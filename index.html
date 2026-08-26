@@ -981,6 +981,9 @@ function buildAddArea(col) {
     if (e.key === 'Escape') cancelBtn.click();
   });
 
+  actions.appendChild(confirmBtn);
+  actions.appendChild(cancelBtn);
+
   addArea.appendChild(addBtn);
   addArea.appendChild(input);
   addArea.appendChild(actions);
