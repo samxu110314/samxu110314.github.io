@@ -1002,11 +1002,12 @@ function renderBoard() {
       if (task.status === 'done') doneItems.push({ task, col });
     });
   });
+  doneItems.sort((a, b) => b.task.progress - a.task.progress);
 
   // ---- 渲染 5 个源分类列（仅显示待办/进行中任务）----
   COLUMNS.forEach((col) => {
     const doneInCol = col.tasks.filter(t => t.status === 'done').length;
-    const activeTasks = col.tasks.filter(t => t.status !== 'done');
+    const activeTasks = col.tasks.filter(t => t.status !== 'done').slice().sort((a, b) => b.progress - a.progress);
     totalDone += doneInCol;
     totalAll += col.tasks.length;
     totalDoing += col.tasks.filter(t => t.status === 'doing').length;
