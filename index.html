@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作看板 | Work Board</title>
+<style>
+  :root {
+    --c-urgent: #e74c3c;
+    --c-important: #f39c12;
+    --c-sales: #3498db;
+    --c-minor: #27ae60;
+    --c-done: #16a085;
+    --c-public: #8e44ad;
+    --bg: #f0f2f5;
+    --card-bg: #ffffff;
+    --text: #2c3e50;
+    --text-light: #7f8c8d;
+    --border: #e1e4e8;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-hover: 0 4px 12px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.08);
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  /* Header */
+  .header {
+    max-width: 1600px;
+    margin: 0 auto 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .header-left h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .header-left .date {
+    font-size: 14px;
+    color: var(--text-light);
+    margin-top: 4px;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .progress-box {
+    text-align: right;
+    min-width: 240px;
+  }
+  .progress-box .label {
+    font-size: 12px;
+    color: var(--text-light);
+    margin-bottom: 4px;
+  }
+  .progress-box .nums {
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .progress-box .nums .done { color: var(--c-minor); }
+  .progress-box .nums .pct { color: var(--c-sales); }
+  .progress-box .summary {
+    font-size: 11px;
+    color: var(--text-light);
+    margin-top: 2px;
+  }
+  .progress-bar {
+    width: 220px;
+    height: 8px;
+    background: #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--c-sales), var(--c-minor));
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+
+  /* Board */
+  .board {
+    max-width: 1700px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 1400px) {
+    .board { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 768px) {
+    .board { grid-template-columns: 1fr; }
+  }
+
+  /* Column */
+  .column {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .column-header {
+    padding: 12px 16px 8px;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .column-header .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .column-header .count {
+    background: rgba(255,255,255,0.25);
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .col-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,0.3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .col-fill {
+    height: 100%;
+    background: rgba(255,255,255,0.9);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+  .col-urgent .column-header { background: var(--c-urgent); }
+  .col-important .column-header { background: var(--c-important); }
+  .col-sales .column-header { background: var(--c-sales); }
+  .col-minor .column-header { background: var(--c-minor); }
+  .col-public .column-header { background: var(--c-public); }
+  .col-done .column-header { background: var(--c-done); }
+  .col-done { background: #f3fbf9; }
+
+  .task-list {
+    padding: 10px 12px;
+    flex: 1;
+    min-height: 120px;
+  }
+  .empty-hint {
+    color: #b0b8c0;
+    font-size: 13px;
+    text-align: center;
+    padding: 24px 8px;
+    border: 1px dashed #e0e4e8;
+    border-radius: 8px;
+  }
+  .source-tag {
+    font-size: 11px;
+    color: #95a5a6;
+    margin: 4px 0 2px;
+    padding: 1px 6px;
+    background: #ecf7f4;
+    border-radius: 4px;
+    display: inline-block;
+  }
+
+  /* Task Card */
+  .task {
+    background: #f8f9fa;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: box-shadow 0.2s, opacity 0.2s;
+    cursor: default;
+    position: relative;
+  }
+  .task:hover {
+    box-shadow: var(--shadow-hover);
+  }
+  .task.doing {
+    border-left: 3px solid var(--c-sales);
+    background: #f0f7fd;
+  }
+  .task .checkbox {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ccc;
+    border-radius: 5px;
+    flex-shrink: 0;
+    cursor: pointer;
+    margin-top: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .task .checkbox:hover { border-color: var(--text-light); }
+  .task.done .checkbox {
+    background: var(--c-minor);
+    border-color: var(--c-minor);
+  }
+  .task.done .checkbox::after {
+    content: '✓';
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .task .content {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .task .content-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .task .title { font-weight: 500; }
+  .task.done .title {
+    text-decoration: line-through;
+    color: var(--text-light);
+  }
+  .task .delete-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0 2px;
+    transition: opacity 0.2s, color 0.2s;
+    flex-shrink: 0;
+  }
+  .task:hover .delete-btn { opacity: 1; }
+  .task .delete-btn:hover { color: var(--c-urgent); }
+
+  /* Status chip */
+  .status-chip {
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 20px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+  }
+  .status-chip:hover { transform: scale(1.05); }
+  .status-chip .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .status-todo { background: #eceff1; color: #7f8c8d; }
+  .status-todo .dot { background: #b0bec5; }
+  .status-doing { background: #d6eaf8; color: #2471a3; }
+  .status-doing .dot { background: var(--c-sales); animation: pulse 1.2s infinite; }
+  .status-done { background: #d5f5e3; color: #1e8449; }
+  .status-done .dot { background: var(--c-minor); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.75); }
+  }
+
+  /* Sub-tasks */
+  .task .sub-tasks {
+    margin-top: 6px;
+    padding-left: 14px;
+    font-size: 13px;
+    color: var(--text-light);
+    line-height: 1.6;
+  }
+  .task .sub-tasks div { position: relative; }
+  .task .sub-tasks div::before {
+    content: '·';
+    position: absolute;
+    left: -10px;
+  }
+
+  /* Progress row */
+  .progress-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .mini-bar {
+    flex: 1;
+    height: 6px;
+    background: #e5e8ea;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .mini-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--c-sales), var(--c-minor));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .progress-num {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-light);
+    min-width: 36px;
+    text-align: right;
+    cursor: pointer;
+    border-bottom: 1px dashed transparent;
+  }
+  .progress-num:hover { color: var(--c-sales); border-bottom-color: var(--c-sales); }
+  .p-btn {
+    width: 20px;
+    height: 20px;
+    border: 1px solid #d0d4d8;
+    background: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--text-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .p-btn:hover { border-color: var(--c-sales); color: var(--c-sales); }
+
+  /* Add Task */
+  .add-task {
+    padding: 8px 12px 12px;
+  }
+  .add-task-btn {
+    width: 100%;
+    padding: 8px;
+    background: transparent;
+    border: 2px dashed #d0d4d8;
+    border-radius: var(--radius-sm);
+    color: var(--text-light);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .add-task-btn:hover {
+    border-color: var(--text-light);
+    color: var(--text);
+  }
+  .add-task-input {
+    display: none;
+    width: 100%;
+    padding: 8px 10px;
+    border: 2px solid var(--c-sales);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    outline: none;
+    font-family: inherit;
+  }
+  .add-task-actions {
+    display: none;
+    margin-top: 6px;
+    gap: 6px;
+  }
+  .add-task-actions button {
+    padding: 5px 14px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-confirm {
+    background: var(--c-sales);
+    color: #fff;
+  }
+  .btn-cancel {
+    background: #ecf0f1;
+    color: var(--text-light);
+  }
+
+  /* Footer */
+  .footer {
+    max-width: 1600px;
+    margin: 24px auto 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-light);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>📋 工作看板</h1>
+    <div class="date" id="todayDate"></div>
+  </div>
+  <div class="header-right">
+    <div class="progress-box">
+      <div class="label">整体进度（按进度加权）</div>
+      <div class="nums"><span class="done" id="doneCount">0</span> / <span id="totalCount">0</span> 完成 · <span class="pct" id="overallPct">0%</span></div>
+      <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+      <div class="summary" id="statusSummary">待办 0 · 进行中 0 · 已完成 0</div>
+    </div>
+  </div>
+</div>
+
+<div class="board" id="board"></div>
+
+<div class="footer">
+  点击状态标签切换 待办 / 进行中 / 已完成 · 点击百分比可输入进度 · 数据自动保存在本浏览器
+  <div class="footer-tools">
+    <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
+    <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none" />
+    <span id="syncStatus" class="sync-status"></span>
+  </div>
+</div>
+
+<style>
+  .footer-tools { margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .tool-btn { background: #34495e; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .tool-btn:hover { background: #2c3e50; }
+  .sync-status { font-size: 12px; }
+  .sync-on { color: #27ae60; }
+  .sync-pending { color: #f39c12; }
+  .sync-off { color: #e74c3c; }
+  .sync-local { color: #2980b9; }
+</style>
+
+<script>
+// ===== Data Model =====
+const COLUMNS = [
+  { id: 'urgent',   title: '一、重要紧急',   cls: 'col-urgent',   tasks: [
+    { title: '三季度框条新品开发', sub: ['新品开发设计，布纹、金属等', '部分贴图制作'], status: 'todo', progress: 0 },
+    { title: '三季度框条新品304款段样图调色', status: 'todo', progress: 0 },
+    { title: '三季度框条新品样册设计', status: 'todo', progress: 0 },
+    { title: '新增2箱新品待拍摄段样和角样', status: 'todo', progress: 0 },
+    { title: '广交会框条墙面设计', status: 'todo', progress: 0 },
+    { title: 'Weekly框条弯圆新品推广单页制作', status: 'todo', progress: 0 },
+  ]},
+  { id: 'important', title: '二、重要不紧急', cls: 'col-important', tasks: [
+    { title: '一季度网站上架图制作并上传', status: 'todo', progress: 0 },
+    { title: '二季度网站上架图制作并上传', status: 'todo', progress: 0 },
+    { title: '框条客户公司介绍PPT替换展厅图', status: 'todo', progress: 0 },
+    { title: '义乌展邀请函设计', status: 'todo', progress: 0 },
+    { title: '意大利展邀请函设计', status: 'todo', progress: 0 },
+    { title: 'Intco-Framing网站优化、发布', status: 'todo', progress: 0 },
+  ]},
+  { id: 'sales',    title: '三、销售任务',    cls: 'col-sales',    tasks: [
+    { title: '临时销售任务（待分配）', status: 'todo', progress: 0 },
+  ]},
+  { id: 'minor',    title: '四、不重要不紧急', cls: 'col-minor',    tasks: [
+    { title: '6月大货留样存800并汇总到图库', status: 'todo', progress: 0 },
+    { title: '7月大货留样拍摄段样图', status: 'todo', progress: 0 },
+    { title: '8月大货留样拍摄段样图', status: 'todo', progress: 0 },
+  ]},
+  { id: 'public',   title: '五、公共事务',    cls: 'col-public',   tasks: [
+    { title: '青州英彩画框制作', status: 'todo', progress: 0 },
+    { title: '7月积分商城费用报销', status: 'todo', progress: 0 },
+    { title: '20日Coloro来访陪同', status: 'todo', progress: 0 },
+    { title: '马来再生和医疗照片墙发货', status: 'todo', progress: 0 },
+    { title: '淮北照片墙打印', status: 'todo', progress: 0 },
+  ]},
+];
+
+const STORAGE_KEY = 'work_board_data_v2';
+const LEGACY_KEY = 'work_board_data_v1';
+
+// ===== Persistence（服务器统一存储 + 本地缓存）=====
+// 数据以服务器为准（存于 data.json），所有入口（本地/在线/手机）读写同一份，
+// 彻底解决 localStorage 按网址隔离导致的数据不同步问题。
+
+function normalizeTask(t) {
+  const done = !!t.done;
+  // v2+ 数据保留 status/progress；v1 旧数据（仅 done 字段）兼容转换
+  let status = t.status || (done ? 'done' : 'todo');
+  let progress = typeof t.progress === 'number' ? t.progress : (done ? 100 : 0);
+  if (done || status === 'done' || progress >= 100) { status = 'done'; progress = 100; }
+  else if (progress > 0) { status = 'doing'; }
+  else { status = 'todo'; progress = 0; }
+  return { title: t.title || '', sub: t.sub || [], status, progress };
+}
+
+function localLoad() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length === COLUMNS.length) return parsed;
+    } catch(e) { console.warn('Load local failed', e); }
+  }
+  // Legacy v1 (done only)
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  if (legacy) {
+    try {
+      const parsed = JSON.parse(legacy);
+      if (Array.isArray(parsed) && parsed.length === COLUMNS.length) {
+        localStorage.removeItem(LEGACY_KEY);
+        return parsed;
+      }
+    } catch(e) {}
+  }
+  return null;
+}
+
+// writable=true 表示有 Node API（可双向同步）；false 表示只有静态 data.json 快照（只读，用于在线部署版）
+let boardWritable = true;
+
+async function serverLoad() {
+  // reachable=true 表示服务器正常响应（data 可能为 null = 服务器确认无数据）
+  // reachable=false 表示读取失败（网络抖动/服务器未启动），此时绝不能上传本地数据覆盖服务器
+  try {
+    const res = await fetch('/api/data', { cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      boardWritable = true;
+      return { data: json.data || null, updatedAt: json.updatedAt || 0, reachable: true, writable: true };
+    }
+  } catch(e) {}
+  // 静态部署回退：读取同目录 data.json 只读快照（在线版无 Node API 时至少能看到进度）
+  try {
+    const res2 = await fetch('data.json', { cache: 'no-store' });
+    if (res2.ok) {
+      const json = await res2.json();
+      boardWritable = false;
+      return { data: json.data || null, updatedAt: json.updatedAt || 0, reachable: true, writable: false };
+    }
+  } catch(e) { console.warn('Server load failed, use local', e); }
+  boardWritable = false;
+  return { data: null, updatedAt: 0, reachable: false, writable: false };
+}
+
+// 统计带进度/非待办的任务数（用于冲突检测）
+function countActive(data) {
+  if (!Array.isArray(data)) return 0;
+  return data.reduce((sum, col) => sum + (col.tasks || []).filter(t => t.progress > 0 || (t.status && t.status !== 'todo')).length, 0);
+}
+
+// 顶部浮动提示
+function showNotice(msg) {
+  let el = document.getElementById('syncNotice');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'syncNotice';
+    el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#e67e22;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:92%;text-align:center;font-weight:600';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+async function serverSave(data) {
+  // 在线只读版（静态快照，无 Node API）：只存本地缓存，不尝试 POST
+  if (!boardWritable) {
+    setSyncStatus(false);
+    return 0;
+  }
+  try {
+    // 保存前先读取服务器当前数据做冲突检测：
+    // 如果服务器有较多带进度任务，而本地数据几乎无进度（本地旧缓存/服务器读取失败的产物），
+    // 说明本地数据不完整 —— 拒绝覆盖，自动恢复服务器数据
+    const pre = await fetch('/api/data', { cache: 'no-store' });
+    if (pre.ok) {
+      const pj = await pre.json();
+      const remote = pj.data;
+      const remoteActive = countActive(remote);
+      const localActive = countActive(data);
+      if (remoteActive >= 2 && localActive * 2 < remoteActive) {
+        console.warn('Local data looks stale, restore from server');
+        if (remote) {
+          applyData(remote);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
+          renderBoard();
+        }
+        setSyncStatus(true);
+        showNotice('检测到本地数据不完整，已自动恢复为服务器最新数据');
+        return 0;
+      }
+    }
+    const res = await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data })
+    });
+    if (res.ok) {
+      const json = await res.json();
+      return json.updatedAt || 0;
+    }
+    if (res.status === 409) {
+      // 服务器拒绝了覆盖（服务端保护触发）：恢复服务器数据
+      const j = await res.json().catch(() => null);
+      const remote = j && j.data;
+      if (remote) {
+        applyData(remote);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
+        renderBoard();
+      }
+      setSyncStatus(true);
+      showNotice('检测到本地数据不完整，已自动恢复为服务器最新数据');
+      return 0;
+    }
+  } catch(e) {
+    console.warn('Server save failed, kept in local cache', e);
+  }
+  return 0;
+}
+
+// 最近一次与服务器同步的版本时间戳，用于轮询增量同步
+let lastSyncedAt = 0;
+// 本地是否有未保存的变更（保存中或保存失败）；为 true 时轮询不应用服务器数据，防止覆盖刚改的内容
+let dirty = false;
+
+function saveData() {
+  dirty = true;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
+  serverSave(COLUMNS).then(ts => {
+    if (ts) { lastSyncedAt = ts; setSyncStatus(true); }
+    else setSyncStatus(false);
+    dirty = false;
+  }); // fire and forget，失败时本地缓存兜底
+}
+
+// 以 base 为主，把 extra 中多出的任务（按标题去重）合并进来
+function mergeData(base, extra) {
+  return base.map((col, i) => {
+    const extraCol = extra[i];
+    const tasks = col.tasks.map(normalizeTask);
+    if (extraCol && Array.isArray(extraCol.tasks)) {
+      const titles = new Set(tasks.map(t => t.title));
+      extraCol.tasks.forEach(t => {
+        if (t && t.title && !titles.has(t.title)) {
+          tasks.push(normalizeTask(t));
+          titles.add(t.title);
+        }
+      });
+    }
+    return { ...col, tasks };
+  });
+}
+
+function applyData(data) {
+  data.forEach((col, i) => {
+    if (col.tasks && COLUMNS[i]) {
+      COLUMNS[i].tasks = col.tasks.map(normalizeTask);
+    }
+  });
+}
+
+async function initData() {
+  const { data: serverData, updatedAt, reachable } = await serverLoad();
+  lastSyncedAt = updatedAt;
+  const localData = localLoad();
+  const migrated = localStorage.getItem('work_board_migrated_v3');
+
+  if (reachable && serverData) {
+    // 服务器正常且已有数据：以服务器为准，但未迁移过的入口再合并一次本地数据（防丢任务）
+    if (localData && !migrated) {
+      const merged = mergeData(serverData, localData);
+      applyData(merged);
+      localStorage.setItem('work_board_migrated_v3', '1');
+      saveData();
+    } else {
+      applyData(serverData);
+    }
+  } else if (reachable && !serverData) {
+    // 服务器正常且确认无数据（首次使用）：合并 默认任务 + 本地数据（找回之前新增的任务），并上传
+    const base = COLUMNS.map(col => ({ ...col, tasks: col.tasks.map(normalizeTask) }));
+    const merged = localData ? mergeData(base, localData) : base;
+    applyData(merged);
+    localStorage.setItem('work_board_migrated_v3', '1');
+    saveData();
+  } else {
+    // 服务器读取失败：只用本地/默认数据渲染，绝不 POST 上传（防止无进度缓存覆盖服务器上的进度）
+    if (localData) {
+      applyData(localData);
+    }
+    // 本地也没有则保留 COLUMNS 初始默认任务
+    setSyncStatus(false);
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
+  if (reachable) setSyncStatus(true);
+}
+
+// ===== 实时同步轮询 =====
+// 每 5 秒检查一次服务器是否有新数据（其他页面/设备改过），有则自动刷新界面
+async function pollSync() {
+  if (location.protocol === 'file:') return;
+  if (dirty) return; // 本地有未保存变更时，不应用服务器数据，防止覆盖刚改的内容
+  const { data: serverData, updatedAt, reachable } = await serverLoad();
+  if (reachable && serverData && updatedAt > lastSyncedAt) {
+    applyData(serverData);
+    lastSyncedAt = updatedAt;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
+    renderBoard();
+  }
+}
+
+// ===== 同步状态提示 =====
+function setSyncStatus(ok) {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (location.protocol === 'file:') {
+    el.textContent = '本地文件版 · 无法同步';
+    el.className = 'sync-status sync-off';
+  } else if (!boardWritable) {
+    el.textContent = '💾 本地保存';
+    el.className = 'sync-status sync-local';
+  } else if (ok) {
+    el.textContent = '● 已同步';
+    el.className = 'sync-status sync-on';
+  } else {
+    el.textContent = '○ 同步中...';
+    el.className = 'sync-status sync-pending';
+  }
+}
+
+// ===== 本地文件版防误用提示 =====
+function showFileModeBanner() {
+  if (location.protocol !== 'file:') return;
+  const banner = document.createElement('div');
+  banner.style.cssText = 'background:#fff3cd;color:#856404;padding:10px 16px;border-radius:8px;margin:0 auto 16px;max-width:1600px;font-size:14px;border:1px solid #ffeeba;line-height:1.6;';
+  banner.innerHTML = '⚠️ <b>当前是本地文件版，无法与云端网站同步。</b>请用云端网站地址打开看板（在浏览器收藏夹保存该地址即可随时访问）。';
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+
+// ===== Status / Progress logic =====
+const STATUS_ICON = { todo: '○', doing: '●', done: '✓' };
+const STATUS_LABEL = { todo: '待办', doing: '进行中', done: '已完成' };
+
+function statusHtml(s) {
+  return `<span class="dot"></span>${STATUS_ICON[s]} ${STATUS_LABEL[s]}`;
+}
+
+function setStatus(task, s) {
+  task.status = s;
+  if (s === 'done') task.progress = 100;
+  if (s === 'todo') task.progress = 0;
+  // doing keeps current progress
+}
+
+function cycleStatus(task) {
+  const order = ['todo', 'doing', 'done'];
+  const next = order[(order.indexOf(task.status) + 1) % 3];
+  setStatus(task, next);
+}
+
+function toggleDone(task) {
+  if (task.status === 'done') {
+    task.status = 'doing';
+    if (task.progress >= 100) task.progress = 90;
+  } else {
+    task.status = 'done';
+    task.progress = 100;
+  }
+}
+
+function applyProgress(task, p) {
+  task.progress = Math.max(0, Math.min(100, Math.round(p)));
+  if (task.progress >= 100) task.status = 'done';
+  else if (task.progress > 0) task.status = 'doing';
+  else task.status = 'todo';
+}
+
+function adjustProgress(task, delta) {
+  applyProgress(task, task.progress + delta);
+}
+
+function inputProgress(task) {
+  const v = prompt('请输入进度（0-100）：', task.progress);
+  if (v === null) return;
+  const n = parseInt(v, 10);
+  if (isNaN(n)) return;
+  applyProgress(task, n);
+}
+
+// ===== Render =====
+// 构建单个任务卡片（源列与“已完成”列共用）
+function buildTaskEl(task, col, isDoneCol, sourceTitle) {
+  const taskEl = document.createElement('div');
+  taskEl.className = 'task' + (task.status === 'done' ? ' done' : '') + (task.status === 'doing' ? ' doing' : '');
+
+  const checkbox = document.createElement('div');
+  checkbox.className = 'checkbox';
+  checkbox.title = '标记完成 / 取消完成';
+  checkbox.onclick = () => {
+    toggleDone(task);
+    saveData();
+    renderBoard();
+  };
+
+  const content = document.createElement('div');
+  content.className = 'content';
+
+  const top = document.createElement('div');
+  top.className = 'content-top';
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'title';
+  titleEl.textContent = task.title;
+
+  const chip = document.createElement('span');
+  chip.className = `status-chip status-${task.status}`;
+  chip.innerHTML = statusHtml(task.status);
+  chip.title = '点击切换状态（待办 → 进行中 → 已完成）';
+  chip.onclick = () => {
+    cycleStatus(task);
+    saveData();
+    renderBoard();
+  };
+
+  top.appendChild(titleEl);
+  top.appendChild(chip);
+  content.appendChild(top);
+
+  // 已完成列显示来源分类
+  if (isDoneCol && sourceTitle) {
+    const srcTag = document.createElement('div');
+    srcTag.className = 'source-tag';
+    srcTag.textContent = '来源：' + sourceTitle.replace(/^[一二三四五六]、/, '');
+    content.appendChild(srcTag);
+  }
+
+  if (task.sub && task.sub.length > 0) {
+    const subEl = document.createElement('div');
+    subEl.className = 'sub-tasks';
+    task.sub.forEach(s => {
+      const d = document.createElement('div');
+      d.textContent = s;
+      subEl.appendChild(d);
+    });
+    content.appendChild(subEl);
+  }
+
+  // Progress row
+  const progressRow = document.createElement('div');
+  progressRow.className = 'progress-row';
+
+  const bar = document.createElement('div');
+  bar.className = 'mini-bar';
+  const fill = document.createElement('div');
+  fill.className = 'mini-fill';
+  fill.style.width = task.progress + '%';
+  bar.appendChild(fill);
+
+  const num = document.createElement('span');
+  num.className = 'progress-num';
+  num.textContent = task.progress + '%';
+  num.title = '点击输入进度';
+  num.onclick = () => {
+    inputProgress(task);
+    saveData();
+    renderBoard();
+  };
+
+  const minus = document.createElement('button');
+  minus.className = 'p-btn';
+  minus.textContent = '−';
+  minus.title = '进度 -5%';
+  minus.onclick = () => {
+    adjustProgress(task, -5);
+    saveData();
+    renderBoard();
+  };
+
+  const plus = document.createElement('button');
+  plus.className = 'p-btn';
+  plus.textContent = '+';
+  plus.title = '进度 +5%';
+  plus.onclick = () => {
+    adjustProgress(task, 5);
+    saveData();
+    renderBoard();
+  };
+
+  progressRow.appendChild(bar);
+  progressRow.appendChild(num);
+  progressRow.appendChild(minus);
+  progressRow.appendChild(plus);
+  content.appendChild(progressRow);
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'delete-btn';
+  delBtn.textContent = '×';
+  delBtn.title = '删除任务';
+  delBtn.onclick = () => {
+    const idx = col.tasks.indexOf(task);
+    if (idx >= 0) col.tasks.splice(idx, 1);
+    saveData();
+    renderBoard();
+  };
+
+  taskEl.appendChild(checkbox);
+  taskEl.appendChild(content);
+  taskEl.appendChild(delBtn);
+  return taskEl;
+}
+
+// 构建新增任务区域
+function buildAddArea(col) {
+  const addArea = document.createElement('div');
+  addArea.className = 'add-task';
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'add-task-btn';
+  addBtn.textContent = '+ 新增任务';
+
+  const input = document.createElement('input');
+  input.className = 'add-task-input';
+  input.type = 'text';
+  input.placeholder = '输入任务内容...';
+
+  const actions = document.createElement('div');
+  actions.className = 'add-task-actions';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn-confirm';
+  confirmBtn.textContent = '添加';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-cancel';
+  cancelBtn.textContent = '取消';
+
+  addBtn.onclick = () => {
+    addBtn.style.display = 'none';
+    input.style.display = 'block';
+    actions.style.display = 'flex';
+    input.focus();
+  };
+
+  const doAdd = () => {
+    const val = input.value.trim();
+    if (val) {
+      col.tasks.push({ title: val, sub: [], status: 'todo', progress: 0 });
+      saveData();
+      renderBoard();
+    } else {
+      addBtn.style.display = 'block';
+      input.style.display = 'none';
+      actions.style.display = 'none';
+      input.value = '';
+    }
+  };
+
+  confirmBtn.onclick = doAdd;
+  cancelBtn.onclick = () => {
+    addBtn.style.display = 'block';
+    input.style.display = 'none';
+    actions.style.display = 'none';
+    input.value = '';
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doAdd();
+    if (e.key === 'Escape') cancelBtn.click();
+  });
+
+  addArea.appendChild(addBtn);
+  addArea.appendChild(input);
+  addArea.appendChild(actions);
+  return addArea;
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  let totalDone = 0, totalAll = 0, totalDoing = 0, sumProgress = 0;
+
+  // 收集所有“已完成”任务（连同其来源分类），用于在独立列中统一展示
+  const doneItems = [];
+  COLUMNS.forEach(col => {
+    col.tasks.forEach(task => {
+      if (task.status === 'done') doneItems.push({ task, col });
+    });
+  });
+
+  // ---- 渲染 5 个源分类列（仅显示待办/进行中任务）----
+  COLUMNS.forEach((col) => {
+    const doneInCol = col.tasks.filter(t => t.status === 'done').length;
+    const activeTasks = col.tasks.filter(t => t.status !== 'done');
+    totalDone += doneInCol;
+    totalAll += col.tasks.length;
+    totalDoing += col.tasks.filter(t => t.status === 'doing').length;
+    sumProgress += col.tasks.reduce((a, t) => a + t.progress, 0);
+    const colProgress = col.tasks.length ? Math.round(col.tasks.reduce((a, t) => a + t.progress, 0) / col.tasks.length) : 0;
+
+    const colEl = document.createElement('div');
+    colEl.className = `column ${col.cls}`;
+
+    const header = document.createElement('div');
+    header.className = 'column-header';
+    header.innerHTML = `
+      <div class="header-top"><span>${col.title}</span><span class="count">${activeTasks.length} 进行中 · 已完成 ${doneInCol}</span></div>
+      <div class="col-bar"><div class="col-fill" style="width:${colProgress}%"></div></div>`;
+    colEl.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'task-list';
+
+    if (activeTasks.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-hint';
+      empty.textContent = doneInCol > 0 ? '进行中任务已全部完成 ✓' : '本类暂无进行中任务';
+      list.appendChild(empty);
+    } else {
+      activeTasks.forEach((task) => {
+        list.appendChild(buildTaskEl(task, col, false, null));
+      });
+    }
+    colEl.appendChild(list);
+    colEl.appendChild(buildAddArea(col));
+    board.appendChild(colEl);
+  });
+
+  // ---- 渲染“六、近期已完成任务”收集列 ----
+  const doneColEl = document.createElement('div');
+  doneColEl.className = 'column col-done';
+
+  const doneHeader = document.createElement('div');
+  doneHeader.className = 'column-header';
+  doneHeader.innerHTML = `
+    <div class="header-top"><span>六、近期已完成任务</span><span class="count">${doneItems.length} 项</span></div>
+    <div class="col-bar"><div class="col-fill" style="width:${doneItems.length ? 100 : 0}%"></div></div>`;
+  doneColEl.appendChild(doneHeader);
+
+  const doneList = document.createElement('div');
+  doneList.className = 'task-list';
+  if (doneItems.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-hint';
+    empty.textContent = '暂无已完成任务';
+    doneList.appendChild(empty);
+  } else {
+    doneItems.forEach(({ task, col }) => {
+      doneList.appendChild(buildTaskEl(task, col, true, col.title));
+    });
+  }
+  doneColEl.appendChild(doneList);
+  board.appendChild(doneColEl);
+
+  // Update overall progress
+  document.getElementById('doneCount').textContent = totalDone;
+  document.getElementById('totalCount').textContent = totalAll;
+  const todoCount = totalAll - totalDone - totalDoing;
+  document.getElementById('statusSummary').textContent = `待办 ${todoCount} · 进行中 ${totalDoing} · 已完成 ${totalDone}`;
+  const overall = totalAll > 0 ? Math.round(sumProgress / totalAll) : 0;
+  document.getElementById('overallPct').textContent = overall + '%';
+  document.getElementById('progressFill').style.width = overall + '%';
+}
+
+// ===== Date =====
+function setDate() {
+  const days = ['日','一','二','三','四','五','六'];
+  const now = new Date();
+  const str = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 星期${days[now.getDay()]}`;
+  document.getElementById('todayDate').textContent = str;
+}
+
+// ===== 导出 / 导入（换设备与备份）=====
+function exportData() {
+  const payload = {
+    type: 'work-board',
+    exportedAt: new Date().toISOString(),
+    data: COLUMNS.map(col => ({ ...col, tasks: col.tasks.map(t => normalizeTask(t)) }))
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `工作看板备份_${stamp}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showNotice('已导出备份文件，可保存到手机或网盘');
+}
+
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      const incoming = parsed.data || parsed;
+      if (!Array.isArray(incoming) || incoming.length !== COLUMNS.length) {
+        alert('文件格式不正确：列数不匹配，导入已取消');
+        return;
+      }
+      if (!confirm('导入将覆盖当前看板内容，确定继续？建议先点"导出备份"。')) return;
+      applyData(incoming);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
+      localStorage.setItem('work_board_migrated_v3', '1');
+      lastSyncedAt = Date.now();
+      saveData();
+      renderBoard();
+      showNotice('已从备份恢复看板');
+    } catch (e) {
+      alert('导入失败：文件不是有效的看板备份');
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ===== Init =====
+showFileModeBanner();
+initData().then(() => {
+  setDate();
+  renderBoard();
+  setInterval(pollSync, 5000);
+  const eb = document.getElementById('exportBtn');
+  const ib = document.getElementById('importBtn');
+  const iff = document.getElementById('importFile');
+  if (eb) eb.onclick = exportData;
+  if (ib) ib.onclick = () => iff && iff.click();
+  if (iff) iff.onchange = (e) => { if (e.target.files && e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; };
+});
+</script>
+</body>
+</html>

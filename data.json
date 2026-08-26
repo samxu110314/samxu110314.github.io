@@ -1,0 +1,169 @@
+{
+  "data": [
+    {
+      "id": "urgent",
+      "title": "一、重要紧急",
+      "cls": "col-urgent",
+      "tasks": [
+        {
+          "title": "三季度框条新品开发",
+          "sub": [
+            "新品开发设计，布纹、金属等",
+            "部分贴图制作"
+          ],
+          "status": "doing",
+          "progress": 90
+        },
+        {
+          "title": "三季度框条新品304款段样图调色",
+          "sub": [],
+          "status": "doing",
+          "progress": 5
+        },
+        {
+          "title": "三季度框条新品样册设计",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        },
+        {
+          "title": "新增2箱新品待拍摄段样和角样",
+          "sub": [],
+          "status": "doing",
+          "progress": 50
+        },
+        {
+          "title": "广交会框条墙面设计",
+          "sub": [],
+          "status": "doing",
+          "progress": 70
+        },
+        {
+          "title": "Weekly框条弯圆新品推广单页制作",
+          "sub": [],
+          "status": "done",
+          "progress": 100
+        }
+      ]
+    },
+    {
+      "id": "important",
+      "title": "二、重要不紧急",
+      "cls": "col-important",
+      "tasks": [
+        {
+          "title": "一季度网站上架图制作并上传",
+          "sub": [],
+          "status": "doing",
+          "progress": 10
+        },
+        {
+          "title": "二季度网站上架图制作并上传",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        },
+        {
+          "title": "框条客户公司介绍PPT替换展厅图",
+          "sub": [],
+          "status": "doing",
+          "progress": 90
+        },
+        {
+          "title": "义乌展邀请函设计",
+          "sub": [],
+          "status": "done",
+          "progress": 100
+        },
+        {
+          "title": "意大利展邀请函设计",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        },
+        {
+          "title": "Intco-Framing网站优化、发布",
+          "sub": [],
+          "status": "doing",
+          "progress": 35
+        }
+      ]
+    },
+    {
+      "id": "sales",
+      "title": "三、销售任务",
+      "cls": "col-sales",
+      "tasks": [
+        {
+          "title": "包装展示盒设计",
+          "sub": [],
+          "status": "doing",
+          "progress": 35
+        }
+      ]
+    },
+    {
+      "id": "minor",
+      "title": "四、不重要不紧急",
+      "cls": "col-minor",
+      "tasks": [
+        {
+          "title": "6月大货留样存800并汇总到图库",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        },
+        {
+          "title": "7月大货留样拍摄段样图",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        },
+        {
+          "title": "8月大货留样拍摄段样图",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        }
+      ]
+    },
+    {
+      "id": "public",
+      "title": "五、公共事务",
+      "cls": "col-public",
+      "tasks": [
+        {
+          "title": "青州英彩画框制作",
+          "sub": [],
+          "status": "doing",
+          "progress": 70
+        },
+        {
+          "title": "7月积分商城费用报销",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        },
+        {
+          "title": "20日Coloro来访陪同",
+          "sub": [],
+          "status": "done",
+          "progress": 100
+        },
+        {
+          "title": "马来再生和医疗照片墙发货",
+          "sub": [],
+          "status": "doing",
+          "progress": 50
+        },
+        {
+          "title": "淮北照片墙打印",
+          "sub": [],
+          "status": "todo",
+          "progress": 0
+        }
+      ]
+    }
+  ],
+  "updatedAt": 1787707747396
+}
