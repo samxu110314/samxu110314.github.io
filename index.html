@@ -681,8 +681,18 @@ async function initData() {
   const migrated = localStorage.getItem('work_board_migrated_v3');
 
   if (reachable && serverData) {
-    // 服务器正常且已有数据：以服务器为准，但未迁移过的入口再合并一次本地数据（防丢任务）
-    if (localData && !migrated) {
+    if (!boardWritable) {
+      // 静态托管（GitHub Pages 等，只有只读 data.json 快照）：
+      // 以浏览器本地数据为准，data.json 仅作为首次访问的初始种子，
+      // 绝不能用冻结的旧快照覆盖用户已保存的进度
+      if (localData) {
+        applyData(localData);
+      } else {
+        applyData(serverData);
+        localStorage.setItem('work_board_migrated_v3', '1');
+      }
+    } else if (localData && !migrated) {
+      // 有后端 API：以服务器为准，但未迁移过的入口再合并一次本地数据（防丢任务）
       const merged = mergeData(serverData, localData);
       applyData(merged);
       localStorage.setItem('work_board_migrated_v3', '1');
@@ -713,6 +723,7 @@ async function initData() {
 // 每 5 秒检查一次服务器是否有新数据（其他页面/设备改过），有则自动刷新界面
 async function pollSync() {
   if (location.protocol === 'file:') return;
+  if (!boardWritable) return; // 静态托管无后端可轮询，且会用过期的 data.json 覆盖本地进度
   if (dirty) return; // 本地有未保存变更时，不应用服务器数据，防止覆盖刚改的内容
   const { data: serverData, updatedAt, reachable } = await serverLoad();
   if (reachable && serverData && updatedAt > lastSyncedAt) {
