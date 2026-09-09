@@ -158,7 +158,7 @@
     min-height: 240px;
   }
   .column-header {
-    padding: 10px 12px 7px;
+    padding: 10px 11px 8px;
     color: #fff;
     font-size: 14px;
     font-weight: 600;
@@ -167,16 +167,39 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 6px;
     gap: 6px;
+  }
+  .column-header .col-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+    line-height: 1.3;
+  }
+  .column-header .count-row {
+    margin: 5px 0 6px;
   }
   .column-header .count {
     background: rgba(255,255,255,0.25);
-    padding: 2px 10px;
+    padding: 1px 9px;
     border-radius: 20px;
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 500;
     white-space: nowrap;
+    display: inline-block;
+  }
+  .done-count-chip {
+    background: rgba(255,255,255,0.25);
+    padding: 1px 9px;
+    border-radius: 20px;
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .col-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; overflow: hidden; }
   .col-fill { height: 100%; background: rgba(255,255,255,0.9); border-radius: 2px; transition: width 0.4s ease; }
@@ -316,8 +339,28 @@
   .done-col-list { padding: 10px 12px; }
   .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 
+  /* ===== 近期已完成（主看板下方） ===== */
+  .recent-section { margin: 20px auto 0; max-width: 1200px; }
+  .recent-head { display: flex; align-items: center; justify-content: space-between; }
+  .recent-head h2 { font-size: 15px; color: var(--text); margin: 0; display: flex; align-items: center; gap: 6px; }
+  .recent-head .recent-count { color: var(--text-light); font-weight: 500; font-size: 13px; }
+  .recent-toggle { border: none; background: #eef2f6; color: #556; border-radius: 20px; padding: 4px 13px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .recent-toggle:hover { background: #e2e8ee; }
+  .recent-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .recent-card { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; min-width: 190px; max-width: 280px; box-shadow: var(--shadow); }
+  .recent-card .rc-title { font-size: 13px; color: var(--text); font-weight: 500; word-break: break-word; }
+  .recent-card .rc-meta { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+  .recent-card .rc-col { color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 11px; white-space: nowrap; }
+  .recent-card .rc-time { font-size: 11px; color: #98a2ad; white-space: nowrap; }
+
   /* ===== 管理后台 ===== */
   .admin-wrap { max-width: 1300px; margin: 0 auto; }
+  .admin-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .admin-title { font-size: 16px; color: var(--text); margin: 0; }
+  .toggle-label { font-size: 13px; color: #556; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+  .toggle-label input { accent-color: var(--c-sales); width: 16px; height: 16px; cursor: pointer; }
+  .demo-board { max-width: 1200px; }
+  .admin-sec-title { font-size: 15px; color: var(--text); margin: 18px 0 10px; }
   .admin-wrap h3 { font-size: 16px; margin: 22px 0 12px; }
   .admin-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
   .admin-table th, .admin-table td { padding: 11px 14px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
@@ -410,6 +453,14 @@
 
   <div class="board" id="board"></div>
 
+  <div class="recent-section" id="recentSection">
+    <div class="recent-head">
+      <h2>🗂 近期已完成 <span class="recent-count" id="recentCount"></span></h2>
+      <button class="recent-toggle" id="recentToggle">收起</button>
+    </div>
+    <div class="recent-grid" id="recentGrid"></div>
+  </div>
+
   <div id="doneView" style="display:none">
     <div class="done-wrap">
       <div class="stat-cards" id="doneStatCards"></div>
@@ -420,9 +471,20 @@
 
   <div id="adminView" style="display:none">
     <div class="admin-wrap">
-      <div class="stat-cards" id="adminStatCards"></div>
-      <h3>注册用户列表</h3>
-      <table class="admin-table" id="adminTable"></table>
+      <div class="admin-toolbar">
+        <h3 class="admin-title">后台管理</h3>
+        <label class="toggle-label"><input type="checkbox" id="adminDemoToggle"> 虚拟演示数据（示例看板）</label>
+      </div>
+      <div id="adminDemo" style="display:none">
+        <div class="stat-cards" id="adminDemoStatCards"></div>
+        <h3 class="admin-sec-title">示例看板 · 虚拟数据（仅供预览，不影响真实数据）</h3>
+        <div class="board demo-board" id="adminDemoBoard"></div>
+      </div>
+      <div id="adminReal">
+        <div class="stat-cards" id="adminStatCards"></div>
+        <h3 class="admin-sec-title">注册用户列表</h3>
+        <table class="admin-table" id="adminTable"></table>
+      </div>
     </div>
   </div>
 
@@ -1221,12 +1283,15 @@ function renderBoard() {
     headerTop.className = 'header-top';
 
     const nameSpan = document.createElement('span');
+    nameSpan.className = 'col-title';
     nameSpan.textContent = col.title;
+    nameSpan.title = col.title;
 
     const rightBox = document.createElement('span');
     rightBox.style.display = 'inline-flex';
     rightBox.style.alignItems = 'center';
-    rightBox.style.gap = '6px';
+    rightBox.style.gap = '4px';
+    rightBox.style.flexShrink = '0';
 
     if (!readonly) {
       const tools = document.createElement('span');
@@ -1246,13 +1311,16 @@ function renderBoard() {
       rightBox.appendChild(tools);
     }
 
+    headerTop.appendChild(nameSpan);
+    headerTop.appendChild(rightBox);
+
+    const countRow = document.createElement('div');
+    countRow.className = 'count-row';
     const count = document.createElement('span');
     count.className = 'count';
     count.textContent = `${activeTasks.length} 进行中 · 已完成 ${doneInCol}`;
-    rightBox.appendChild(count);
-
-    headerTop.appendChild(nameSpan);
-    headerTop.appendChild(rightBox);
+    count.title = count.textContent;
+    countRow.appendChild(count);
 
     const colBar = document.createElement('div');
     colBar.className = 'col-bar';
@@ -1262,6 +1330,7 @@ function renderBoard() {
     colBar.appendChild(colFill);
 
     header.appendChild(headerTop);
+    header.appendChild(countRow);
     header.appendChild(colBar);
     colEl.appendChild(header);
 
@@ -1291,6 +1360,7 @@ function renderBoard() {
   }
 
   updateHeaderStats(cols);
+  renderRecentDone(cols);
 
   // 只读预览横幅
   const banner = $('previewBanner');
@@ -1300,6 +1370,32 @@ function renderBoard() {
   } else {
     banner.style.display = 'none';
   }
+}
+
+// ================= 近期已完成（主看板下方） =================
+function renderRecentDone(cols = COLUMNS) {
+  const sec = $('recentSection');
+  const grid = $('recentGrid');
+  if (!sec || !grid) return;
+  const items = [];
+  cols.forEach(col => (col.tasks || []).forEach(t => {
+    if (t.status === 'done') items.push({ t, colTitle: col.title, colColor: col.color });
+  }));
+  items.sort((a, b) => (b.t.doneAt || 0) - (a.t.doneAt || 0));
+  if (!items.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  $('recentCount').textContent = items.length + ' 项';
+  grid.innerHTML = '';
+  items.slice(0, 12).forEach(it => {
+    const card = document.createElement('div');
+    card.className = 'recent-card';
+    card.innerHTML = `<div class="rc-title">${esc(it.t.title)}</div>
+      <div class="rc-meta"><span class="rc-col" style="background:${it.colColor}">${esc(it.colTitle)}</span>
+        <span class="rc-time">✓ ${it.t.doneAt ? fmtDate(it.t.doneAt) : '较早前'}</span></div>`;
+    grid.appendChild(card);
+  });
+  const toggle = $('recentToggle');
+  if (toggle) toggle.style.display = items.length > 0 ? '' : 'none';
 }
 
 // ================= 已完成统计看板 =================
@@ -1357,7 +1453,7 @@ function renderDoneView() {
     const header = document.createElement('div');
     header.className = 'column-header';
     header.style.background = col.color || PALETTE[0];
-    header.innerHTML = `<div class="header-top"><span>${esc(col.title)}</span>
+    header.innerHTML = `<div class="header-top"><span class="col-title">${esc(col.title)}</span>
       <span class="done-count-chip">${doneTasks.length} 项 · ${doneItems.length ? Math.round(doneTasks.length / doneItems.length * 100) : 0}%</span></div>
       <div class="col-bar"><div class="col-fill" style="width:${doneTasks.length ? 100 : 0}%"></div></div>`;
     colEl.appendChild(header);
@@ -1404,6 +1500,80 @@ function boardStatsOf(id) {
   let total = 0, done = 0;
   cols.forEach(c => (c.tasks || []).forEach(t => { total++; if (t.status === 'done') done++; }));
   return { total, done };
+}
+
+// -------- 虚拟演示数据（仅后台预览，不影响真实数据） --------
+const DEMO_COLS = [
+  { title: '一、重要紧急', color: PALETTE[0], tasks: [
+    { title: '三季度框条新品开发', sub: [], status: 'doing', progress: 90, planStart: '2026-09-01', planEnd: '2026-10-15' },
+    { title: '广交会框条墙面设计', sub: [], status: 'doing', progress: 70, planStart: '', planEnd: '' },
+    { title: '三季度框条样册设计', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
+    { title: '新增2箱新品待拍摄段样和角样', sub: [], status: 'doing', progress: 50, planStart: '', planEnd: '' },
+    { title: '新品推广单页制作', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 86400000 },
+  ]},
+  { title: '二、重要不紧急', color: PALETTE[1], tasks: [
+    { title: '一季度网站上架图制作并上传', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 2 * 86400000 },
+    { title: '二季度网站上架图制作并上传', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
+    { title: '网站优化、发布', sub: [], status: 'doing', progress: 35, planStart: '2026-09-05', planEnd: '' },
+  ]},
+  { title: '三、销售任务', color: PALETTE[2], tasks: [
+    { title: '包装展示盒设计', sub: [], status: 'doing', progress: 35, planStart: '', planEnd: '' },
+    { title: '意大利展邀请函设计', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 3 * 86400000 },
+  ]},
+  { title: '四、不重要不紧急', color: PALETTE[3], tasks: [
+    { title: '6月大货留样存800并汇总到图库', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
+    { title: '7月大货留样拍摄段样图', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
+  ]},
+  { title: '五、公共事务', color: PALETTE[4], tasks: [
+    { title: '青州英彩画框制作', sub: [], status: 'doing', progress: 70, planStart: '', planEnd: '' },
+    { title: '7月积分商城费用报销', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 2 * 86400000 },
+    { title: '马来再生和医疗照片墙发货', sub: [], status: 'doing', progress: 50, planStart: '', planEnd: '' },
+  ]},
+];
+
+function renderAdminDemo() {
+  const board = $('adminDemoBoard');
+  if (!board) return;
+  board.innerHTML = '';
+  let total = 0, doing = 0, done = 0;
+  DEMO_COLS.forEach(col => {
+    const active = col.tasks.filter(t => t.status !== 'done');
+    const doneN = col.tasks.filter(t => t.status === 'done').length;
+    const prog = col.tasks.length ? Math.round(col.tasks.reduce((a, t) => a + t.progress, 0) / col.tasks.length) : 0;
+    total += col.tasks.length; doing += active.filter(t => t.status === 'doing').length; done += doneN;
+    const colEl = document.createElement('div');
+    colEl.className = 'column';
+    const header = document.createElement('div');
+    header.className = 'column-header';
+    header.style.background = col.color || PALETTE[0];
+    header.innerHTML = `<div class="header-top"><span class="col-title">${esc(col.title)}</span></div>
+      <div class="count-row"><span class="count">${active.length} 进行中 · 已完成 ${doneN}</span></div>
+      <div class="col-bar"><div class="col-fill" style="width:${prog}%"></div></div>`;
+    colEl.appendChild(header);
+    const list = document.createElement('div');
+    list.className = 'task-list';
+    col.tasks.forEach(t => list.appendChild(buildTaskEl(t, col, true)));
+    colEl.appendChild(list);
+    board.appendChild(colEl);
+  });
+  const cards = [
+    { num: 2, lbl: '演示人数' },
+    { num: doing, lbl: '进行中', cls: 'hl2' },
+    { num: done, lbl: '已完成', cls: 'hl' },
+    { num: total, lbl: '任务总数' },
+  ];
+  $('adminDemoStatCards').innerHTML = cards.map(c =>
+    `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+  ).join('');
+}
+
+function syncAdminDemoToggle() {
+  const toggle = $('adminDemoToggle');
+  if (!toggle) { return; }
+  const demo = toggle.checked;
+  $('adminDemo').style.display = demo ? '' : 'none';
+  $('adminReal').style.display = demo ? 'none' : '';
+  if (demo) renderAdminDemo();
 }
 
 function renderAdminView() {
@@ -1470,6 +1640,7 @@ function renderAdminView() {
 function previewUser(id) {
   previewUid = id;
   $('board').style.display = 'flex';
+  $('recentSection').style.display = '';
   $('doneView').style.display = 'none';
   $('adminView').style.display = 'none';
   $('progressBox').style.display = '';
@@ -1494,13 +1665,14 @@ function switchView(v) {
   previewUid = null;
   $('previewBanner').style.display = 'none';
   $('board').style.display = v === 'board' ? 'flex' : 'none';
+  $('recentSection').style.display = v === 'board' ? '' : 'none';
   $('doneView').style.display = v === 'done' ? 'block' : 'none';
   $('adminView').style.display = v === 'admin' ? 'block' : 'none';
   $('progressBox').style.display = v === 'admin' ? 'none' : '';
   setNavActive(v);
   if (v === 'board') renderBoard();
   if (v === 'done') renderDoneView();
-  if (v === 'admin') renderAdminView();
+  if (v === 'admin') { syncAdminDemoToggle(); renderAdminView(); }
 }
 
 // ================= 导出 / 导入 =================
@@ -1605,6 +1777,19 @@ async function init() {
     e.target.value = '';
   };
 
+  // 近期已完成 折叠/展开
+  const recentToggle = $('recentToggle');
+  if (recentToggle) recentToggle.onclick = () => {
+    const grid = $('recentGrid');
+    const collapsed = grid.style.display === 'none';
+    grid.style.display = collapsed ? '' : 'none';
+    recentToggle.textContent = collapsed ? '收起' : '展开';
+  };
+
+  // 后台管理 虚拟演示数据 切换
+  const demoToggle = $('adminDemoToggle');
+  if (demoToggle) demoToggle.onchange = () => syncAdminDemoToggle();
+
   // 自动登录（会话仍有效时）
   const users = loadUsers();
   const sid = localStorage.getItem(SESSION_KEY);
@@ -1618,6 +1803,7 @@ if (typeof globalThis !== 'undefined') {
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
+    renderRecentDone, renderAdminDemo, syncAdminDemoToggle,
     cloud: {
       isOn: () => cloudEnabled(),
       cfg: (t, g) => { CLOUD.token = t; CLOUD.gistId = g; },
