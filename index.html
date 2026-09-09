@@ -379,6 +379,33 @@
   .admin-table .view-btn:hover { background: #2f89c5; }
   .role-tag { font-size: 11px; background: #fdf3e0; color: #b9770e; padding: 1px 8px; border-radius: 10px; }
 
+  /* ===== 运营统计面板 ===== */
+  .admin-panels { display: grid; grid-template-columns: 3fr 2fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 980px) { .admin-panels { grid-template-columns: 1fr; } }
+  .panel { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; min-width: 0; }
+  .panel h4 { font-size: 13px; color: var(--text); margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+  .admin-note { font-size: 12px; color: var(--text-light); margin: 6px 0 10px; line-height: 1.6; }
+  .trend-wrap { display: flex; align-items: flex-end; gap: 5px; height: 128px; padding: 4px 2px 0; }
+  .trend-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; min-width: 0; }
+  .trend-bar { width: 72%; background: linear-gradient(180deg, var(--c-sales), var(--c-minor)); border-radius: 3px 3px 0 0; min-height: 2px; transition: height .4s; }
+  .trend-col.wk .trend-bar { background: linear-gradient(180deg, #9db8d9, #5b8db8); }
+  .trend-val { font-size: 10px; color: var(--text-light); line-height: 1; }
+  .trend-day { font-size: 10px; color: var(--text-light); white-space: nowrap; }
+  .rank-list { display: flex; flex-direction: column; }
+  .rank-row { display: flex; align-items: center; gap: 9px; padding: 7px 2px; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .rank-row:last-child { border-bottom: none; }
+  .rank-no { width: 21px; height: 21px; border-radius: 50%; background: #eef2f6; color: #667; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+  .rank-row.top .rank-no { background: var(--c-sales); color: #fff; }
+  .rank-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-name b { font-weight: 600; }
+  .rank-meta { font-size: 11px; color: var(--text-light); white-space: nowrap; }
+  .u-badge { display: inline-block; font-size: 11px; padding: 1px 9px; border-radius: 10px; white-space: nowrap; }
+  .u-badge.new { background: #e8f1fd; color: #2f6fb0; }
+  .u-badge.hot { background: #e4f7ef; color: #1d8a5c; }
+  .u-badge.wk { background: #eaf6fb; color: #2a88ad; }
+  .u-badge.mo { background: #f0f2f5; color: #7a8794; }
+  .u-badge.sleep { background: #f5f5f5; color: #a0a0a0; }
+
   /* ===== 预览横幅 ===== */
   .preview-banner {
     max-width: 1700px; margin: 0 auto 16px; background: #fdf6e3; border: 1px solid #f0ddb8;
@@ -478,17 +505,26 @@
   <div id="adminView" style="display:none">
     <div class="admin-wrap">
       <div class="admin-toolbar">
-        <h3 class="admin-title">后台管理</h3>
-        <label class="toggle-label"><input type="checkbox" id="adminDemoToggle"> 虚拟演示数据（示例看板）</label>
+        <h3 class="admin-title">📊 网站运营后台</h3>
+        <label class="toggle-label"><input type="checkbox" id="adminDemoToggle"> 虚拟演示数据</label>
       </div>
       <div id="adminDemo" style="display:none">
         <div class="stat-cards" id="adminDemoStatCards"></div>
-        <h3 class="admin-sec-title">示例看板 · 虚拟数据（仅供预览，不影响真实数据）</h3>
-        <div class="board demo-board" id="adminDemoBoard"></div>
+        <div class="admin-panels">
+          <div class="panel" id="adminDemoTrend"></div>
+          <div class="panel" id="adminDemoRank"></div>
+        </div>
+        <h3 class="admin-sec-title">示例用户列表（虚拟数据，仅供预览，不影响真实数据）</h3>
+        <table class="admin-table" id="adminDemoTable"></table>
       </div>
       <div id="adminReal">
         <div class="stat-cards" id="adminStatCards"></div>
-        <h3 class="admin-sec-title">注册用户列表</h3>
+        <div class="admin-panels">
+          <div class="panel" id="adminTrend"></div>
+          <div class="panel" id="adminRank"></div>
+        </div>
+        <h3 class="admin-sec-title">用户列表（注册 / 使用频次 / 活跃状态）</h3>
+        <div class="admin-note">统计为跨设备云端汇总：任一同事在其浏览器登录一次即上云并出现在这里（若看不到某人，请其在 https://samxu110314.github.io/ 登录一次）。后台只做统计展示，不修改任何任务数据。</div>
         <table class="admin-table" id="adminTable"></table>
       </div>
     </div>
@@ -688,9 +724,23 @@ async function cloudWrite(payload) {
   if (!r.ok) throw new Error('cloud write ' + r.status);
   return r.json();
 }
+// 合并同一账号在两个环境的记录：时间较新者为主(含hash)，累计字段取最大/并集，防计数回退丢失
+function mergeDaysMap(a, b) {
+  const out = {};
+  const add = o => Object.keys(o || {}).forEach(k => { out[k] = (out[k] || 0) + o[k]; });
+  add(a); add(b);
+  return out;
+}
 function pickUser(a, b) {
   if (!a) return b; if (!b) return a;
-  return ((a.lastActive || 0) >= (b.lastActive || 0)) ? a : b;
+  const base = ((a.lastActive || 0) >= (b.lastActive || 0)) ? a : b;
+  const merged = Object.assign({}, base);
+  merged.createdAt = Math.min(a.createdAt || Infinity, b.createdAt || Infinity);
+  if (!isFinite(merged.createdAt)) merged.createdAt = base.createdAt || Date.now();
+  merged.loginCount = Math.max(a.loginCount || 0, b.loginCount || 0);
+  merged.actions = Math.max(a.actions || 0, b.actions || 0);
+  merged.days = mergeDaysMap(a.days, b.days);
+  return merged;
 }
 function parseJ(s, dft) { try { return JSON.parse(s) || dft; } catch (e) { return dft; } }
 function mergeUsersLocal(localUsers, cloudUsers) {
@@ -814,6 +864,7 @@ async function tryRegister() {
     users[id] = {
       uid: id, hash: hashPass(pw), createdAt: Date.now(), lastActive: Date.now(),
       loginCount: 1, actions: 0, isAdmin: (id === ADMIN_UID),
+      days: { [dayKey()]: 1 },
     };
     saveUsers(users);
     setBoard(id, emptyColumns());
@@ -826,6 +877,7 @@ async function tryRegister() {
   users[id] = {
     uid: id, hash: hashPass(pw), createdAt: Date.now(), lastActive: Date.now(),
     loginCount: 1, actions: 0, isAdmin: (id === ADMIN_UID),
+    days: { [dayKey()]: 1 },
   };
   saveUsers(users);
   setBoard(id, emptyColumns());
@@ -838,6 +890,7 @@ function doLogin(id, isAuto) {
   if (!u) { alert('用户不存在'); return; }
   u.lastActive = Date.now();
   if (!isAuto) u.loginCount = (u.loginCount || 0) + 1;
+  trackActive(u);   // 打开页面/登录均计入当日活跃
   users[id] = u;
   saveUsers(users);
   currentUser = u;
@@ -894,6 +947,22 @@ function showApp() {
   switchView('board');
 }
 
+// ================= 活跃度采集（运营统计） =================
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+function dayKey(d) {
+  const x = d ? new Date(d) : new Date();
+  return x.getFullYear() + '-' + pad2(x.getMonth() + 1) + '-' + pad2(x.getDate());
+}
+function dayKeyOffset(off) { return dayKey(Date.now() - off * 86400000); }
+function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+function trackActive(u) {
+  if (!u) return;
+  u.days = u.days || {};
+  const k = dayKey();
+  u.days[k] = (u.days[k] || 0) + 1;
+  u.lastActive = Date.now();
+}
+
 // ================= 保存 =================
 function saveData() {
   if (!currentUser) return;
@@ -902,7 +971,7 @@ function saveData() {
   const u = users[currentUser.uid];
   if (u) {
     u.actions = (u.actions || 0) + 1;
-    u.lastActive = Date.now();
+    trackActive(u);   // 每次有效保存计入当日活跃（强度）
     users[u.uid] = u;
     saveUsers(users);
     currentUser = u;
@@ -1572,69 +1641,184 @@ function boardStatsOf(id) {
   return { total, done };
 }
 
-// -------- 虚拟演示数据（仅后台预览，不影响真实数据） --------
-const DEMO_COLS = [
-  { title: '一、重要紧急', color: PALETTE[0], tasks: [
-    { title: '三季度框条新品开发', sub: [], status: 'doing', progress: 90, planStart: '2026-09-01', planEnd: '2026-10-15' },
-    { title: '广交会框条墙面设计', sub: [], status: 'doing', progress: 70, planStart: '', planEnd: '' },
-    { title: '三季度框条样册设计', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
-    { title: '新增2箱新品待拍摄段样和角样', sub: [], status: 'doing', progress: 50, planStart: '', planEnd: '' },
-    { title: '新品推广单页制作', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 86400000 },
-  ]},
-  { title: '二、重要不紧急', color: PALETTE[1], tasks: [
-    { title: '一季度网站上架图制作并上传', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 2 * 86400000 },
-    { title: '二季度网站上架图制作并上传', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
-    { title: '网站优化、发布', sub: [], status: 'doing', progress: 35, planStart: '2026-09-05', planEnd: '' },
-  ]},
-  { title: '三、销售任务', color: PALETTE[2], tasks: [
-    { title: '包装展示盒设计', sub: [], status: 'doing', progress: 35, planStart: '', planEnd: '' },
-    { title: '意大利展邀请函设计', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 3 * 86400000 },
-  ]},
-  { title: '四、不重要不紧急', color: PALETTE[3], tasks: [
-    { title: '6月大货留样存800并汇总到图库', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
-    { title: '7月大货留样拍摄段样图', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' },
-  ]},
-  { title: '五、公共事务', color: PALETTE[4], tasks: [
-    { title: '青州英彩画框制作', sub: [], status: 'doing', progress: 70, planStart: '', planEnd: '' },
-    { title: '7月积分商城费用报销', sub: [], status: 'done', progress: 100, doneAt: Date.now() - 2 * 86400000 },
-    { title: '马来再生和医疗照片墙发货', sub: [], status: 'doing', progress: 50, planStart: '', planEnd: '' },
-  ]},
-];
-
-function renderAdminDemo() {
-  const board = $('adminDemoBoard');
-  if (!board) return;
-  board.innerHTML = '';
-  let total = 0, doing = 0, done = 0;
-  DEMO_COLS.forEach(col => {
-    const active = col.tasks.filter(t => t.status !== 'done');
-    const doneN = col.tasks.filter(t => t.status === 'done').length;
-    const prog = col.tasks.length ? Math.round(col.tasks.reduce((a, t) => a + t.progress, 0) / col.tasks.length) : 0;
-    total += col.tasks.length; doing += active.filter(t => t.status === 'doing').length; done += doneN;
-    const colEl = document.createElement('div');
-    colEl.className = 'column';
-    const header = document.createElement('div');
-    header.className = 'column-header';
-    header.style.background = col.color || PALETTE[0];
-    header.innerHTML = `<div class="header-top"><span class="col-title">${esc(col.title)}</span></div>
-      <div class="count-row"><span class="count">${active.length} 进行中 · 已完成 ${doneN}</span></div>
-      <div class="col-bar"><div class="col-fill" style="width:${prog}%"></div></div>`;
-    colEl.appendChild(header);
-    const list = document.createElement('div');
-    list.className = 'task-list';
-    col.tasks.forEach(t => list.appendChild(buildTaskEl(t, col, true)));
-    colEl.appendChild(list);
-    board.appendChild(colEl);
+// -------- 运营统计工具 --------
+function adminUsers() {
+  const users = loadUsers();
+  const out = [];
+  Object.keys(users || {}).forEach(k => { const u = users[k]; if (u && u.uid) out.push(u); });
+  return out;
+}
+function isActiveOnDay(u, key, useLastFallback) {
+  if (u.days && u.days[key]) return true;
+  if (useLastFallback && (u.lastActive || 0) >= startOfToday()) return true; // 兼容无 days 的老账号
+  return false;
+}
+function activeInWindow(u, n) {
+  if (u.days) {
+    const since = dayKeyOffset(n - 1);
+    for (const k in u.days) if (k >= since) return true;
+  }
+  return (u.lastActive || 0) >= Date.now() - n * 86400000;
+}
+function activeDayCount(u, n) {
+  const d = u.days; let c = 0;
+  if (d) { const since = dayKeyOffset(n - 1); Object.keys(d).forEach(k => { if (k >= since) c++; }); }
+  if (!c && activeInWindow(u, n)) c = 1;
+  return c;
+}
+function fmtMD(key) { const p = String(key).split('-'); return (+p[1]) + '/' + (+p[2]); }
+function computeAdminStats(list) {
+  const now = Date.now();
+  const t0 = startOfToday();
+  const tk = dayKey();
+  const s = { total: list.length, dau: 0, wau: 0, mau: 0, new7: 0, newToday: 0, logins: 0, acts: 0, tasks: 0, done: 0, never: 0 };
+  list.forEach(u => {
+    if (isActiveOnDay(u, tk, true)) s.dau++;
+    if (activeInWindow(u, 7)) s.wau++;
+    if (activeInWindow(u, 30)) s.mau++;
+    const ca = u.createdAt || 0;
+    if (ca >= now - 7 * 86400000) s.new7++;
+    if (ca >= t0) s.newToday++;
+    s.logins += u.loginCount || 0;
+    s.acts += u.actions || 0;
+    if (!u.lastActive) s.never++;
+    const st = boardStatsOf(u.uid);
+    s.tasks += st.total; s.done += st.done;
   });
+  return s;
+}
+function renderStatCards(elId, s) {
+  const el = $(elId); if (!el) return;
   const cards = [
-    { num: 2, lbl: '演示人数' },
-    { num: doing, lbl: '进行中', cls: 'hl2' },
-    { num: done, lbl: '已完成', cls: 'hl' },
-    { num: total, lbl: '任务总数' },
+    { num: s.total, lbl: '注册用户', cls: 'hl2' },
+    { num: s.dau, lbl: '今日活跃（DAU）' },
+    { num: s.wau, lbl: '近7日活跃', cls: 'hl' },
+    { num: s.mau, lbl: '近30日活跃' },
+    { num: s.new7, lbl: '近7日新增注册' },
+    { num: s.logins, lbl: '累计登录次数' },
+    { num: s.acts, lbl: '累计操作次数' },
+    { num: `${s.done} / ${s.tasks}`, lbl: '已完成 / 任务总数' },
   ];
-  $('adminDemoStatCards').innerHTML = cards.map(c =>
+  el.innerHTML = cards.map(c =>
     `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
   ).join('');
+}
+function renderTrend(elId, list, n) {
+  const el = $(elId); if (!el) return;
+  const t0 = startOfToday();
+  const rows = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const k = dayKeyOffset(i);
+    let cnt = 0;
+    list.forEach(u => { if (u.days && u.days[k]) cnt += u.days[k]; });
+    if (i === 0) list.forEach(u => { if (!(u.days && u.days[k]) && (u.lastActive || 0) >= t0) cnt++; });
+    rows.push({ k, cnt });
+  }
+  const max = Math.max(1, ...rows.map(r => r.cnt));
+  const wk = new Date().getDay();
+  el.innerHTML = `<h4>📈 近 ${n} 天使用频次趋势（当日登录+操作次数）</h4><div class="trend-wrap">` + rows.map((r, i) => {
+    const h = r.cnt ? Math.max(6, Math.round(r.cnt / max * 96)) : 2;
+    const dow = ((wk - (n - 1 - i)) % 7 + 7) % 7;
+    const isWk = dow === 0 || dow === 6;
+    return `<div class="trend-col${isWk ? ' wk' : ''}" title="${r.k}：${r.cnt} 次">
+      <div class="trend-val">${r.cnt || ''}</div>
+      <div class="trend-bar" style="height:${h}px"></div>
+      <div class="trend-day">${fmtMD(r.k)}</div></div>`;
+  }).join('') + '</div>';
+}
+function renderRank(elId, list) {
+  const el = $(elId); if (!el) return;
+  const rank = list.map(u => ({
+    u,
+    logins: u.loginCount || 0,
+    d30: activeDayCount(u, 30),
+    acts: u.actions || 0,
+  })).sort((a, b) => b.logins - a.logins || b.d30 - a.d30 || b.acts - a.acts).slice(0, 6);
+  el.innerHTML = `<h4>🏆 使用频次排行（Top ${rank.length}）</h4>` + (rank.length ? `<div class="rank-list">` + rank.map((r, i) => `
+    <div class="rank-row${i < 3 ? ' top' : ''}">
+      <div class="rank-no">${i + 1}</div>
+      <div class="rank-name"><b>${esc(r.u.uid)}</b>${r.u.isAdmin ? ' <span class="role-tag">管理员</span>' : ''}</div>
+      <div class="rank-meta">登录 ${r.logins} 次 · 近30天活跃 ${r.d30} 天</div>
+    </div>`).join('') + '</div>' : '<div class="admin-note">暂无数据，等同事登录后自动生成</div>');
+}
+function userBadge(u) {
+  const now = Date.now();
+  const ca = u.createdAt || 0;
+  const la = u.lastActive || 0;
+  if (!la) return '<span class="u-badge mo">从未活跃</span>';
+  if (ca >= now - 3 * 86400000) return '<span class="u-badge new">新用户</span>';
+  if (la >= startOfToday()) return '<span class="u-badge hot">今日活跃</span>';
+  if (la >= now - 7 * 86400000) return '<span class="u-badge wk">7日内</span>';
+  if (la >= now - 30 * 86400000) return '<span class="u-badge mo">30日内</span>';
+  return '<span class="u-badge sleep">已沉睡</span>';
+}
+function renderUserTable(elId, list, demo) {
+  const table = $(elId); if (!table) return;
+  table.innerHTML = '';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>工号</th><th>活跃状态</th><th>角色</th><th>注册时间</th><th>最近活跃</th><th>累计登录</th><th>近30天活跃</th><th>操作次数</th><th>已完成/任务</th><th></th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  (list || []).forEach(u => {
+    const st = boardStatsOf(u.uid);
+    const tr = document.createElement('tr');
+    const cells = [
+      `<b>${esc(u.uid)}</b>`,
+      userBadge(u),
+      u.isAdmin ? '<span class="role-tag">管理员</span>' : '成员',
+      u.createdAt ? fmtDate(u.createdAt) : '—',
+      u.lastActive ? fmtDate(u.lastActive) : '—',
+      String(u.loginCount || 0),
+      String(activeDayCount(u, 30)) + ' 天',
+      String(u.actions || 0),
+      demo ? '<span style="color:#aab">演示</span>' : (st.total ? `${st.done} / ${st.total}` : '<span style="color:#aab">—</span>'),
+    ];
+    cells.forEach(html => {
+      const td = document.createElement('td'); td.innerHTML = html; tr.appendChild(td);
+    });
+    const tdBtn = document.createElement('td');
+    if (!demo && st.total) {
+      const btn = document.createElement('button');
+      btn.className = 'view-btn'; btn.textContent = '查看看板';
+      btn.onclick = () => previewUser(u.uid);
+      tdBtn.appendChild(btn);
+    }
+    tr.appendChild(tdBtn);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+}
+
+// -------- 虚拟演示数据（仅后台预览，不影响真实数据） --------
+const DEMO_USERS = (function () {
+  const mk = (uid, createdDaysAgo, lastAgoH, logins, acts, admin) => {
+    const seed = (+uid.slice(-2)) || 5;
+    const days = {};
+    for (let i = 29; i >= 0; i--) {
+      const v = (seed * 31 + i * 17) % 10;
+      if (v < 3) continue;
+      days[dayKeyOffset(i)] = (v % 3) + (i < 14 ? 2 : 0);
+    }
+    const lastActive = Date.now() - lastAgoH * 3600000;
+    if (!days[dayKey()] && lastAgoH < 30) days[dayKey()] = 1;
+    return { uid, hash: 'x', createdAt: Date.now() - createdDaysAgo * 86400000, lastActive, loginCount: logins, actions: acts, days, isAdmin: !!admin };
+  };
+  return [
+    mk('10001', 4, 3, 9, 41),
+    mk('10002', 46, 6, 33, 208),
+    mk('10003', 62, 28, 17, 96),
+    mk('10004', 95, 260, 12, 58),
+    mk('10005', 31, 2, 21, 150),
+    mk('110314', 130, 1, 76, 610, true),
+  ];
+})();
+
+function renderAdminDemo() {
+  const list = DEMO_USERS.slice().sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
+  renderStatCards('adminDemoStatCards', computeAdminStats(list));
+  renderTrend('adminDemoTrend', list, 14);
+  renderRank('adminDemoRank', list);
+  renderUserTable('adminDemoTable', list, true);
 }
 
 function syncAdminDemoToggle() {
@@ -1647,63 +1831,11 @@ function syncAdminDemoToggle() {
 }
 
 function renderAdminView() {
-  const users = loadUsers();
-  const list = Object.values(users).sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
-  const now = Date.now();
-  const today0 = new Date(); today0.setHours(0, 0, 0, 0);
-  let todayActive = 0, weekActive = 0, totalTasks = 0, totalDone = 0;
-  list.forEach(u => {
-    if ((u.lastActive || 0) >= today0.getTime()) todayActive++;
-    if ((u.lastActive || 0) >= now - 7 * 86400000) weekActive++;
-    const st = boardStatsOf(u.uid);
-    totalTasks += st.total;
-    totalDone += st.done;
-  });
-
-  const cards = [
-    { num: list.length, lbl: '注册人数' },
-    { num: todayActive, lbl: '今日活跃', cls: 'hl2' },
-    { num: weekActive, lbl: '7日内活跃' },
-    { num: totalTasks, lbl: '全部任务数' },
-    { num: totalDone, lbl: '全部已完成', cls: 'hl' },
-  ];
-  $('adminStatCards').innerHTML = cards.map(c =>
-    `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
-  ).join('');
-
-  const table = $('adminTable');
-  table.innerHTML = '';
-  const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>工号</th><th>角色</th><th>注册时间</th><th>最近活跃</th><th>登录次数</th><th>操作次数</th><th>任务（完成/总）</th><th>操作</th></tr>';
-  table.appendChild(thead);
-  const tbody = document.createElement('tbody');
-  list.forEach(u => {
-    const st = boardStatsOf(u.uid);
-    const tr = document.createElement('tr');
-    const cells = [
-      `<b>${esc(u.uid)}</b>`,
-      u.isAdmin ? '<span class="role-tag">管理员</span>' : '成员',
-      fmtDate(u.createdAt),
-      u.lastActive ? fmtDate(u.lastActive) : '—',
-      String(u.loginCount || 0),
-      String(u.actions || 0),
-      `${st.done} / ${st.total}`,
-    ];
-    cells.forEach(html => {
-      const td = document.createElement('td');
-      td.innerHTML = html;
-      tr.appendChild(td);
-    });
-    const tdBtn = document.createElement('td');
-    const btn = document.createElement('button');
-    btn.className = 'view-btn';
-    btn.textContent = '查看看板';
-    btn.onclick = () => previewUser(u.uid);
-    tdBtn.appendChild(btn);
-    tr.appendChild(tdBtn);
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
+  const list = adminUsers().sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
+  renderStatCards('adminStatCards', computeAdminStats(list));
+  renderTrend('adminTrend', list, 14);
+  renderRank('adminRank', list);
+  renderUserTable('adminTable', list, false);
   $('progressBox').style.display = 'none';
 }
 
@@ -1873,7 +2005,10 @@ if (typeof globalThis !== 'undefined') {
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
-    renderRecentDone, buildRecentColumn, renderAdminDemo, syncAdminDemoToggle,
+    renderRecentDone, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
+    adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
+    renderUserTable, userBadge, activeInWindow, activeDayCount,
+    dayKey, dayKeyOffset, trackActive, pickUser,
     cloud: {
       isOn: () => cloudEnabled(),
       cfg: (t, g) => { CLOUD.token = t; CLOUD.gistId = g; },
