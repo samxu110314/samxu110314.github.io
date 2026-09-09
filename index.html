@@ -33,10 +33,48 @@
     padding: 24px;
   }
 
-  /* Header */
+  /* ===== 登录/注册页 ===== */
+  .login-wrap {
+    min-height: 90vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #e8f0fe 0%, #f0f2f5 50%, #e8f8f5 100%);
+    border-radius: 16px;
+  }
+  .login-card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(44,62,80,0.12);
+    padding: 40px 44px;
+    width: 380px;
+    max-width: 92vw;
+    text-align: center;
+  }
+  .login-card h1 { font-size: 24px; margin-bottom: 6px; }
+  .login-sub { font-size: 13px; color: var(--text-light); margin-bottom: 22px; }
+  .auth-tabs { display: flex; border-bottom: 2px solid #eef1f4; margin-bottom: 22px; }
+  .auth-tab {
+    flex: 1; padding: 10px; background: none; border: none; font-size: 15px;
+    cursor: pointer; color: var(--text-light); font-family: inherit; border-bottom: 2px solid transparent; margin-bottom: -2px;
+  }
+  .auth-tab.active { color: var(--c-sales); border-bottom-color: var(--c-sales); font-weight: 600; }
+  .auth-form input {
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--border); border-radius: 8px;
+    font-size: 15px; margin-bottom: 12px; outline: none; font-family: inherit; letter-spacing: 1px;
+  }
+  .auth-form input:focus { border-color: var(--c-sales); }
+  .auth-btn {
+    width: 100%; padding: 12px; background: var(--c-sales); color: #fff; border: none;
+    border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; margin-top: 4px;
+  }
+  .auth-btn:hover { background: #2f89c5; }
+  .login-tip { font-size: 12px; color: var(--text-light); margin-top: 18px; line-height: 1.7; }
+
+  /* ===== 应用头部 ===== */
   .header {
-    max-width: 1600px;
-    margin: 0 auto 24px;
+    max-width: 1700px;
+    margin: 0 auto 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -56,59 +94,54 @@
   .header-right {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
+    flex-wrap: wrap;
   }
-  .progress-box {
-    text-align: right;
-    min-width: 240px;
+  .nav-tabs { display: flex; gap: 6px; background: #e8ecf0; padding: 4px; border-radius: 10px; }
+  .nav-btn {
+    padding: 7px 16px; border: none; background: transparent; border-radius: 8px;
+    font-size: 14px; color: var(--text-light); cursor: pointer; font-family: inherit; transition: all .2s;
   }
-  .progress-box .label {
-    font-size: 12px;
-    color: var(--text-light);
-    margin-bottom: 4px;
+  .nav-btn:hover { color: var(--text); }
+  .nav-btn.active { background: #fff; color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+  .user-box { display: flex; align-items: center; gap: 8px; }
+  .user-chip {
+    background: #fff; border: 1px solid var(--border); border-radius: 20px;
+    padding: 6px 14px; font-size: 13px; font-weight: 600; box-shadow: var(--shadow);
   }
-  .progress-box .nums {
-    font-size: 18px;
-    font-weight: 700;
+  .mini-btn {
+    padding: 6px 12px; border: 1px solid var(--border); background: #fff; border-radius: 8px;
+    font-size: 12px; color: var(--text-light); cursor: pointer; font-family: inherit;
   }
+  .mini-btn:hover { color: var(--c-urgent); border-color: var(--c-urgent); }
+  .progress-box { text-align: right; min-width: 240px; }
+  .progress-box .label { font-size: 12px; color: var(--text-light); margin-bottom: 4px; }
+  .progress-box .nums { font-size: 18px; font-weight: 700; }
   .progress-box .nums .done { color: var(--c-minor); }
   .progress-box .nums .pct { color: var(--c-sales); }
-  .progress-box .summary {
-    font-size: 11px;
-    color: var(--text-light);
-    margin-top: 2px;
-  }
+  .progress-box .summary { font-size: 11px; color: var(--text-light); margin-top: 2px; }
   .progress-bar {
-    width: 220px;
-    height: 8px;
-    background: #ddd;
-    border-radius: 4px;
-    overflow: hidden;
-    margin-top: 6px;
+    width: 220px; height: 8px; background: #ddd; border-radius: 4px; overflow: hidden; margin-top: 6px;
   }
   .progress-bar .fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--c-sales), var(--c-minor));
-    border-radius: 4px;
-    transition: width 0.4s ease;
+    height: 100%; background: linear-gradient(90deg, var(--c-sales), var(--c-minor));
+    border-radius: 4px; transition: width 0.4s ease;
   }
 
-  /* Board */
+  /* ===== 看板网格 ===== */
   .board {
     max-width: 1700px;
     margin: 0 auto;
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 16px;
   }
-  @media (max-width: 1400px) {
-    .board { grid-template-columns: repeat(3, 1fr); }
-  }
   @media (max-width: 768px) {
+    body { padding: 12px; }
     .board { grid-template-columns: 1fr; }
   }
 
-  /* Column */
+  /* ===== 分类列 ===== */
   .column {
     background: var(--card-bg);
     border-radius: var(--radius);
@@ -128,443 +161,285 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 6px;
+    gap: 6px;
   }
   .column-header .count {
     background: rgba(255,255,255,0.25);
     padding: 2px 10px;
     border-radius: 20px;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
+    white-space: nowrap;
   }
-  .col-bar {
-    width: 100%;
-    height: 4px;
-    background: rgba(255,255,255,0.3);
-    border-radius: 2px;
-    overflow: hidden;
+  .col-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; overflow: hidden; }
+  .col-fill { height: 100%; background: rgba(255,255,255,0.9); border-radius: 2px; transition: width 0.4s ease; }
+  .col-tools { display: flex; gap: 4px; opacity: 0; transition: opacity .2s; }
+  .column:hover .col-tools { opacity: 1; }
+  .col-tool {
+    background: rgba(255,255,255,0.2); border: none; color: #fff; cursor: pointer;
+    border-radius: 4px; font-size: 12px; padding: 2px 7px; font-family: inherit;
   }
-  .col-fill {
-    height: 100%;
-    background: rgba(255,255,255,0.9);
-    border-radius: 2px;
-    transition: width 0.4s ease;
+  .col-tool:hover { background: rgba(255,255,255,0.4); }
+  .add-col {
+    border: 2px dashed #cfd6dd; border-radius: var(--radius); min-height: 160px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: #8a97a3; font-size: 14px; transition: all .2s;
   }
-  .col-urgent .column-header { background: var(--c-urgent); }
-  .col-important .column-header { background: var(--c-important); }
-  .col-sales .column-header { background: var(--c-sales); }
-  .col-minor .column-header { background: var(--c-minor); }
-  .col-public .column-header { background: var(--c-public); }
-  .col-done .column-header { background: var(--c-done); }
-  .col-done { background: #f3fbf9; }
+  .add-col:hover { border-color: var(--c-sales); color: var(--c-sales); background: #f4f9fd; }
 
-  .task-list {
-    padding: 10px 12px;
-    flex: 1;
-    min-height: 120px;
-  }
+  .task-list { padding: 10px 12px; flex: 1; min-height: 100px; }
   .empty-hint {
-    color: #b0b8c0;
-    font-size: 13px;
-    text-align: center;
-    padding: 24px 8px;
-    border: 1px dashed #e0e4e8;
-    border-radius: 8px;
-  }
-  .source-tag {
-    font-size: 11px;
-    color: #95a5a6;
-    margin: 4px 0 2px;
-    padding: 1px 6px;
-    background: #ecf7f4;
-    border-radius: 4px;
-    display: inline-block;
+    color: #b0b8c0; font-size: 13px; text-align: center; padding: 20px 8px;
+    border: 1px dashed #e0e4e8; border-radius: 8px;
   }
 
-  /* Task Card */
+  /* ===== 任务卡 ===== */
   .task {
-    background: #f8f9fa;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    transition: box-shadow 0.2s, opacity 0.2s;
-    cursor: default;
-    position: relative;
+    background: #f8f9fa; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 10px;
+    transition: box-shadow 0.2s, opacity 0.2s; cursor: default; position: relative;
   }
-  .task:hover {
-    box-shadow: var(--shadow-hover);
-  }
-  .task.doing {
-    border-left: 3px solid var(--c-sales);
-    background: #f0f7fd;
-  }
+  .task:hover { box-shadow: var(--shadow-hover); }
+  .task.doing { border-left: 3px solid var(--c-sales); background: #f0f7fd; }
   .task .checkbox {
-    width: 20px;
-    height: 20px;
-    border: 2px solid #ccc;
-    border-radius: 5px;
-    flex-shrink: 0;
-    cursor: pointer;
-    margin-top: 1px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
+    width: 20px; height: 20px; border: 2px solid #ccc; border-radius: 5px; flex-shrink: 0;
+    cursor: pointer; margin-top: 1px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;
   }
   .task .checkbox:hover { border-color: var(--text-light); }
-  .task.done .checkbox {
-    background: var(--c-minor);
-    border-color: var(--c-minor);
-  }
-  .task.done .checkbox::after {
-    content: '✓';
-    color: #fff;
-    font-size: 13px;
-    font-weight: 700;
-  }
-  .task .content {
-    flex: 1;
-    font-size: 14px;
-    line-height: 1.5;
-    word-break: break-word;
-  }
-  .task .content-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
+  .task.done .checkbox { background: var(--c-minor); border-color: var(--c-minor); }
+  .task.done .checkbox::after { content: '✓'; color: #fff; font-size: 13px; font-weight: 700; }
+  .task .content { flex: 1; font-size: 14px; line-height: 1.5; word-break: break-word; }
+  .task .content-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .task .title { font-weight: 500; }
-  .task.done .title {
-    text-decoration: line-through;
-    color: var(--text-light);
-  }
+  .task.done .title { text-decoration: line-through; color: var(--text-light); }
   .task .delete-btn {
-    opacity: 0;
-    background: none;
-    border: none;
-    color: #ccc;
-    cursor: pointer;
-    font-size: 16px;
-    padding: 0 2px;
-    transition: opacity 0.2s, color 0.2s;
-    flex-shrink: 0;
+    opacity: 0; background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px;
+    padding: 0 2px; transition: opacity 0.2s, color 0.2s; flex-shrink: 0;
   }
   .task:hover .delete-btn { opacity: 1; }
   .task .delete-btn:hover { color: var(--c-urgent); }
 
-  /* Status chip */
   .status-chip {
-    font-size: 11px;
-    padding: 2px 9px;
-    border-radius: 20px;
-    cursor: pointer;
-    user-select: none;
-    white-space: nowrap;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: 1px solid transparent;
-    transition: all 0.2s;
+    font-size: 11px; padding: 2px 9px; border-radius: 20px; cursor: pointer; user-select: none;
+    white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; border: 1px solid transparent; transition: all 0.2s;
   }
   .status-chip:hover { transform: scale(1.05); }
-  .status-chip .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-  }
+  .status-chip .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
   .status-todo { background: #eceff1; color: #7f8c8d; }
   .status-todo .dot { background: #b0bec5; }
   .status-doing { background: #d6eaf8; color: #2471a3; }
   .status-doing .dot { background: var(--c-sales); animation: pulse 1.2s infinite; }
   .status-done { background: #d5f5e3; color: #1e8449; }
   .status-done .dot { background: var(--c-minor); }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.4; transform: scale(0.75); }
-  }
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.75); } }
 
-  /* Sub-tasks */
-  .task .sub-tasks {
-    margin-top: 6px;
-    padding-left: 14px;
-    font-size: 13px;
-    color: var(--text-light);
-    line-height: 1.6;
-  }
+  .task .sub-tasks { margin-top: 6px; padding-left: 14px; font-size: 13px; color: var(--text-light); line-height: 1.6; }
   .task .sub-tasks div { position: relative; }
-  .task .sub-tasks div::before {
-    content: '·';
-    position: absolute;
-    left: -10px;
-  }
+  .task .sub-tasks div::before { content: '·'; position: absolute; left: -10px; }
 
-  /* Progress row */
-  .progress-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 8px;
-  }
-  .mini-bar {
-    flex: 1;
-    height: 6px;
-    background: #e5e8ea;
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  .mini-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--c-sales), var(--c-minor));
-    border-radius: 3px;
-    transition: width 0.3s ease;
-  }
+  .progress-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .mini-bar { flex: 1; height: 6px; background: #e5e8ea; border-radius: 3px; overflow: hidden; }
+  .mini-fill { height: 100%; background: linear-gradient(90deg, var(--c-sales), var(--c-minor)); border-radius: 3px; transition: width 0.3s ease; }
   .progress-num {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-light);
-    min-width: 36px;
-    text-align: right;
-    cursor: pointer;
-    border-bottom: 1px dashed transparent;
+    font-size: 11px; font-weight: 600; color: var(--text-light); min-width: 36px; text-align: right;
+    cursor: pointer; border-bottom: 1px dashed transparent;
   }
   .progress-num:hover { color: var(--c-sales); border-bottom-color: var(--c-sales); }
   .p-btn {
-    width: 20px;
-    height: 20px;
-    border: 1px solid #d0d4d8;
-    background: #fff;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    line-height: 1;
-    color: var(--text-light);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    transition: all 0.2s;
+    width: 20px; height: 20px; border: 1px solid #d0d4d8; background: #fff; border-radius: 4px; cursor: pointer;
+    font-size: 13px; line-height: 1; color: var(--text-light); display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all 0.2s;
   }
   .p-btn:hover { border-color: var(--c-sales); color: var(--c-sales); }
 
-  /* Add Task */
-  .add-task {
-    padding: 8px 12px 12px;
-  }
+  .add-task { padding: 8px 12px 12px; }
   .add-task-btn {
-    width: 100%;
-    padding: 8px;
-    background: transparent;
-    border: 2px dashed #d0d4d8;
-    border-radius: var(--radius-sm);
-    color: var(--text-light);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s;
+    width: 100%; padding: 8px; background: transparent; border: 2px dashed #d0d4d8;
+    border-radius: var(--radius-sm); color: var(--text-light); font-size: 13px; cursor: pointer; transition: all 0.2s;
   }
-  .add-task-btn:hover {
-    border-color: var(--text-light);
-    color: var(--text);
-  }
+  .add-task-btn:hover { border-color: var(--text-light); color: var(--text); }
   .add-task-input {
-    display: none;
-    width: 100%;
-    padding: 8px 10px;
-    border: 2px solid var(--c-sales);
-    border-radius: var(--radius-sm);
-    font-size: 14px;
-    outline: none;
-    font-family: inherit;
+    display: none; width: 100%; padding: 8px 10px; border: 2px solid var(--c-sales);
+    border-radius: var(--radius-sm); font-size: 14px; outline: none; font-family: inherit;
   }
-  .add-task-actions {
-    display: none;
-    margin-top: 6px;
-    gap: 6px;
-  }
+  .add-task-actions { display: none; margin-top: 6px; gap: 6px; }
   .add-task-actions button {
-    padding: 5px 14px;
-    border: none;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    cursor: pointer;
-    font-family: inherit;
+    padding: 5px 14px; border: none; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; font-family: inherit;
   }
-  .btn-confirm {
-    background: var(--c-sales);
-    color: #fff;
+  .btn-confirm { background: var(--c-sales); color: #fff; }
+  .btn-cancel { background: #ecf0f1; color: var(--text-light); }
+
+  /* ===== 已完成统计看板 ===== */
+  .done-wrap { max-width: 1700px; margin: 0 auto; }
+  .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .stat-card { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; }
+  .stat-card .num { font-size: 26px; font-weight: 700; }
+  .stat-card .lbl { font-size: 12px; color: var(--text-light); margin-top: 3px; }
+  .stat-card.hl .num { color: var(--c-minor); }
+  .stat-card.hl2 .num { color: var(--c-sales); }
+  .done-bars { background: #fff; border-radius: var(--radius); padding: 18px 22px; box-shadow: var(--shadow); margin-bottom: 18px; }
+  .done-bars h3 { font-size: 15px; margin-bottom: 12px; }
+  .bar-line { display: flex; align-items: center; gap: 12px; margin: 9px 0; font-size: 13px; }
+  .bar-line .bar-name { width: 150px; text-align: right; color: var(--text); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-line .bar-track { flex: 1; height: 16px; background: #eef1f4; border-radius: 8px; overflow: hidden; }
+  .bar-line .bar-fillv { height: 100%; background: linear-gradient(90deg, var(--c-sales), var(--c-done)); border-radius: 8px; transition: width .4s; }
+  .bar-line .bar-val { width: 190px; color: var(--text-light); flex-shrink: 0; font-size: 12px; }
+  .done-card { background: #f3fbf9; border: 1px solid #d5efea; border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+  .done-card .t { font-weight: 600; font-size: 14px; word-break: break-word; }
+  .done-card .meta { font-size: 11px; color: #88a6a0; margin-top: 4px; }
+  .done-col-list { padding: 10px 12px; }
+  .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+
+  /* ===== 管理后台 ===== */
+  .admin-wrap { max-width: 1300px; margin: 0 auto; }
+  .admin-wrap h3 { font-size: 16px; margin: 22px 0 12px; }
+  .admin-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  .admin-table th, .admin-table td { padding: 11px 14px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .admin-table th { background: #f5f7f9; font-size: 12px; color: var(--text-light); white-space: nowrap; }
+  .admin-table tr:last-child td { border-bottom: none; }
+  .admin-table .view-btn {
+    background: var(--c-sales); color: #fff; border: none; border-radius: 6px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
   }
-  .btn-cancel {
-    background: #ecf0f1;
-    color: var(--text-light);
+  .admin-table .view-btn:hover { background: #2f89c5; }
+  .role-tag { font-size: 11px; background: #fdf3e0; color: #b9770e; padding: 1px 8px; border-radius: 10px; }
+
+  /* ===== 预览横幅 ===== */
+  .preview-banner {
+    max-width: 1700px; margin: 0 auto 16px; background: #fdf6e3; border: 1px solid #f0ddb8;
+    color: #8a6d3b; padding: 10px 16px; border-radius: 8px; font-size: 14px;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .preview-banner button {
+    background: #b9770e; color: #fff; border: none; border-radius: 6px; padding: 6px 14px;
+    font-size: 13px; cursor: pointer; font-family: inherit;
   }
 
-  /* Footer */
-  .footer {
-    max-width: 1600px;
-    margin: 24px auto 0;
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-light);
-  }
+  /* ===== 页脚 ===== */
+  .footer { max-width: 1700px; margin: 24px auto 0; text-align: center; font-size: 12px; color: var(--text-light); }
+  .footer-tools { margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .tool-btn { background: #34495e; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .tool-btn:hover { background: #2c3e50; }
+  .sync-status { font-size: 12px; color: #2980b9; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="header-left">
+<!-- ======== 登录 / 注册 ======== -->
+<div id="loginView" class="login-wrap">
+  <div class="login-card">
     <h1>📋 工作看板</h1>
-    <div class="date" id="todayDate"></div>
+    <p class="login-sub">团队任务管理 · 数据独立保存</p>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tabLogin">登 录</button>
+      <button class="auth-tab" id="tabReg">注 册</button>
+    </div>
+    <div class="auth-form" id="loginForm">
+      <input id="loginUid" placeholder="工号" autocomplete="username">
+      <input id="loginPass" type="password" maxlength="6" placeholder="密码（6位数字）" autocomplete="current-password">
+      <button class="auth-btn" id="doLogin">登 录</button>
+    </div>
+    <div class="auth-form" id="regForm" style="display:none">
+      <input id="regUid" placeholder="工号（推荐使用工号注册）" autocomplete="off">
+      <input id="regPass" type="password" maxlength="6" placeholder="密码（6位数字）" autocomplete="new-password">
+      <input id="regPass2" type="password" maxlength="6" placeholder="确认密码" autocomplete="new-password">
+      <button class="auth-btn" id="doReg">注 册</button>
+    </div>
+    <p class="login-tip">每个工号拥有自己独立的工作看板<br>管理员工号：110314</p>
   </div>
-  <div class="header-right">
-    <div class="progress-box">
-      <div class="label">整体进度（按进度加权）</div>
-      <div class="nums"><span class="done" id="doneCount">0</span> / <span id="totalCount">0</span> 完成 · <span class="pct" id="overallPct">0%</span></div>
-      <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
-      <div class="summary" id="statusSummary">待办 0 · 进行中 0 · 已完成 0</div>
+</div>
+
+<!-- ======== 应用主体 ======== -->
+<div id="appView" style="display:none">
+
+  <div class="header">
+    <div class="header-left">
+      <h1 id="boardTitle">📋 工作看板</h1>
+      <div class="date" id="todayDate"></div>
+    </div>
+    <div class="header-right">
+      <div class="nav-tabs">
+        <button class="nav-btn active" id="navBoard">任务看板</button>
+        <button class="nav-btn" id="navDone">已完成看板</button>
+        <button class="nav-btn" id="navAdmin" style="display:none">后台管理</button>
+      </div>
+      <div class="user-box">
+        <span class="user-chip" id="userChip">工号</span>
+        <button class="mini-btn" id="chgPwdBtn">改密码</button>
+        <button class="mini-btn" id="logoutBtn">退出登录</button>
+      </div>
+      <div class="progress-box" id="progressBox">
+        <div class="label">整体进度（按进度加权）</div>
+        <div class="nums"><span class="done" id="doneCount">0</span> / <span id="totalCount">0</span> 完成 · <span class="pct" id="overallPct">0%</span></div>
+        <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
+        <div class="summary" id="statusSummary">待办 0 · 进行中 0 · 已完成 0</div>
+      </div>
     </div>
   </div>
-</div>
 
-<div class="board" id="board"></div>
-
-<div class="footer">
-  点击状态标签切换 待办 / 进行中 / 已完成 · 点击百分比可输入进度 · 数据自动保存在本浏览器
-  <div class="footer-tools">
-    <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
-    <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
-    <input type="file" id="importFile" accept="application/json" style="display:none" />
-    <span id="syncStatus" class="sync-status"></span>
+  <div class="preview-banner" id="previewBanner" style="display:none">
+    <span id="previewText">正在查看的看板（只读）</span>
+    <button id="previewBack">返回后台</button>
   </div>
-</div>
 
-<style>
-  .footer-tools { margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
-  .tool-btn { background: #34495e; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
-  .tool-btn:hover { background: #2c3e50; }
-  .sync-status { font-size: 12px; }
-  .sync-on { color: #27ae60; }
-  .sync-pending { color: #f39c12; }
-  .sync-off { color: #e74c3c; }
-  .sync-local { color: #2980b9; }
-</style>
+  <div class="board" id="board"></div>
+
+  <div id="doneView" style="display:none">
+    <div class="done-wrap">
+      <div class="stat-cards" id="doneStatCards"></div>
+      <div class="done-bars" id="doneBars"></div>
+      <div class="board" id="doneBoard"></div>
+    </div>
+  </div>
+
+  <div id="adminView" style="display:none">
+    <div class="admin-wrap">
+      <div class="stat-cards" id="adminStatCards"></div>
+      <h3>注册用户列表</h3>
+      <table class="admin-table" id="adminTable"></table>
+    </div>
+  </div>
+
+  <div class="footer">
+    点击状态标签切换 待办 / 进行中 / 已完成 · 点击百分比可输入进度 · 数据自动保存在本浏览器
+    <div class="footer-tools">
+      <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
+      <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none" />
+      <span id="syncStatus" class="sync-status"></span>
+    </div>
+  </div>
+
+</div>
 
 <script>
-// ===== Data Model =====
-const COLUMNS = [
-  { id: 'urgent',   title: '一、重要紧急',   cls: 'col-urgent',   tasks: [
-    { title: '三季度框条新品开发', sub: ['新品开发设计，布纹、金属等', '部分贴图制作'], status: 'todo', progress: 0 },
-    { title: '三季度框条新品304款段样图调色', status: 'todo', progress: 0 },
-    { title: '三季度框条新品样册设计', status: 'todo', progress: 0 },
-    { title: '新增2箱新品待拍摄段样和角样', status: 'todo', progress: 0 },
-    { title: '广交会框条墙面设计', status: 'todo', progress: 0 },
-    { title: 'Weekly框条弯圆新品推广单页制作', status: 'todo', progress: 0 },
-  ]},
-  { id: 'important', title: '二、重要不紧急', cls: 'col-important', tasks: [
-    { title: '一季度网站上架图制作并上传', status: 'todo', progress: 0 },
-    { title: '二季度网站上架图制作并上传', status: 'todo', progress: 0 },
-    { title: '框条客户公司介绍PPT替换展厅图', status: 'todo', progress: 0 },
-    { title: '义乌展邀请函设计', status: 'todo', progress: 0 },
-    { title: '意大利展邀请函设计', status: 'todo', progress: 0 },
-    { title: 'Intco-Framing网站优化、发布', status: 'todo', progress: 0 },
-  ]},
-  { id: 'sales',    title: '三、销售任务',    cls: 'col-sales',    tasks: [
-    { title: '临时销售任务（待分配）', status: 'todo', progress: 0 },
-  ]},
-  { id: 'minor',    title: '四、不重要不紧急', cls: 'col-minor',    tasks: [
-    { title: '6月大货留样存800并汇总到图库', status: 'todo', progress: 0 },
-    { title: '7月大货留样拍摄段样图', status: 'todo', progress: 0 },
-    { title: '8月大货留样拍摄段样图', status: 'todo', progress: 0 },
-  ]},
-  { id: 'public',   title: '五、公共事务',    cls: 'col-public',   tasks: [
-    { title: '青州英彩画框制作', status: 'todo', progress: 0 },
-    { title: '7月积分商城费用报销', status: 'todo', progress: 0 },
-    { title: '20日Coloro来访陪同', status: 'todo', progress: 0 },
-    { title: '马来再生和医疗照片墙发货', status: 'todo', progress: 0 },
-    { title: '淮北照片墙打印', status: 'todo', progress: 0 },
-  ]},
-];
+// ================= 常量与工具 =================
+const USERS_KEY = 'wb_users_v1';
+const SESSION_KEY = 'wb_session_v1';
+const LEGACY_KEYS = ['work_board_data_v2', 'work_board_data_v1'];
+const ADMIN_UID = '110314';
+const PALETTE = ['#e74c3c', '#f39c12', '#3498db', '#27ae60', '#8e44ad', '#d35400', '#16a085', '#2c3e50', '#c0392b', '#7f8c8d'];
+const CLS_COLOR = { 'col-urgent': '#e74c3c', 'col-important': '#f39c12', 'col-sales': '#3498db', 'col-minor': '#27ae60', 'col-public': '#8e44ad' };
 
-const STORAGE_KEY = 'work_board_data_v2';
-const LEGACY_KEY = 'work_board_data_v1';
+const $ = id => document.getElementById(id);
 
-// ===== Persistence（服务器统一存储 + 本地缓存）=====
-// 数据以服务器为准（存于 data.json），所有入口（本地/在线/手机）读写同一份，
-// 彻底解决 localStorage 按网址隔离导致的数据不同步问题。
-
-function normalizeTask(t) {
-  const done = !!t.done;
-  // v2+ 数据保留 status/progress；v1 旧数据（仅 done 字段）兼容转换
-  let status = t.status || (done ? 'done' : 'todo');
-  let progress = typeof t.progress === 'number' ? t.progress : (done ? 100 : 0);
-  if (done || status === 'done' || progress >= 100) { status = 'done'; progress = 100; }
-  else if (progress > 0) { status = 'doing'; }
-  else { status = 'todo'; progress = 0; }
-  return { title: t.title || '', sub: t.sub || [], status, progress };
+function hashPass(p) {
+  let h = 5381;
+  for (let i = 0; i < p.length; i++) h = (((h << 5) + h) + p.charCodeAt(i)) >>> 0;
+  return 'h' + h.toString(36);
 }
-
-function localLoad() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length === COLUMNS.length) return parsed;
-    } catch(e) { console.warn('Load local failed', e); }
-  }
-  // Legacy v1 (done only)
-  const legacy = localStorage.getItem(LEGACY_KEY);
-  if (legacy) {
-    try {
-      const parsed = JSON.parse(legacy);
-      if (Array.isArray(parsed) && parsed.length === COLUMNS.length) {
-        localStorage.removeItem(LEGACY_KEY);
-        return parsed;
-      }
-    } catch(e) {}
-  }
-  return null;
+function newId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
-
-// writable=true 表示有 Node API（可双向同步）；false 表示只有静态 data.json 快照（只读，用于在线部署版）
-let boardWritable = true;
-
-async function serverLoad() {
-  // reachable=true 表示服务器正常响应（data 可能为 null = 服务器确认无数据）
-  // reachable=false 表示读取失败（网络抖动/服务器未启动），此时绝不能上传本地数据覆盖服务器
-  try {
-    const res = await fetch('/api/data', { cache: 'no-store' });
-    if (res.ok) {
-      const json = await res.json();
-      boardWritable = true;
-      return { data: json.data || null, updatedAt: json.updatedAt || 0, reachable: true, writable: true };
-    }
-  } catch(e) {}
-  // 静态部署回退：读取同目录 data.json 只读快照（在线版无 Node API 时至少能看到进度）
-  try {
-    const res2 = await fetch('data.json', { cache: 'no-store' });
-    if (res2.ok) {
-      const json = await res2.json();
-      boardWritable = false;
-      return { data: json.data || null, updatedAt: json.updatedAt || 0, reachable: true, writable: false };
-    }
-  } catch(e) { console.warn('Server load failed, use local', e); }
-  boardWritable = false;
-  return { data: null, updatedAt: 0, reachable: false, writable: false };
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-
-// 统计带进度/非待办的任务数（用于冲突检测）
-function countActive(data) {
-  if (!Array.isArray(data)) return 0;
-  return data.reduce((sum, col) => sum + (col.tasks || []).filter(t => t.progress > 0 || (t.status && t.status !== 'todo')).length, 0);
-}
-
-// 顶部浮动提示
 function showNotice(msg) {
-  let el = document.getElementById('syncNotice');
+  let el = $('syncNotice');
   if (!el) {
     el = document.createElement('div');
     el.id = 'syncNotice';
@@ -574,236 +449,259 @@ function showNotice(msg) {
   el.textContent = msg;
   el.style.display = 'block';
   clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.display = 'none'; }, 5000);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
-async function serverSave(data) {
-  // 在线只读版（静态快照，无 Node API）：只存本地缓存，不尝试 POST
-  if (!boardWritable) {
-    setSyncStatus(false);
-    return 0;
-  }
+// ================= 默认数据 =================
+// 管理员(110314)首次种子的任务数据（与 data.json 快照一致）
+function defaultColumns() {
+  return JSON.parse(JSON.stringify([
+    { id: 'urgent', title: '一、重要紧急', color: '#e74c3c', tasks: [
+      { title: '三季度框条新品开发', sub: ['新品开发设计，布纹、金属等', '部分贴图制作'], status: 'doing', progress: 90 },
+      { title: '三季度框条新品304款段样图调色', sub: [], status: 'doing', progress: 5 },
+      { title: '三季度框条新品样册设计', sub: [], status: 'todo', progress: 0 },
+      { title: '新增2箱新品待拍摄段样和角样', sub: [], status: 'doing', progress: 50 },
+      { title: '广交会框条墙面设计', sub: [], status: 'doing', progress: 70 },
+      { title: 'Weekly框条弯圆新品推广单页制作', sub: [], status: 'done', progress: 100 },
+    ]},
+    { id: 'important', title: '二、重要不紧急', color: '#f39c12', tasks: [
+      { title: '一季度网站上架图制作并上传', sub: [], status: 'doing', progress: 10 },
+      { title: '二季度网站上架图制作并上传', sub: [], status: 'todo', progress: 0 },
+      { title: '框条客户公司介绍PPT替换展厅图', sub: [], status: 'doing', progress: 90 },
+      { title: '义乌展邀请函设计', sub: [], status: 'done', progress: 100 },
+      { title: '意大利展邀请函设计', sub: [], status: 'todo', progress: 0 },
+      { title: 'Intco-Framing网站优化、发布', sub: [], status: 'doing', progress: 35 },
+    ]},
+    { id: 'sales', title: '三、销售任务', color: '#3498db', tasks: [
+      { title: '包装展示盒设计', sub: [], status: 'doing', progress: 35 },
+    ]},
+    { id: 'minor', title: '四、不重要不紧急', color: '#27ae60', tasks: [
+      { title: '6月大货留样存800并汇总到图库', sub: [], status: 'todo', progress: 0 },
+      { title: '7月大货留样拍摄段样图', sub: [], status: 'todo', progress: 0 },
+      { title: '8月大货留样拍摄段样图', sub: [], status: 'todo', progress: 0 },
+    ]},
+    { id: 'public', title: '五、公共事务', color: '#8e44ad', tasks: [
+      { title: '青州英彩画框制作', sub: [], status: 'doing', progress: 70 },
+      { title: '7月积分商城费用报销', sub: [], status: 'todo', progress: 0 },
+      { title: '20日Coloro来访陪同', sub: [], status: 'done', progress: 100 },
+      { title: '马来再生和医疗照片墙发货', sub: [], status: 'doing', progress: 50 },
+      { title: '淮北照片墙打印', sub: [], status: 'todo', progress: 0 },
+    ]},
+  ]));
+}
+
+// 新注册用户的初始分类（空任务）
+function emptyColumns() {
+  return [
+    { id: newId(), title: '一、重要紧急', color: '#e74c3c', tasks: [] },
+    { id: newId(), title: '二、重要不紧急', color: '#f39c12', tasks: [] },
+    { id: newId(), title: '三、销售任务', color: '#3498db', tasks: [] },
+    { id: newId(), title: '四、不重要不紧急', color: '#27ae60', tasks: [] },
+    { id: newId(), title: '五、公共事务', color: '#8e44ad', tasks: [] },
+  ];
+}
+
+// ================= 数据规范化 =================
+function normalizeTask(t) {
+  if (!t) return { title: '', sub: [], status: 'todo', progress: 0 };
+  const done = !!t.done;
+  let status = t.status || (done ? 'done' : 'todo');
+  let progress = typeof t.progress === 'number' ? t.progress : (done ? 100 : 0);
+  if (done || status === 'done' || progress >= 100) { status = 'done'; progress = 100; }
+  else if (progress > 0) { status = 'doing'; }
+  else { status = 'todo'; progress = 0; }
+  return { title: t.title || '', sub: t.sub || [], status, progress, doneAt: status === 'done' ? (t.doneAt || null) : null };
+}
+
+function normalizeColumns(cols) {
+  if (!Array.isArray(cols)) return emptyColumns();
+  return cols.map((col, i) => ({
+    id: col.id || newId() + i,
+    title: col.title || ('分类 ' + (i + 1)),
+    color: col.color || CLS_COLOR[col.cls] || PALETTE[i % PALETTE.length],
+    tasks: (col.tasks || []).map(normalizeTask),
+  }));
+}
+
+// ================= 账户体系（工号 + 6位数字密码，数据按浏览器本地保存）=================
+function loadUsers() {
+  try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch (e) { return {}; }
+}
+function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+function boardKey(id) { return 'wb_board_v1_' + id; }
+function getBoard(id) {
   try {
-    // 保存前先读取服务器当前数据做冲突检测：
-    // 如果服务器有较多带进度任务，而本地数据几乎无进度（本地旧缓存/服务器读取失败的产物），
-    // 说明本地数据不完整 —— 拒绝覆盖，自动恢复服务器数据
-    const pre = await fetch('/api/data', { cache: 'no-store' });
-    if (pre.ok) {
-      const pj = await pre.json();
-      const remote = pj.data;
-      const remoteActive = countActive(remote);
-      const localActive = countActive(data);
-      if (remoteActive >= 2 && localActive * 2 < remoteActive) {
-        console.warn('Local data looks stale, restore from server');
-        if (remote) {
-          applyData(remote);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
-          renderBoard();
-        }
-        setSyncStatus(true);
-        showNotice('检测到本地数据不完整，已自动恢复为服务器最新数据');
-        return 0;
+    const b = JSON.parse(localStorage.getItem(boardKey(id)));
+    if (Array.isArray(b) && b.length) return b;
+  } catch (e) {}
+  return null;
+}
+function setBoard(id, cols) { localStorage.setItem(boardKey(id), JSON.stringify(cols)); }
+
+// 旧版（无账号）看板数据 → 迁移给管理员
+function legacyBoard() {
+  for (const k of LEGACY_KEYS) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(k));
+      if (Array.isArray(parsed) && parsed.length) {
+        const cols = normalizeColumns(parsed);
+        if (cols.some(c => c.tasks.length)) return cols;
       }
-    }
-    const res = await fetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data })
-    });
-    if (res.ok) {
-      const json = await res.json();
-      return json.updatedAt || 0;
-    }
-    if (res.status === 409) {
-      // 服务器拒绝了覆盖（服务端保护触发）：恢复服务器数据
-      const j = await res.json().catch(() => null);
-      const remote = j && j.data;
-      if (remote) {
-        applyData(remote);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
-        renderBoard();
-      }
-      setSyncStatus(true);
-      showNotice('检测到本地数据不完整，已自动恢复为服务器最新数据');
-      return 0;
-    }
-  } catch(e) {
-    console.warn('Server save failed, kept in local cache', e);
+    } catch (e) {}
   }
-  return 0;
+  return null;
 }
 
-// 最近一次与服务器同步的版本时间戳，用于轮询增量同步
-let lastSyncedAt = 0;
-// 本地是否有未保存的变更（保存中或保存失败）；为 true 时轮询不应用服务器数据，防止覆盖刚改的内容
-let dirty = false;
+let currentUser = null;   // 当前登录用户记录
+let COLUMNS = [];         // 当前用户看板数据
+let previewUid = null;    // 管理员正在查看的用户（只读预览）
 
+// ================= 登录 / 注册 =================
+function switchAuthTab(which) {
+  const isLogin = which === 'login';
+  $('tabLogin').className = 'auth-tab' + (isLogin ? ' active' : '');
+  $('tabReg').className = 'auth-tab' + (!isLogin ? ' active' : '');
+  $('loginForm').style.display = isLogin ? 'block' : 'none';
+  $('regForm').style.display = isLogin ? 'none' : 'block';
+}
+
+function tryLogin() {
+  const id = $('loginUid').value.trim();
+  const pw = $('loginPass').value.trim();
+  if (!id || !pw) { alert('请输入工号和密码'); return; }
+  const users = loadUsers();
+  const u = users[id];
+  if (!u) { alert('该工号未注册'); return; }
+  if (u.hash !== hashPass(pw)) { alert('密码不正确'); return; }
+  doLogin(id, false);
+}
+
+function tryRegister() {
+  const id = $('regUid').value.trim();
+  const pw = $('regPass').value.trim();
+  const pw2 = $('regPass2').value.trim();
+  if (!id) { alert('请输入工号'); return; }
+  if (!/^[A-Za-z0-9_-]{2,20}$/.test(id)) { alert('工号需为 2-20 位字母或数字'); return; }
+  if (!/^\d{6}$/.test(pw)) { alert('密码必须是 6 位数字'); return; }
+  if (pw !== pw2) { alert('两次输入的密码不一致'); return; }
+  const users = loadUsers();
+  if (users[id]) { alert('该工号已注册，请直接登录'); return; }
+  users[id] = {
+    uid: id, hash: hashPass(pw), createdAt: Date.now(), lastActive: Date.now(),
+    loginCount: 1, actions: 0, isAdmin: (id === ADMIN_UID),
+  };
+  saveUsers(users);
+  setBoard(id, emptyColumns());
+  doLogin(id, true);
+}
+
+function doLogin(id, isAuto) {
+  const users = loadUsers();
+  const u = users[id];
+  if (!u) { alert('用户不存在'); return; }
+  u.lastActive = Date.now();
+  if (!isAuto) u.loginCount = (u.loginCount || 0) + 1;
+  users[id] = u;
+  saveUsers(users);
+  currentUser = u;
+  localStorage.setItem(SESSION_KEY, id);
+
+  // 本人（110314）首次在新版登录：优先迁移旧版已保存数据，绝不丢
+  if (id === ADMIN_UID && !getBoard(id)) {
+    setBoard(id, legacyBoard() || defaultColumns());
+  }
+  COLUMNS = normalizeColumns(getBoard(id) || emptyColumns());
+  setBoard(id, COLUMNS);
+  showApp();
+}
+
+function doLogout() {
+  localStorage.removeItem(SESSION_KEY);
+  currentUser = null;
+  previewUid = null;
+  $('appView').style.display = 'none';
+  $('loginView').style.display = 'flex';
+  $('loginUid').value = '';
+  $('loginPass').value = '';
+  $('regUid').value = '';
+  $('regPass').value = '';
+  $('regPass2').value = '';
+  switchAuthTab('login');
+}
+
+function changePassword() {
+  if (!currentUser) return;
+  const old = prompt('请输入当前密码：');
+  if (old === null) return;
+  const users = loadUsers();
+  const u = users[currentUser.uid];
+  if (!u || u.hash !== hashPass(old)) { alert('当前密码不正确'); return; }
+  const np = prompt('请输入新密码（6位数字）：');
+  if (np === null) return;
+  if (!/^\d{6}$/.test(np)) { alert('新密码必须是 6 位数字'); return; }
+  u.hash = hashPass(np);
+  users[u.uid] = u;
+  saveUsers(users);
+  alert('密码已修改');
+}
+
+function showApp() {
+  $('loginView').style.display = 'none';
+  $('appView').style.display = 'block';
+  $('boardTitle').textContent = '📋 ' + currentUser.uid + ' 的工作看板';
+  $('userChip').textContent = '工号 ' + currentUser.uid;
+  $('navAdmin').style.display = currentUser.isAdmin ? '' : 'none';
+  $('syncStatus').textContent = '💾 已登录 ' + currentUser.uid + ' · 数据保存在本浏览器';
+  switchView('board');
+}
+
+// ================= 保存 =================
 function saveData() {
-  dirty = true;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
-  serverSave(COLUMNS).then(ts => {
-    if (ts) { lastSyncedAt = ts; setSyncStatus(true); }
-    else setSyncStatus(false);
-    dirty = false;
-  }); // fire and forget，失败时本地缓存兜底
-}
-
-// 以 base 为主，把 extra 中多出的任务（按标题去重）合并进来
-function mergeData(base, extra) {
-  return base.map((col, i) => {
-    const extraCol = extra[i];
-    const tasks = col.tasks.map(normalizeTask);
-    if (extraCol && Array.isArray(extraCol.tasks)) {
-      const titles = new Set(tasks.map(t => t.title));
-      extraCol.tasks.forEach(t => {
-        if (t && t.title && !titles.has(t.title)) {
-          tasks.push(normalizeTask(t));
-          titles.add(t.title);
-        }
-      });
-    }
-    return { ...col, tasks };
-  });
-}
-
-function applyData(data) {
-  data.forEach((col, i) => {
-    if (col.tasks && COLUMNS[i]) {
-      COLUMNS[i].tasks = col.tasks.map(normalizeTask);
-    }
-  });
-}
-
-async function initData() {
-  const { data: serverData, updatedAt, reachable } = await serverLoad();
-  lastSyncedAt = updatedAt;
-  const localData = localLoad();
-  const migrated = localStorage.getItem('work_board_migrated_v3');
-
-  if (reachable && serverData) {
-    if (!boardWritable) {
-      // 静态托管（GitHub Pages 等，只有只读 data.json 快照）：
-      // 以浏览器本地数据为准，data.json 仅作为首次访问的初始种子，
-      // 绝不能用冻结的旧快照覆盖用户已保存的进度
-      if (localData) {
-        applyData(localData);
-      } else {
-        applyData(serverData);
-        localStorage.setItem('work_board_migrated_v3', '1');
-      }
-    } else if (localData && !migrated) {
-      // 有后端 API：以服务器为准，但未迁移过的入口再合并一次本地数据（防丢任务）
-      const merged = mergeData(serverData, localData);
-      applyData(merged);
-      localStorage.setItem('work_board_migrated_v3', '1');
-      saveData();
-    } else {
-      applyData(serverData);
-    }
-  } else if (reachable && !serverData) {
-    // 服务器正常且确认无数据（首次使用）：合并 默认任务 + 本地数据（找回之前新增的任务），并上传
-    const base = COLUMNS.map(col => ({ ...col, tasks: col.tasks.map(normalizeTask) }));
-    const merged = localData ? mergeData(base, localData) : base;
-    applyData(merged);
-    localStorage.setItem('work_board_migrated_v3', '1');
-    saveData();
-  } else {
-    // 服务器读取失败：只用本地/默认数据渲染，绝不 POST 上传（防止无进度缓存覆盖服务器上的进度）
-    if (localData) {
-      applyData(localData);
-    }
-    // 本地也没有则保留 COLUMNS 初始默认任务
-    setSyncStatus(false);
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
-  if (reachable) setSyncStatus(true);
-}
-
-// ===== 实时同步轮询 =====
-// 每 5 秒检查一次服务器是否有新数据（其他页面/设备改过），有则自动刷新界面
-async function pollSync() {
-  if (location.protocol === 'file:') return;
-  if (!boardWritable) return; // 静态托管无后端可轮询，且会用过期的 data.json 覆盖本地进度
-  if (dirty) return; // 本地有未保存变更时，不应用服务器数据，防止覆盖刚改的内容
-  const { data: serverData, updatedAt, reachable } = await serverLoad();
-  if (reachable && serverData && updatedAt > lastSyncedAt) {
-    applyData(serverData);
-    lastSyncedAt = updatedAt;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
-    renderBoard();
+  if (!currentUser) return;
+  setBoard(currentUser.uid, COLUMNS);
+  const users = loadUsers();
+  const u = users[currentUser.uid];
+  if (u) {
+    u.actions = (u.actions || 0) + 1;
+    u.lastActive = Date.now();
+    users[u.uid] = u;
+    saveUsers(users);
+    currentUser = u;
   }
 }
 
-// ===== 同步状态提示 =====
-function setSyncStatus(ok) {
-  const el = document.getElementById('syncStatus');
-  if (!el) return;
-  if (location.protocol === 'file:') {
-    el.textContent = '本地文件版 · 无法同步';
-    el.className = 'sync-status sync-off';
-  } else if (!boardWritable) {
-    el.textContent = '💾 本地保存';
-    el.className = 'sync-status sync-local';
-  } else if (ok) {
-    el.textContent = '● 已同步';
-    el.className = 'sync-status sync-on';
-  } else {
-    el.textContent = '○ 同步中...';
-    el.className = 'sync-status sync-pending';
-  }
-}
-
-// ===== 本地文件版防误用提示 =====
-function showFileModeBanner() {
-  if (location.protocol !== 'file:') return;
-  const banner = document.createElement('div');
-  banner.style.cssText = 'background:#fff3cd;color:#856404;padding:10px 16px;border-radius:8px;margin:0 auto 16px;max-width:1600px;font-size:14px;border:1px solid #ffeeba;line-height:1.6;';
-  banner.innerHTML = '⚠️ <b>当前是本地文件版，无法与云端网站同步。</b>请用云端网站地址打开看板（在浏览器收藏夹保存该地址即可随时访问）。';
-  document.body.insertBefore(banner, document.body.firstChild);
-}
-
-// ===== Status / Progress logic =====
+// ================= 状态 / 进度 =================
 const STATUS_ICON = { todo: '○', doing: '●', done: '✓' };
 const STATUS_LABEL = { todo: '待办', doing: '进行中', done: '已完成' };
-
-function statusHtml(s) {
-  return `<span class="dot"></span>${STATUS_ICON[s]} ${STATUS_LABEL[s]}`;
-}
+function statusHtml(s) { return `<span class="dot"></span>${STATUS_ICON[s]} ${STATUS_LABEL[s]}`; }
 
 function setStatus(task, s) {
   task.status = s;
-  if (s === 'done') task.progress = 100;
-  if (s === 'todo') task.progress = 0;
-  // doing keeps current progress
+  if (s === 'done') { task.progress = 100; if (!task.doneAt) task.doneAt = Date.now(); }
+  if (s === 'todo') { task.progress = 0; task.doneAt = null; }
 }
-
 function cycleStatus(task) {
   const order = ['todo', 'doing', 'done'];
-  const next = order[(order.indexOf(task.status) + 1) % 3];
-  setStatus(task, next);
+  setStatus(task, order[(order.indexOf(task.status) + 1) % 3]);
 }
-
 function toggleDone(task) {
   if (task.status === 'done') {
     task.status = 'doing';
     if (task.progress >= 100) task.progress = 90;
+    task.doneAt = null;
   } else {
     task.status = 'done';
     task.progress = 100;
+    if (!task.doneAt) task.doneAt = Date.now();
   }
 }
-
 function applyProgress(task, p) {
   task.progress = Math.max(0, Math.min(100, Math.round(p)));
-  if (task.progress >= 100) task.status = 'done';
-  else if (task.progress > 0) task.status = 'doing';
-  else task.status = 'todo';
+  if (task.progress >= 100) { task.status = 'done'; if (!task.doneAt) task.doneAt = Date.now(); }
+  else if (task.progress > 0) { task.status = 'doing'; task.doneAt = null; }
+  else { task.status = 'todo'; task.doneAt = null; }
 }
-
-function adjustProgress(task, delta) {
-  applyProgress(task, task.progress + delta);
-}
-
+function adjustProgress(task, delta) { applyProgress(task, task.progress + delta); }
 function inputProgress(task) {
   const v = prompt('请输入进度（0-100）：', task.progress);
   if (v === null) return;
@@ -812,20 +710,15 @@ function inputProgress(task) {
   applyProgress(task, n);
 }
 
-// ===== Render =====
-// 构建单个任务卡片（源列与“已完成”列共用）
-function buildTaskEl(task, col, isDoneCol, sourceTitle) {
+// ================= 任务看板渲染 =================
+function buildTaskEl(task, col, readonly) {
   const taskEl = document.createElement('div');
   taskEl.className = 'task' + (task.status === 'done' ? ' done' : '') + (task.status === 'doing' ? ' doing' : '');
 
   const checkbox = document.createElement('div');
   checkbox.className = 'checkbox';
   checkbox.title = '标记完成 / 取消完成';
-  checkbox.onclick = () => {
-    toggleDone(task);
-    saveData();
-    renderBoard();
-  };
+  if (!readonly) checkbox.onclick = () => { toggleDone(task); saveData(); renderBoard(); };
 
   const content = document.createElement('div');
   content.className = 'content';
@@ -841,23 +734,11 @@ function buildTaskEl(task, col, isDoneCol, sourceTitle) {
   chip.className = `status-chip status-${task.status}`;
   chip.innerHTML = statusHtml(task.status);
   chip.title = '点击切换状态（待办 → 进行中 → 已完成）';
-  chip.onclick = () => {
-    cycleStatus(task);
-    saveData();
-    renderBoard();
-  };
+  if (!readonly) chip.onclick = () => { cycleStatus(task); saveData(); renderBoard(); };
 
   top.appendChild(titleEl);
   top.appendChild(chip);
   content.appendChild(top);
-
-  // 已完成列显示来源分类
-  if (isDoneCol && sourceTitle) {
-    const srcTag = document.createElement('div');
-    srcTag.className = 'source-tag';
-    srcTag.textContent = '来源：' + sourceTitle.replace(/^[一二三四五六]、/, '');
-    content.appendChild(srcTag);
-  }
 
   if (task.sub && task.sub.length > 0) {
     const subEl = document.createElement('div');
@@ -870,7 +751,6 @@ function buildTaskEl(task, col, isDoneCol, sourceTitle) {
     content.appendChild(subEl);
   }
 
-  // Progress row
   const progressRow = document.createElement('div');
   progressRow.className = 'progress-row';
 
@@ -885,31 +765,19 @@ function buildTaskEl(task, col, isDoneCol, sourceTitle) {
   num.className = 'progress-num';
   num.textContent = task.progress + '%';
   num.title = '点击输入进度';
-  num.onclick = () => {
-    inputProgress(task);
-    saveData();
-    renderBoard();
-  };
+  if (!readonly) num.onclick = () => { inputProgress(task); saveData(); renderBoard(); };
 
   const minus = document.createElement('button');
   minus.className = 'p-btn';
   minus.textContent = '−';
   minus.title = '进度 -5%';
-  minus.onclick = () => {
-    adjustProgress(task, -5);
-    saveData();
-    renderBoard();
-  };
+  if (!readonly) minus.onclick = () => { adjustProgress(task, -5); saveData(); renderBoard(); };
 
   const plus = document.createElement('button');
   plus.className = 'p-btn';
   plus.textContent = '+';
   plus.title = '进度 +5%';
-  plus.onclick = () => {
-    adjustProgress(task, 5);
-    saveData();
-    renderBoard();
-  };
+  if (!readonly) plus.onclick = () => { adjustProgress(task, 5); saveData(); renderBoard(); };
 
   progressRow.appendChild(bar);
   progressRow.appendChild(num);
@@ -917,24 +785,25 @@ function buildTaskEl(task, col, isDoneCol, sourceTitle) {
   progressRow.appendChild(plus);
   content.appendChild(progressRow);
 
-  const delBtn = document.createElement('button');
-  delBtn.className = 'delete-btn';
-  delBtn.textContent = '×';
-  delBtn.title = '删除任务';
-  delBtn.onclick = () => {
-    const idx = col.tasks.indexOf(task);
-    if (idx >= 0) col.tasks.splice(idx, 1);
-    saveData();
-    renderBoard();
-  };
+  if (!readonly) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'delete-btn';
+    delBtn.textContent = '×';
+    delBtn.title = '删除任务';
+    delBtn.onclick = () => {
+      const idx = col.tasks.indexOf(task);
+      if (idx >= 0) col.tasks.splice(idx, 1);
+      saveData();
+      renderBoard();
+    };
+    taskEl.appendChild(delBtn);
+  }
 
   taskEl.appendChild(checkbox);
   taskEl.appendChild(content);
-  taskEl.appendChild(delBtn);
   return taskEl;
 }
 
-// 构建新增任务区域
 function buildAddArea(col) {
   const addArea = document.createElement('div');
   addArea.className = 'add-task';
@@ -1001,115 +870,373 @@ function buildAddArea(col) {
   return addArea;
 }
 
-function renderBoard() {
-  const board = document.getElementById('board');
-  board.innerHTML = '';
-  let totalDone = 0, totalAll = 0, totalDoing = 0, sumProgress = 0;
+// ---- 分类列管理：改名 / 删除 ----
+function renameColumn(col) {
+  const name = prompt('修改分类名称：', col.title);
+  if (name === null) return;
+  const v = name.trim();
+  if (!v) { alert('分类名称不能为空'); return; }
+  col.title = v;
+  saveData();
+  renderBoard();
+}
 
-  // 收集所有“已完成”任务（连同其来源分类），用于在独立列中统一展示
-  const doneItems = [];
-  COLUMNS.forEach(col => {
-    col.tasks.forEach(task => {
-      if (task.status === 'done') doneItems.push({ task, col });
+function deleteColumn(col) {
+  const total = col.tasks.length;
+  if (COLUMNS.length <= 1) { alert('至少保留一个分类，不能删除'); return; }
+  const msg = total > 0
+    ? `分类「${col.title}」下有 ${total} 个任务（含已完成），删除后将一并清除，确定删除？`
+    : `确定删除分类「${col.title}」？`;
+  if (!confirm(msg)) return;
+  const idx = COLUMNS.indexOf(col);
+  if (idx >= 0) COLUMNS.splice(idx, 1);
+  saveData();
+  renderBoard();
+}
+
+function addColumn() {
+  const name = prompt('新分类名称：');
+  if (name === null) return;
+  const v = name.trim();
+  if (!v) { alert('分类名称不能为空'); return; }
+  if (COLUMNS.some(c => c.title === v)) { alert('已存在同名分类'); return; }
+  COLUMNS.push({ id: newId(), title: v, color: PALETTE[COLUMNS.length % PALETTE.length], tasks: [] });
+  saveData();
+  renderBoard();
+}
+
+function updateHeaderStats(cols) {
+  let totalDone = 0, totalAll = 0, totalDoing = 0, sumProgress = 0;
+  cols.forEach(col => {
+    col.tasks.forEach(t => {
+      totalAll++;
+      sumProgress += t.progress;
+      if (t.status === 'done') totalDone++;
+      else if (t.status === 'doing') totalDoing++;
     });
   });
-  doneItems.sort((a, b) => b.task.progress - a.task.progress);
+  $('doneCount').textContent = totalDone;
+  $('totalCount').textContent = totalAll;
+  const todoCount = totalAll - totalDone - totalDoing;
+  $('statusSummary').textContent = `待办 ${todoCount} · 进行中 ${totalDoing} · 已完成 ${totalDone}`;
+  const overall = totalAll > 0 ? Math.round(sumProgress / totalAll) : 0;
+  $('overallPct').textContent = overall + '%';
+  $('progressFill').style.width = overall + '%';
+}
 
-  // ---- 渲染 5 个源分类列（仅显示待办/进行中任务）----
-  COLUMNS.forEach((col) => {
+function renderBoard() {
+  const readonly = !!previewUid;
+  const cols = previewUid ? normalizeColumns(getBoard(previewUid) || []) : COLUMNS;
+  const board = $('board');
+  board.innerHTML = '';
+
+  cols.forEach(col => {
     const doneInCol = col.tasks.filter(t => t.status === 'done').length;
     const activeTasks = col.tasks.filter(t => t.status !== 'done').slice().sort((a, b) => b.progress - a.progress);
-    totalDone += doneInCol;
-    totalAll += col.tasks.length;
-    totalDoing += col.tasks.filter(t => t.status === 'doing').length;
-    sumProgress += col.tasks.reduce((a, t) => a + t.progress, 0);
     const colProgress = col.tasks.length ? Math.round(col.tasks.reduce((a, t) => a + t.progress, 0) / col.tasks.length) : 0;
 
     const colEl = document.createElement('div');
-    colEl.className = `column ${col.cls}`;
+    colEl.className = 'column';
 
     const header = document.createElement('div');
     header.className = 'column-header';
-    header.innerHTML = `
-      <div class="header-top"><span>${col.title}</span><span class="count">${activeTasks.length} 进行中 · 已完成 ${doneInCol}</span></div>
-      <div class="col-bar"><div class="col-fill" style="width:${colProgress}%"></div></div>`;
+    header.style.background = col.color || PALETTE[0];
+
+    const headerTop = document.createElement('div');
+    headerTop.className = 'header-top';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = col.title;
+
+    const rightBox = document.createElement('span');
+    rightBox.style.display = 'inline-flex';
+    rightBox.style.alignItems = 'center';
+    rightBox.style.gap = '6px';
+
+    if (!readonly) {
+      const tools = document.createElement('span');
+      tools.className = 'col-tools';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'col-tool';
+      editBtn.textContent = '✎';
+      editBtn.title = '重命名分类';
+      editBtn.onclick = () => renameColumn(col);
+      const delBtn = document.createElement('button');
+      delBtn.className = 'col-tool';
+      delBtn.textContent = '✕';
+      delBtn.title = '删除分类';
+      delBtn.onclick = () => deleteColumn(col);
+      tools.appendChild(editBtn);
+      tools.appendChild(delBtn);
+      rightBox.appendChild(tools);
+    }
+
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = `${activeTasks.length} 进行中 · 已完成 ${doneInCol}`;
+    rightBox.appendChild(count);
+
+    headerTop.appendChild(nameSpan);
+    headerTop.appendChild(rightBox);
+
+    const colBar = document.createElement('div');
+    colBar.className = 'col-bar';
+    const colFill = document.createElement('div');
+    colFill.className = 'col-fill';
+    colFill.style.width = colProgress + '%';
+    colBar.appendChild(colFill);
+
+    header.appendChild(headerTop);
+    header.appendChild(colBar);
     colEl.appendChild(header);
 
     const list = document.createElement('div');
     list.className = 'task-list';
-
     if (activeTasks.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty-hint';
       empty.textContent = doneInCol > 0 ? '进行中任务已全部完成 ✓' : '本类暂无进行中任务';
       list.appendChild(empty);
     } else {
-      activeTasks.forEach((task) => {
-        list.appendChild(buildTaskEl(task, col, false, null));
-      });
+      activeTasks.forEach(task => list.appendChild(buildTaskEl(task, col, readonly)));
     }
     colEl.appendChild(list);
-    colEl.appendChild(buildAddArea(col));
+
+    if (!readonly) colEl.appendChild(buildAddArea(col));
     board.appendChild(colEl);
   });
 
-  // ---- 渲染“六、近期已完成任务”收集列 ----
-  const doneColEl = document.createElement('div');
-  doneColEl.className = 'column col-done';
+  if (!readonly) {
+    const addCol = document.createElement('div');
+    addCol.className = 'add-col';
+    addCol.textContent = '＋ 新增分类';
+    addCol.title = '添加一个任务分类';
+    addCol.onclick = addColumn;
+    board.appendChild(addCol);
+  }
 
-  const doneHeader = document.createElement('div');
-  doneHeader.className = 'column-header';
-  doneHeader.innerHTML = `
-    <div class="header-top"><span>六、近期已完成任务</span><span class="count">${doneItems.length} 项</span></div>
-    <div class="col-bar"><div class="col-fill" style="width:${doneItems.length ? 100 : 0}%"></div></div>`;
-  doneColEl.appendChild(doneHeader);
+  updateHeaderStats(cols);
 
-  const doneList = document.createElement('div');
-  doneList.className = 'task-list';
-  if (doneItems.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-hint';
-    empty.textContent = '暂无已完成任务';
-    doneList.appendChild(empty);
+  // 只读预览横幅
+  const banner = $('previewBanner');
+  if (previewUid) {
+    $('previewText').textContent = `正在查看 工号 ${previewUid} 的看板（只读）`;
+    banner.style.display = 'flex';
   } else {
-    doneItems.forEach(({ task, col }) => {
-      doneList.appendChild(buildTaskEl(task, col, true, col.title));
+    banner.style.display = 'none';
+  }
+}
+
+// ================= 已完成统计看板 =================
+function renderDoneView() {
+  const cols = COLUMNS;
+  const allTasks = [];
+  cols.forEach(col => col.tasks.forEach(t => allTasks.push({ task: t, col })));
+  const doneItems = allTasks.filter(x => x.task.status === 'done');
+  const totalAll = allTasks.length;
+  const totalDoing = allTasks.filter(x => x.task.status === 'doing').length;
+  const donePct = totalAll ? Math.round(doneItems.length / totalAll * 100) : 0;
+
+  // 1) 汇总统计卡
+  const cards = [
+    { num: totalAll, lbl: '任务总数' },
+    { num: totalDoing, lbl: '进行中', cls: 'hl2' },
+    { num: doneItems.length, lbl: '已完成', cls: 'hl' },
+    { num: donePct + '%', lbl: '总完成率', cls: 'hl' },
+    { num: totalAll - doneItems.length - totalDoing, lbl: '待办' },
+  ];
+  $('doneStatCards').innerHTML = cards.map(c =>
+    `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+  ).join('');
+
+  // 2) 各分类完成占比（横向条形图）
+  let barsHtml = '<h3>各分类完成情况</h3>';
+  if (doneItems.length === 0) {
+    barsHtml += '<div class="empty-hint" style="border:none">暂无已完成任务</div>';
+  } else {
+    cols.forEach(col => {
+      const doneN = col.tasks.filter(t => t.status === 'done').length;
+      const pct = doneItems.length ? Math.round(doneN / doneItems.length * 100) : 0;
+      const doneRate = col.tasks.length ? Math.round(doneN / col.tasks.length * 100) : 0;
+      barsHtml += `<div class="bar-line">
+        <span class="bar-name" title="${esc(col.title)}">${esc(col.title)}</span>
+        <div class="bar-track"><div class="bar-fillv" style="width:${pct}%"></div></div>
+        <span class="bar-val">完成 ${doneN}/${col.tasks.length} · 占比 ${pct}% · 完成率 ${doneRate}%</span>
+      </div>`;
     });
   }
-  doneColEl.appendChild(doneList);
-  board.appendChild(doneColEl);
+  $('doneBars').innerHTML = barsHtml;
 
-  // Update overall progress
-  document.getElementById('doneCount').textContent = totalDone;
-  document.getElementById('totalCount').textContent = totalAll;
-  const todoCount = totalAll - totalDone - totalDoing;
-  document.getElementById('statusSummary').textContent = `待办 ${todoCount} · 进行中 ${totalDoing} · 已完成 ${totalDone}`;
-  const overall = totalAll > 0 ? Math.round(sumProgress / totalAll) : 0;
-  document.getElementById('overallPct').textContent = overall + '%';
-  document.getElementById('progressFill').style.width = overall + '%';
+  // 3) 已完成任务看板（按源分类列分区，按完成时间倒序）
+  const doneBoard = $('doneBoard');
+  doneBoard.innerHTML = '';
+  let shown = 0;
+  cols.forEach(col => {
+    const doneTasks = col.tasks.filter(t => t.status === 'done').slice().sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+    if (!doneTasks.length && !col.tasks.length) return;
+    shown += doneTasks.length;
+
+    const colEl = document.createElement('div');
+    colEl.className = 'column';
+
+    const header = document.createElement('div');
+    header.className = 'column-header';
+    header.style.background = col.color || PALETTE[0];
+    header.innerHTML = `<div class="header-top"><span>${esc(col.title)}</span>
+      <span class="done-count-chip">${doneTasks.length} 项 · ${doneItems.length ? Math.round(doneTasks.length / doneItems.length * 100) : 0}%</span></div>
+      <div class="col-bar"><div class="col-fill" style="width:${doneTasks.length ? 100 : 0}%"></div></div>`;
+    colEl.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'done-col-list';
+    if (!doneTasks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-hint';
+      empty.textContent = '本分类暂无已完成';
+      list.appendChild(empty);
+    } else {
+      doneTasks.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'done-card';
+        card.innerHTML = `<div class="t">${esc(t.title)}</div>
+          <div class="meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</div>`;
+        list.appendChild(card);
+      });
+    }
+    colEl.appendChild(list);
+    doneBoard.appendChild(colEl);
+  });
+
+  if (!shown) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-hint';
+    empty.style.margin = '0 auto';
+    empty.style.maxWidth = '400px';
+    empty.textContent = '还没有已完成的任务，去任务看板勾选完成吧';
+    doneBoard.appendChild(empty);
+  }
+
+  updateHeaderStats(cols);
 }
 
-// ===== Date =====
-function setDate() {
-  const days = ['日','一','二','三','四','五','六'];
-  const now = new Date();
-  const str = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 星期${days[now.getDay()]}`;
-  document.getElementById('todayDate').textContent = str;
+// ================= 管理后台 =================
+function boardStatsOf(id) {
+  const cols = getBoard(id);
+  if (!cols) return { total: 0, done: 0 };
+  let total = 0, done = 0;
+  cols.forEach(c => (c.tasks || []).forEach(t => { total++; if (t.status === 'done') done++; }));
+  return { total, done };
 }
 
-// ===== 导出 / 导入（换设备与备份）=====
+function renderAdminView() {
+  const users = loadUsers();
+  const list = Object.values(users).sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
+  const now = Date.now();
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+  let todayActive = 0, weekActive = 0, totalTasks = 0, totalDone = 0;
+  list.forEach(u => {
+    if ((u.lastActive || 0) >= today0.getTime()) todayActive++;
+    if ((u.lastActive || 0) >= now - 7 * 86400000) weekActive++;
+    const st = boardStatsOf(u.uid);
+    totalTasks += st.total;
+    totalDone += st.done;
+  });
+
+  const cards = [
+    { num: list.length, lbl: '注册人数' },
+    { num: todayActive, lbl: '今日活跃', cls: 'hl2' },
+    { num: weekActive, lbl: '7日内活跃' },
+    { num: totalTasks, lbl: '全部任务数' },
+    { num: totalDone, lbl: '全部已完成', cls: 'hl' },
+  ];
+  $('adminStatCards').innerHTML = cards.map(c =>
+    `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+  ).join('');
+
+  const table = $('adminTable');
+  table.innerHTML = '';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>工号</th><th>角色</th><th>注册时间</th><th>最近活跃</th><th>登录次数</th><th>操作次数</th><th>任务（完成/总）</th><th>操作</th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  list.forEach(u => {
+    const st = boardStatsOf(u.uid);
+    const tr = document.createElement('tr');
+    const cells = [
+      `<b>${esc(u.uid)}</b>`,
+      u.isAdmin ? '<span class="role-tag">管理员</span>' : '成员',
+      fmtDate(u.createdAt),
+      u.lastActive ? fmtDate(u.lastActive) : '—',
+      String(u.loginCount || 0),
+      String(u.actions || 0),
+      `${st.done} / ${st.total}`,
+    ];
+    cells.forEach(html => {
+      const td = document.createElement('td');
+      td.innerHTML = html;
+      tr.appendChild(td);
+    });
+    const tdBtn = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.className = 'view-btn';
+    btn.textContent = '查看看板';
+    btn.onclick = () => previewUser(u.uid);
+    tdBtn.appendChild(btn);
+    tr.appendChild(tdBtn);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  $('progressBox').style.display = 'none';
+}
+
+function previewUser(id) {
+  previewUid = id;
+  $('board').style.display = 'grid';
+  $('doneView').style.display = 'none';
+  $('adminView').style.display = 'none';
+  $('progressBox').style.display = '';
+  setNavActive('');
+  renderBoard();
+}
+
+function backToAdmin() {
+  previewUid = null;
+  $('previewBanner').style.display = 'none';
+  switchView('admin');
+}
+
+// ================= 视图切换 =================
+function setNavActive(v) {
+  $('navBoard').className = 'nav-btn' + (v === 'board' ? ' active' : '');
+  $('navDone').className = 'nav-btn' + (v === 'done' ? ' active' : '');
+  $('navAdmin').className = 'nav-btn' + (v === 'admin' ? ' active' : '');
+}
+
+function switchView(v) {
+  previewUid = null;
+  $('previewBanner').style.display = 'none';
+  $('board').style.display = v === 'board' ? 'grid' : 'none';
+  $('doneView').style.display = v === 'done' ? 'block' : 'none';
+  $('adminView').style.display = v === 'admin' ? 'block' : 'none';
+  $('progressBox').style.display = v === 'admin' ? 'none' : '';
+  setNavActive(v);
+  if (v === 'board') renderBoard();
+  if (v === 'done') renderDoneView();
+  if (v === 'admin') renderAdminView();
+}
+
+// ================= 导出 / 导入 =================
 function exportData() {
+  if (!currentUser) return;
   const payload = {
-    type: 'work-board',
-    exportedAt: new Date().toISOString(),
-    data: COLUMNS.map(col => ({ ...col, tasks: col.tasks.map(t => normalizeTask(t)) }))
+    type: 'work-board', uid: currentUser.uid, exportedAt: new Date().toISOString(),
+    data: COLUMNS.map(col => ({ ...col, tasks: col.tasks.map(normalizeTask) })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `工作看板备份_${stamp}.json`;
+  a.download = `工作看板备份_${currentUser.uid}_${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
   showNotice('已导出备份文件，可保存到手机或网盘');
@@ -1121,15 +1248,12 @@ function importData(file) {
     try {
       const parsed = JSON.parse(reader.result);
       const incoming = parsed.data || parsed;
-      if (!Array.isArray(incoming) || incoming.length !== COLUMNS.length) {
-        alert('文件格式不正确：列数不匹配，导入已取消');
+      if (!Array.isArray(incoming) || !incoming.length) {
+        alert('文件格式不正确：不是有效的看板备份');
         return;
       }
       if (!confirm('导入将覆盖当前看板内容，确定继续？建议先点"导出备份"。')) return;
-      applyData(incoming);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(COLUMNS));
-      localStorage.setItem('work_board_migrated_v3', '1');
-      lastSyncedAt = Date.now();
+      COLUMNS = normalizeColumns(incoming);
       saveData();
       renderBoard();
       showNotice('已从备份恢复看板');
@@ -1140,19 +1264,68 @@ function importData(file) {
   reader.readAsText(file);
 }
 
-// ===== Init =====
-showFileModeBanner();
-initData().then(() => {
+// ================= 初始化 =================
+function setDate() {
+  const days = ['日', '一', '二', '三', '四', '五', '六'];
+  const now = new Date();
+  $('todayDate').textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${days[now.getDay()]}`;
+}
+
+function init() {
   setDate();
-  renderBoard();
-  setInterval(pollSync, 5000);
-  const eb = document.getElementById('exportBtn');
-  const ib = document.getElementById('importBtn');
-  const iff = document.getElementById('importFile');
-  if (eb) eb.onclick = exportData;
-  if (ib) ib.onclick = () => iff && iff.click();
-  if (iff) iff.onchange = (e) => { if (e.target.files && e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; };
-});
+
+  // 首次使用：内置管理员 110314（初始密码 110314，请尽快修改）
+  const users = loadUsers();
+  if (!Object.keys(users).length) {
+    users[ADMIN_UID] = {
+      uid: ADMIN_UID, hash: hashPass(ADMIN_UID), createdAt: Date.now(),
+      lastActive: 0, loginCount: 0, actions: 0, isAdmin: true,
+    };
+    saveUsers(users);
+    if (!getBoard(ADMIN_UID)) setBoard(ADMIN_UID, legacyBoard() || defaultColumns());
+  }
+
+  // 事件绑定
+  $('tabLogin').onclick = () => switchAuthTab('login');
+  $('tabReg').onclick = () => switchAuthTab('reg');
+  $('doLogin').onclick = tryLogin;
+  $('doReg').onclick = tryRegister;
+  $('loginUid').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+  $('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+  $('regUid').addEventListener('keydown', e => { if (e.key === 'Enter') tryRegister(); });
+  $('regPass').addEventListener('keydown', e => { if (e.key === 'Enter') tryRegister(); });
+  $('regPass2').addEventListener('keydown', e => { if (e.key === 'Enter') tryRegister(); });
+
+  $('navBoard').onclick = () => switchView('board');
+  $('navDone').onclick = () => switchView('done');
+  $('navAdmin').onclick = () => switchView('admin');
+  $('logoutBtn').onclick = doLogout;
+  $('chgPwdBtn').onclick = changePassword;
+  $('previewBack').onclick = backToAdmin;
+
+  $('exportBtn').onclick = exportData;
+  $('importBtn').onclick = () => $('importFile').click();
+  $('importFile').onchange = (e) => {
+    if (e.target.files && e.target.files[0]) importData(e.target.files[0]);
+    e.target.value = '';
+  };
+
+  // 自动登录（会话仍有效时）
+  const sid = localStorage.getItem(SESSION_KEY);
+  if (sid && users[sid]) doLogin(sid, true);
+}
+
+// 调试/自动化测试钩子（无敏感信息）
+if (typeof globalThis !== 'undefined') {
+  globalThis.__WB = {
+    getCOLUMNS: () => COLUMNS,
+    addColumn, renameColumn, deleteColumn,
+    switchView, tryLogin, tryRegister, doLogout, changePassword,
+    loadUsers, previewUser, backToAdmin,
+  };
+}
+
+init();
 </script>
 </body>
 </html>
