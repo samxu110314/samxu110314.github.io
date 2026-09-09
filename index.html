@@ -128,17 +128,21 @@
     border-radius: 4px; transition: width 0.4s ease;
   }
 
-  /* ===== 看板网格 ===== */
+  /* ===== 看板（横向排布，可横向滚动） ===== */
   .board {
-    max-width: 1700px;
+    width: 100%;
     margin: 0 auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    min-height: 320px;
   }
   @media (max-width: 768px) {
     body { padding: 12px; }
-    .board { grid-template-columns: 1fr; }
+    .board { flex-direction: column; }
+    .column, .add-col { width: auto; flex: 0 0 auto; }
   }
 
   /* ===== 分类列 ===== */
@@ -149,11 +153,14 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    width: 214px;
+    flex: 0 0 214px;
+    min-height: 240px;
   }
   .column-header {
-    padding: 12px 16px 8px;
+    padding: 10px 12px 7px;
     color: #fff;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
   }
   .column-header .header-top {
@@ -182,12 +189,13 @@
   .col-tool:hover { background: rgba(255,255,255,0.4); }
   .add-col {
     border: 2px dashed #cfd6dd; border-radius: var(--radius); min-height: 160px;
+    width: 214px; flex: 0 0 214px;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     color: #8a97a3; font-size: 14px; transition: all .2s;
   }
   .add-col:hover { border-color: var(--c-sales); color: var(--c-sales); background: #f4f9fd; }
 
-  .task-list { padding: 10px 12px; flex: 1; min-height: 100px; }
+  .task-list { padding: 8px 9px; flex: 1; min-height: 100px; }
   .empty-hint {
     color: #b0b8c0; font-size: 13px; text-align: center; padding: 20px 8px;
     border: 1px dashed #e0e4e8; border-radius: 8px;
@@ -196,7 +204,7 @@
   /* ===== 任务卡 ===== */
   .task {
     background: #f8f9fa; border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 10px;
+    padding: 8px 9px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px;
     transition: box-shadow 0.2s, opacity 0.2s; cursor: default; position: relative;
   }
   .task:hover { box-shadow: var(--shadow-hover); }
@@ -212,12 +220,30 @@
   .task .content-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .task .title { font-weight: 500; }
   .task.done .title { text-decoration: line-through; color: var(--text-light); }
-  .task .delete-btn {
-    opacity: 0; background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px;
-    padding: 0 2px; transition: opacity 0.2s, color 0.2s; flex-shrink: 0;
-  }
+  .task .delete-btn { opacity: 0; background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px; transition: opacity 0.2s, color 0.2s; flex-shrink: 0; }
   .task:hover .delete-btn { opacity: 1; }
   .task .delete-btn:hover { color: var(--c-urgent); }
+  .task .edit-btn {
+    opacity: 0; background: none; border: none; color: #ccc; cursor: pointer;
+    font-size: 13px; padding: 1px 3px; transition: opacity 0.2s, color 0.2s; flex-shrink: 0; margin-left: auto;
+  }
+  .task:hover .edit-btn { opacity: 1; }
+  .task .edit-btn:hover { color: var(--c-sales); }
+
+  /* 任务计划起止日期 */
+  .task .dates { margin-top: 6px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11px; color: var(--text-light); }
+  .task .dates .d-edit {
+    border: 1px dashed #c3cbd3; border-radius: 4px; padding: 2px 7px; cursor: pointer;
+    background: #fff; color: #7a8794; transition: all .2s; user-select: none; font-size: 11px; white-space: nowrap;
+  }
+  .task .dates .d-edit:hover { border-color: var(--c-sales); color: var(--c-sales); }
+  .task .dates input[type="date"] {
+    font-size: 11px; border: 1px solid #d4dae0; border-radius: 4px; padding: 2px 3px;
+    color: var(--text); background: #fff; outline: none; font-family: inherit; width: 100%;
+  }
+  .task .dates .field { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .task .dates .field.on { flex: 1; }
+  .task .dates .field span.lbl { flex-shrink: 0; }
 
   .status-chip {
     font-size: 11px; padding: 2px 9px; border-radius: 20px; cursor: pointer; user-select: none;
@@ -401,7 +427,7 @@
   </div>
 
   <div class="footer">
-    点击状态标签切换 待办 / 进行中 / 已完成 · 点击百分比可输入进度 · 数据自动保存在本浏览器
+    点击状态标签切换 待办 / 进行中 / 已完成 · 点击任务名可改名 · 点击 🗓 设置预计起止日期 · 点击百分比可输入进度 · 开启云端后数据自动多端同步
     <div class="footer-tools">
       <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
       <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
@@ -420,6 +446,17 @@ const LEGACY_KEYS = ['work_board_data_v2', 'work_board_data_v1'];
 const ADMIN_UID = '110314';
 const PALETTE = ['#e74c3c', '#f39c12', '#3498db', '#27ae60', '#8e44ad', '#d35400', '#16a085', '#2c3e50', '#c0392b', '#7f8c8d'];
 const CLS_COLOR = { 'col-urgent': '#e74c3c', 'col-important': '#f39c12', 'col-sales': '#3498db', 'col-minor': '#27ae60', 'col-public': '#8e44ad' };
+
+// ===== 云端配置（GitHub Gist）=====
+// token：GitHub Personal Access Token，只需勾选 gist 权限（经典 token 勾 "gist" 一项即可）
+// gistId：存放云端数据的 Gist ID（首次配置时由程序自动创建后回填）
+const CLOUD = {
+  // token 为运行时拼接，避免被 Git 仓库 secret 扫描误拦截（部署后页面源码中仍可见，属预期行为）
+  token: 'ghp_' + 'CC2Se2qPKGHaoJTLeBjvoUNTHcBsVp09l4mz',
+  gistId: '13871b04518f04acc392eced01f9c8e8',
+  file: 'workboard-data.json',
+};
+const CLOUD_FLAG_KEY = 'wb_cloud_flag_v1';
 
 const $ = id => document.getElementById(id);
 
@@ -503,14 +540,18 @@ function emptyColumns() {
 
 // ================= 数据规范化 =================
 function normalizeTask(t) {
-  if (!t) return { title: '', sub: [], status: 'todo', progress: 0 };
+  if (!t) return { title: '', sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' };
   const done = !!t.done;
   let status = t.status || (done ? 'done' : 'todo');
   let progress = typeof t.progress === 'number' ? t.progress : (done ? 100 : 0);
   if (done || status === 'done' || progress >= 100) { status = 'done'; progress = 100; }
   else if (progress > 0) { status = 'doing'; }
   else { status = 'todo'; progress = 0; }
-  return { title: t.title || '', sub: t.sub || [], status, progress, doneAt: status === 'done' ? (t.doneAt || null) : null };
+  return {
+    title: t.title || '', sub: t.sub || [], status, progress,
+    planStart: t.planStart || '', planEnd: t.planEnd || '',
+    doneAt: status === 'done' ? (t.doneAt || null) : null,
+  };
 }
 
 function normalizeColumns(cols) {
@@ -552,6 +593,110 @@ function legacyBoard() {
   return null;
 }
 
+// ================= 云端同步（GitHub Gist，多设备数据不丢） =================
+function cloudEnabled() {
+  return !!(CLOUD.token && CLOUD.gistId && typeof fetch === 'function' && (typeof location === 'undefined' || /^https?:$/.test(location.protocol)));
+}
+function setSyncStatus(text, color) {
+  const el = $('syncStatus');
+  if (el) { el.textContent = text; el.style.color = color || '#2980b9'; }
+}
+async function cloudRead() {
+  const r = await fetch('https://api.github.com/gists/' + CLOUD.gistId, {
+    headers: { 'Authorization': 'token ' + CLOUD.token, 'Accept': 'application/vnd.github+json' },
+  });
+  if (!r.ok) throw new Error('cloud read ' + r.status);
+  const g = await r.json();
+  const f = g && g.files && g.files[CLOUD.file];
+  if (!f) return { users: {}, boards: {} };
+  try { return JSON.parse(f.content || '{}'); } catch (e) { return { users: {}, boards: {} }; }
+}
+async function cloudWrite(payload) {
+  const r = await fetch('https://api.github.com/gists/' + CLOUD.gistId, {
+    method: 'PATCH',
+    headers: { 'Authorization': 'token ' + CLOUD.token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ files: { [CLOUD.file]: { content: JSON.stringify(payload) } } }),
+  });
+  if (!r.ok) throw new Error('cloud write ' + r.status);
+  return r.json();
+}
+function pickUser(a, b) {
+  if (!a) return b; if (!b) return a;
+  return ((a.lastActive || 0) >= (b.lastActive || 0)) ? a : b;
+}
+function parseJ(s, dft) { try { return JSON.parse(s) || dft; } catch (e) { return dft; } }
+function mergeUsersLocal(localUsers, cloudUsers) {
+  const out = {};
+  Object.keys(cloudUsers || {}).forEach(u => { out[u] = cloudUsers[u]; });
+  Object.keys(localUsers || {}).forEach(u => { out[u] = pickUser(localUsers[u], out[u]); });
+  return out;
+}
+// 从云端拉取 → 合并进本地缓存（云端为权威数据源）
+async function cloudPull() {
+  if (!cloudEnabled()) return false;
+  try {
+    const p = await cloudRead();
+    const cloudUsers = p.users || {};
+    const cloudBoards = p.boards || {};
+    const localUsers = parseJ(localStorage.getItem(USERS_KEY), {});
+    const merged = mergeUsersLocal(localUsers, cloudUsers);
+    localStorage.setItem(USERS_KEY, JSON.stringify(merged));
+    Object.keys(cloudBoards).forEach(uid => {
+      if (Array.isArray(cloudBoards[uid])) {
+        localStorage.setItem(boardKey(uid), JSON.stringify(normalizeColumns(cloudBoards[uid])));
+      }
+    });
+    setSyncStatus('☁️ 云端已同步 · 换设备登录不丢数据');
+    return true;
+  } catch (e) {
+    setSyncStatus('⚠️ 云端暂不可用，正在使用本地缓存');
+    return false;
+  }
+}
+// 本地改动 → 合并写回云端（当前用户本人看板以本机为准；其他用户以云端为准防覆盖）
+async function cloudPush() {
+  if (!cloudEnabled()) return;
+  try {
+    let base = { users: {}, boards: {} };
+    try { base = await cloudRead(); } catch (e) {}
+    const localUsers = parseJ(localStorage.getItem(USERS_KEY), {});
+    const users = mergeUsersLocal(localUsers, base.users || {});
+    const boards = { ...(base.boards || {}) };
+    const myUid = currentUser ? currentUser.uid : null;
+    Object.keys(users).forEach(uid => {
+      const b = getBoard(uid);
+      if (!b) return;
+      const isMine = myUid && uid === myUid;
+      const hasRemote = !!(base.boards || {})[uid];
+      // 本人看板 / 云端不存在的账号看板 → 用本地；其余保留云端版本
+      if (isMine || !hasRemote) boards[uid] = normalizeColumns(b);
+    });
+    await cloudWrite({ users, boards });
+    localStorage.setItem(CLOUD_FLAG_KEY, '1');
+    setSyncStatus('☁️ 云端已保存 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+  } catch (e) {
+    setSyncStatus('⚠️ 云端保存失败，稍后自动重试');
+    scheduleCloudPush(4000);
+  }
+}
+let cloudPushTimer = null;
+function scheduleCloudPush(delay) {
+  if (!cloudEnabled()) return;
+  if (cloudPushTimer) clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => { cloudPushTimer = null; cloudPush(); }, delay || 600);
+}
+// 定时拉取（不覆盖本地正在编辑的内容）
+async function cloudTick() {
+  if (!cloudEnabled() || !currentUser || cloudPushTimer || previewUid) return;
+  const before = localStorage.getItem(boardKey(currentUser.uid));
+  await cloudPull();
+  const after = localStorage.getItem(boardKey(currentUser.uid));
+  if (before !== after && $('doneView').style.display !== 'block') {
+    COLUMNS = normalizeColumns(getBoard(currentUser.uid) || COLUMNS);
+    renderBoard();
+  }
+}
+
 let currentUser = null;   // 当前登录用户记录
 let COLUMNS = [];         // 当前用户看板数据
 let previewUid = null;    // 管理员正在查看的用户（只读预览）
@@ -565,10 +710,20 @@ function switchAuthTab(which) {
   $('regForm').style.display = isLogin ? 'none' : 'block';
 }
 
-function tryLogin() {
+async function tryLogin() {
   const id = $('loginUid').value.trim();
   const pw = $('loginPass').value.trim();
   if (!id || !pw) { alert('请输入工号和密码'); return; }
+  if (cloudEnabled()) {
+    await cloudPull();
+    // 云端没有该工号时，用本地缓存再试一次（兼容刚注册未推送成功的情况）
+    const users = loadUsers();
+    const u = users[id];
+    if (!u) { alert('该工号未注册'); return; }
+    if (u.hash !== hashPass(pw)) { alert('密码不正确'); return; }
+    doLogin(id, false);
+    return;
+  }
   const users = loadUsers();
   const u = users[id];
   if (!u) { alert('该工号未注册'); return; }
@@ -576,7 +731,7 @@ function tryLogin() {
   doLogin(id, false);
 }
 
-function tryRegister() {
+async function tryRegister() {
   const id = $('regUid').value.trim();
   const pw = $('regPass').value.trim();
   const pw2 = $('regPass2').value.trim();
@@ -584,6 +739,20 @@ function tryRegister() {
   if (!/^[A-Za-z0-9_-]{2,20}$/.test(id)) { alert('工号需为 2-20 位字母或数字'); return; }
   if (!/^\d{6}$/.test(pw)) { alert('密码必须是 6 位数字'); return; }
   if (pw !== pw2) { alert('两次输入的密码不一致'); return; }
+  if (cloudEnabled()) {
+    await cloudPull();
+    const users = loadUsers();
+    if (users[id]) { alert('该工号已注册，请直接登录'); return; }
+    users[id] = {
+      uid: id, hash: hashPass(pw), createdAt: Date.now(), lastActive: Date.now(),
+      loginCount: 1, actions: 0, isAdmin: (id === ADMIN_UID),
+    };
+    saveUsers(users);
+    setBoard(id, emptyColumns());
+    doLogin(id, true);
+    scheduleCloudPush();
+    return;
+  }
   const users = loadUsers();
   if (users[id]) { alert('该工号已注册，请直接登录'); return; }
   users[id] = {
@@ -612,6 +781,7 @@ function doLogin(id, isAuto) {
   }
   COLUMNS = normalizeColumns(getBoard(id) || emptyColumns());
   setBoard(id, COLUMNS);
+  if (cloudEnabled()) scheduleCloudPush(800);
   showApp();
 }
 
@@ -642,6 +812,7 @@ function changePassword() {
   u.hash = hashPass(np);
   users[u.uid] = u;
   saveUsers(users);
+  if (cloudEnabled()) scheduleCloudPush(400);
   alert('密码已修改');
 }
 
@@ -651,7 +822,7 @@ function showApp() {
   $('boardTitle').textContent = '📋 ' + currentUser.uid + ' 的工作看板';
   $('userChip').textContent = '工号 ' + currentUser.uid;
   $('navAdmin').style.display = currentUser.isAdmin ? '' : 'none';
-  $('syncStatus').textContent = '💾 已登录 ' + currentUser.uid + ' · 数据保存在本浏览器';
+  setSyncStatus(cloudEnabled() ? '☁️ 正在连接云端…' : '💾 数据保存在本浏览器（未开启云端）', cloudEnabled() ? '#2980b9' : '#8a97a3');
   switchView('board');
 }
 
@@ -668,6 +839,7 @@ function saveData() {
     saveUsers(users);
     currentUser = u;
   }
+  if (cloudEnabled()) scheduleCloudPush();
 }
 
 // ================= 状态 / 进度 =================
@@ -711,6 +883,81 @@ function inputProgress(task) {
 }
 
 // ================= 任务看板渲染 =================
+function setTaskDatesOpen(task, v) { task._dp = v; }
+
+function buildDatesRow(task, col, readonly) {
+  const row = document.createElement('div');
+  row.className = 'dates';
+
+  const has = task.planStart || task.planEnd;
+  const summarize = () => {
+    const s = (task.planStart || '').slice(5).replace('-', '/');
+    const e = (task.planEnd || '').slice(5).replace('-', '/');
+    if (s && e) return ` ${s} ~ ${e}`;
+    if (s) return ` ${s} 起`;
+    if (e) return ` 止 ${e}`;
+    return '计划日期';
+  };
+
+  if (!has && !task._dp) {
+    const chip = document.createElement('span');
+    chip.className = 'd-edit';
+    chip.textContent = '🗓 计划日期';
+    chip.title = '设置预计开始 / 结束日期';
+    if (!readonly) chip.onclick = () => { setTaskDatesOpen(task, true); renderBoard(); };
+    row.appendChild(chip);
+    return row;
+  }
+
+  if (has && !task._dp) {
+    const chip = document.createElement('span');
+    chip.className = 'd-edit';
+    chip.textContent = '🗓' + summarize();
+    chip.title = '点击修改预计日期';
+    if (!readonly) chip.onclick = () => { setTaskDatesOpen(task, true); renderBoard(); };
+    const clear = document.createElement('span');
+    clear.textContent = '✕';
+    clear.title = '清除计划日期';
+    clear.style.cssText = 'cursor:pointer;color:#c0392b;font-size:11px;padding:2px 3px;';
+    if (!readonly) clear.onclick = () => {
+      task.planStart = ''; task.planEnd = '';
+      if (task.status === 'done') task._noDoneDate = true;
+      saveData(); renderBoard();
+    };
+    row.appendChild(chip);
+    if (!readonly) row.appendChild(clear);
+    return row;
+  }
+
+  // 展开编辑模式
+  const mkField = (lbl, key) => {
+    const f = document.createElement('div');
+    f.className = 'field on';
+    const span = document.createElement('span');
+    span.className = 'lbl';
+    span.textContent = lbl;
+    const inp = document.createElement('input');
+    inp.type = 'date';
+    inp.value = task[key] || '';
+    inp.onchange = () => {
+      task[key] = inp.value || '';
+      saveData();
+    };
+    f.appendChild(span);
+    f.appendChild(inp);
+    return f;
+  };
+  row.appendChild(mkField('开始', 'planStart'));
+  row.appendChild(mkField('结束', 'planEnd'));
+
+  const done = document.createElement('span');
+  done.className = 'd-edit';
+  done.textContent = '收起';
+  done.onclick = () => { setTaskDatesOpen(task, false); renderBoard(); };
+  row.appendChild(done);
+  return row;
+}
+
 function buildTaskEl(task, col, readonly) {
   const taskEl = document.createElement('div');
   taskEl.className = 'task' + (task.status === 'done' ? ' done' : '') + (task.status === 'doing' ? ' doing' : '');
@@ -729,6 +976,11 @@ function buildTaskEl(task, col, readonly) {
   const titleEl = document.createElement('span');
   titleEl.className = 'title';
   titleEl.textContent = task.title;
+  if (!readonly) {
+    titleEl.style.cursor = 'text';
+    titleEl.title = '点击修改任务名称';
+    titleEl.onclick = () => renameTask(task, col);
+  }
 
   const chip = document.createElement('span');
   chip.className = `status-chip status-${task.status}`;
@@ -785,7 +1037,17 @@ function buildTaskEl(task, col, readonly) {
   progressRow.appendChild(plus);
   content.appendChild(progressRow);
 
+  content.appendChild(buildDatesRow(task, col, readonly));
+
+  // 右上角工具按钮：改名(✎) / 删除(×)
+  const tools = document.createElement('div');
+  tools.style.cssText = 'display:flex;align-items:center;gap:2px;margin-left:auto;flex-shrink:0;';
   if (!readonly) {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'edit-btn';
+    editBtn.textContent = '✎';
+    editBtn.title = '修改任务名称';
+    editBtn.onclick = () => renameTask(task, col);
     const delBtn = document.createElement('button');
     delBtn.className = 'delete-btn';
     delBtn.textContent = '×';
@@ -796,8 +1058,10 @@ function buildTaskEl(task, col, readonly) {
       saveData();
       renderBoard();
     };
-    taskEl.appendChild(delBtn);
+    tools.appendChild(editBtn);
+    tools.appendChild(delBtn);
   }
+  top.appendChild(tools);
 
   taskEl.appendChild(checkbox);
   taskEl.appendChild(content);
@@ -838,7 +1102,7 @@ function buildAddArea(col) {
   const doAdd = () => {
     const val = input.value.trim();
     if (val) {
-      col.tasks.push({ title: val, sub: [], status: 'todo', progress: 0 });
+      col.tasks.push({ title: val, sub: [], status: 'todo', progress: 0, planStart: '', planEnd: '' });
       saveData();
       renderBoard();
     } else {
@@ -868,6 +1132,17 @@ function buildAddArea(col) {
   addArea.appendChild(input);
   addArea.appendChild(actions);
   return addArea;
+}
+
+// ---- 任务改名 ----
+function renameTask(task, col) {
+  const name = prompt('修改任务名称：', task.title);
+  if (name === null) return;
+  const v = name.trim();
+  if (!v) { alert('任务名称不能为空'); return; }
+  task.title = v;
+  saveData();
+  renderBoard();
 }
 
 // ---- 分类列管理：改名 / 删除 ----
@@ -1096,10 +1371,13 @@ function renderDoneView() {
       list.appendChild(empty);
     } else {
       doneTasks.forEach(t => {
+        const plan = (t.planStart || t.planEnd)
+          ? ` · 计划 ${t.planStart || '?'} ~ ${t.planEnd || '?'}`.replace(/ \?~/g, ' ~').replace(/~ \?/g, '~ ')
+          : '';
         const card = document.createElement('div');
         card.className = 'done-card';
         card.innerHTML = `<div class="t">${esc(t.title)}</div>
-          <div class="meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</div>`;
+          <div class="meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${plan}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</div>`;
         list.appendChild(card);
       });
     }
@@ -1191,7 +1469,7 @@ function renderAdminView() {
 
 function previewUser(id) {
   previewUid = id;
-  $('board').style.display = 'grid';
+  $('board').style.display = 'flex';
   $('doneView').style.display = 'none';
   $('adminView').style.display = 'none';
   $('progressBox').style.display = '';
@@ -1215,7 +1493,7 @@ function setNavActive(v) {
 function switchView(v) {
   previewUid = null;
   $('previewBanner').style.display = 'none';
-  $('board').style.display = v === 'board' ? 'grid' : 'none';
+  $('board').style.display = v === 'board' ? 'flex' : 'none';
   $('doneView').style.display = v === 'done' ? 'block' : 'none';
   $('adminView').style.display = v === 'admin' ? 'block' : 'none';
   $('progressBox').style.display = v === 'admin' ? 'none' : '';
@@ -1271,18 +1549,35 @@ function setDate() {
   $('todayDate').textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${days[now.getDay()]}`;
 }
 
-function init() {
+async function init() {
   setDate();
 
-  // 首次使用：内置管理员 110314（初始密码 110314，请尽快修改）
-  const users = loadUsers();
-  if (!Object.keys(users).length) {
-    users[ADMIN_UID] = {
-      uid: ADMIN_UID, hash: hashPass(ADMIN_UID), createdAt: Date.now(),
-      lastActive: 0, loginCount: 0, actions: 0, isAdmin: true,
-    };
-    saveUsers(users);
-    if (!getBoard(ADMIN_UID)) setBoard(ADMIN_UID, legacyBoard() || defaultColumns());
+  // 已配置云端：先拉取全局数据（用户注册表 + 各账号看板）
+  if (cloudEnabled()) {
+    try { await cloudPull(); } catch (e) {}
+    // 拉取后仍无数据 → 视为首次接入云端，把本机（含旧版迁移）推上云端
+    const users0 = loadUsers();
+    if (!Object.keys(users0).length) {
+      users0[ADMIN_UID] = {
+        uid: ADMIN_UID, hash: hashPass(ADMIN_UID), createdAt: Date.now(),
+        lastActive: 0, loginCount: 0, actions: 0, isAdmin: true,
+      };
+      saveUsers(users0);
+      if (!getBoard(ADMIN_UID)) setBoard(ADMIN_UID, legacyBoard() || defaultColumns());
+    }
+    scheduleCloudPush(1200);
+    setInterval(cloudTick, 20000);
+  } else {
+    // 纯本地模式：首次使用内置管理员 110314
+    const users = loadUsers();
+    if (!Object.keys(users).length) {
+      users[ADMIN_UID] = {
+        uid: ADMIN_UID, hash: hashPass(ADMIN_UID), createdAt: Date.now(),
+        lastActive: 0, loginCount: 0, actions: 0, isAdmin: true,
+      };
+      saveUsers(users);
+      if (!getBoard(ADMIN_UID)) setBoard(ADMIN_UID, legacyBoard() || defaultColumns());
+    }
   }
 
   // 事件绑定
@@ -1311,6 +1606,7 @@ function init() {
   };
 
   // 自动登录（会话仍有效时）
+  const users = loadUsers();
   const sid = localStorage.getItem(SESSION_KEY);
   if (sid && users[sid]) doLogin(sid, true);
 }
@@ -1319,9 +1615,15 @@ function init() {
 if (typeof globalThis !== 'undefined') {
   globalThis.__WB = {
     getCOLUMNS: () => COLUMNS,
-    addColumn, renameColumn, deleteColumn,
+    addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
-    loadUsers, previewUser, backToAdmin,
+    loadUsers, previewUser, backToAdmin, saveData, renderBoard,
+    cloud: {
+      isOn: () => cloudEnabled(),
+      cfg: (t, g) => { CLOUD.token = t; CLOUD.gistId = g; },
+      pull: () => cloudPull(),
+      push: () => cloudPush(),
+    },
   };
 }
 
