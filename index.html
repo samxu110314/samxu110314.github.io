@@ -223,6 +223,12 @@
     color: #b0b8c0; font-size: 13px; text-align: center; padding: 20px 8px;
     border: 1px dashed #e0e4e8; border-radius: 8px;
   }
+  /* 「近期已完成」归档列：任务所属分类小徽章 */
+  .colchip {
+    display: inline-block; color: #fff; font-size: 10px; line-height: 1.7;
+    padding: 0 8px; border-radius: 9px; margin: 2px 0 3px 2px;
+    white-space: nowrap; max-width: 186px; overflow: hidden; text-overflow: ellipsis;
+  }
 
   /* ===== 任务卡 ===== */
   .task {
@@ -1350,6 +1356,9 @@ function renderBoard() {
     board.appendChild(colEl);
   });
 
+  // 右侧「近期已完成」归档列（放在新增分类按钮之前）
+  board.appendChild(buildRecentColumn(cols));
+
   if (!readonly) {
     const addCol = document.createElement('div');
     addCol.className = 'add-col';
@@ -1370,6 +1379,67 @@ function renderBoard() {
   } else {
     banner.style.display = 'none';
   }
+}
+
+// ================= 近期已完成（主看板右侧归档列） =================
+// 汇总所有分类中 status==='done' 的任务，按完成时间倒序排成一列，保留所属分类徽章
+function buildRecentColumn(cols = COLUMNS) {
+  const items = [];
+  (cols || []).forEach(col => (col.tasks || []).forEach(t => {
+    if (t.status === 'done') items.push({ t, col });
+  }));
+  items.sort((a, b) => (b.t.doneAt || 0) - (a.t.doneAt || 0));
+
+  const colEl = document.createElement('div');
+  colEl.className = 'column done-col';
+
+  const header = document.createElement('div');
+  header.className = 'column-header';
+  header.style.background = '#27ae60';
+  const headerTop = document.createElement('div');
+  headerTop.className = 'header-top';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'col-title';
+  nameSpan.textContent = '近期已完成';
+  nameSpan.title = '已完成任务归档（含所属分类，更多见「已完成看板」）';
+  headerTop.appendChild(nameSpan);
+  const countRow = document.createElement('div');
+  countRow.className = 'count-row';
+  const count = document.createElement('span');
+  count.className = 'count';
+  count.textContent = items.length + ' 项';
+  count.title = count.textContent;
+  countRow.appendChild(count);
+  const colBar = document.createElement('div');
+  colBar.className = 'col-bar';
+  const colFill = document.createElement('div');
+  colFill.className = 'col-fill';
+  colFill.style.width = '100%';
+  colBar.appendChild(colFill);
+  header.appendChild(headerTop);
+  header.appendChild(countRow);
+  header.appendChild(colBar);
+  colEl.appendChild(header);
+
+  const list = document.createElement('div');
+  list.className = 'task-list';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-hint';
+    empty.textContent = '暂无已完成任务';
+    list.appendChild(empty);
+  } else {
+    items.forEach(it => {
+      const tag = document.createElement('div');
+      tag.className = 'colchip';
+      tag.style.background = (it.col && it.col.color) || '#7f8c8d';
+      tag.textContent = it.col ? it.col.title : '已完成';
+      list.appendChild(tag);
+      list.appendChild(buildTaskEl(it.t, it.col, true));
+    });
+  }
+  colEl.appendChild(list);
+  return colEl;
 }
 
 // ================= 近期已完成（主看板下方） =================
@@ -1803,7 +1873,7 @@ if (typeof globalThis !== 'undefined') {
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
-    renderRecentDone, renderAdminDemo, syncAdminDemoToggle,
+    renderRecentDone, buildRecentColumn, renderAdminDemo, syncAdminDemoToggle,
     cloud: {
       isOn: () => cloudEnabled(),
       cfg: (t, g) => { CLOUD.token = t; CLOUD.gistId = g; },
