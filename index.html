@@ -259,20 +259,52 @@
   .task:hover .edit-btn { opacity: 1; }
   .task .edit-btn:hover { color: var(--c-sales); }
 
-  /* 任务计划起止日期 */
+  /* 任务计划起止日期（_月_日 快捷编辑） */
   .task .dates { margin-top: 6px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11px; color: var(--text-light); }
   .task .dates .d-edit {
     border: 1px dashed #c3cbd3; border-radius: 4px; padding: 2px 7px; cursor: pointer;
     background: #fff; color: #7a8794; transition: all .2s; user-select: none; font-size: 11px; white-space: nowrap;
   }
   .task .dates .d-edit:hover { border-color: var(--c-sales); color: var(--c-sales); }
-  .task .dates input[type="date"] {
-    font-size: 11px; border: 1px solid #d4dae0; border-radius: 4px; padding: 2px 3px;
-    color: var(--text); background: #fff; outline: none; font-family: inherit; width: 100%;
+  .task .dates .d-view { white-space: nowrap; }
+  .task .dates.dates-edit { gap: 4px 10px; align-items: flex-start; }
+  .qfield { display: inline-flex; align-items: center; gap: 4px; }
+  .qfield .qlbl { flex-shrink: 0; color: var(--text-light); }
+  .qctl { display: inline-flex; align-items: center; background: #fff; border: 1px solid #dbe1e7; border-radius: 6px; padding: 2px 4px; }
+  .qctl .qbtn {
+    min-width: 20px; height: 20px; border: none; background: transparent; border-radius: 4px; cursor: pointer;
+    font-family: inherit; font-size: 13px; line-height: 1; color: #7f8c8d; display: inline-flex;
+    align-items: center; justify-content: center; padding: 0; transition: all .15s;
   }
-  .task .dates .field { display: flex; align-items: center; gap: 4px; min-width: 0; }
-  .task .dates .field.on { flex: 1; }
-  .task .dates .field span.lbl { flex-shrink: 0; }
+  .qctl .qbtn:hover { background: #edf3f9; color: var(--c-sales); }
+  .qctl .qclr:hover { background: #fdecea; color: #c0392b; }
+  .qctl .qslot {
+    border: none; background: transparent; font-family: inherit; font-size: 12px; font-weight: 600; color: var(--c-sales);
+    cursor: pointer; padding: 1px 2px; min-width: 20px; text-align: center; border-radius: 3px;
+  }
+  .qctl .qslot:hover { background: #e7f1fb; }
+  .qctl .qslot.empty { color: #aab4bd; font-weight: 400; }
+  .qctl .qunit { font-size: 11px; color: var(--text-light); margin: 0 1px; }
+
+  /* 悬停弹出的 月/日 选择层（12个月 · 1-31日） */
+  .plan-pop {
+    position: fixed; z-index: 30000; background: #fff; border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(44,62,80,.16); padding: 8px 10px 10px; display: none;
+    font-size: 12px;
+  }
+  .plan-pop .pp-head { display: flex; align-items: center; justify-content: space-between; color: var(--text-light); margin-bottom: 7px; white-space: nowrap; }
+  .plan-pop .pp-head b { color: var(--text); font-weight: 600; }
+  .plan-pop .pp-x { border: none; background: none; cursor: pointer; color: #aab4bd; font-size: 12px; padding: 0 3px; line-height: 1; }
+  .plan-pop .pp-x:hover { color: #c0392b; }
+  .plan-pop .pp-grid { display: grid; gap: 4px; }
+  .plan-pop .pp-grid.pp-m { grid-template-columns: repeat(4, 40px); }
+  .plan-pop .pp-grid.pp-d { grid-template-columns: repeat(7, 27px); }
+  .plan-pop .pp-opt {
+    border: 1px solid transparent; background: #f4f7fa; border-radius: 5px; cursor: pointer; font-family: inherit;
+    font-size: 12px; color: var(--text); height: 25px; padding: 0 2px; transition: all .12s;
+  }
+  .plan-pop .pp-opt:hover { background: #e3eefb; color: var(--c-sales); border-color: var(--c-sales); }
+  .plan-pop .pp-opt.on { background: var(--c-sales); color: #fff; font-weight: 600; border-color: var(--c-sales); }
 
   .status-chip {
     font-size: 11px; padding: 2px 9px; border-radius: 20px; cursor: pointer; user-select: none;
@@ -531,7 +563,7 @@
   </div>
 
   <div class="footer">
-    点击状态标签切换 待办 / 进行中 / 已完成 · 点击任务名可改名 · 点击 🗓 设置预计起止日期 · 点击百分比可输入进度 · 开启云端后数据自动多端同步
+    点击状态标签切换 待办 / 进行中 / 已完成 · 点击任务名可改名 · 点击 🗓 设置日期（_月_日，鼠标放到 月/日 空格弹出选择，−/+ 任意加减） · 点击百分比可输入进度 · 开启云端后数据自动多端同步
     <div class="footer-tools">
       <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
       <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
@@ -1022,71 +1054,232 @@ function inputProgress(task) {
 // ================= 任务看板渲染 =================
 function setTaskDatesOpen(task, v) { task._dp = v; }
 
+// ---- 日期存取：统一按 YYYY-MM-DD 保存，界面按 “_月_日” 显示/编辑 ----
+function parsePlan(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (m) return { y: +m[1], mo: +m[2], d: +m[3] };
+  m = /^(\d{1,2})-(\d{1,2})$/.exec(s);            // 兼容仅存“月-日”的旧数据
+  if (m) return { y: new Date().getFullYear(), mo: +m[1], d: +m[2] };
+  return null;
+}
+function monthLen(y, mo) { return new Date(y, mo, 0).getDate(); }
+function planStr(p) { return p ? p.y + '-' + pad2(p.mo) + '-' + pad2(p.d) : ''; }
+function fmtPlanMD(v) { const p = parsePlan(v); return p ? p.mo + '月' + p.d + '日' : ''; }
+function todayPlan() { const t = new Date(); return { y: t.getFullYear(), mo: t.getMonth() + 1, d: t.getDate() }; }
+
+// 整日加减：可任意提前 / 推迟（跨月、跨年自动换算）
+function nudgePlan(task, key, delta) {
+  const p = parsePlan(task[key]) || todayPlan();
+  const dt = new Date(p.y, p.mo - 1, p.d + delta);
+  task[key] = dt.getFullYear() + '-' + pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate());
+  saveData(); renderBoard();
+}
+// 设置某任务的 月份(m) 或 日(d)；空日期从当年 1 月 1 日起算
+function setPlanPart(task, key, part, val) {
+  let p = parsePlan(task[key]) || { y: new Date().getFullYear(), mo: 1, d: 1 };
+  if (part === 'm') {
+    p.mo = val;
+    if (p.d > monthLen(p.y, p.mo)) p.d = monthLen(p.y, p.mo);   // 如 2月31日 → 月末
+  } else {
+    p.d = Math.min(val, monthLen(p.y, p.mo));
+  }
+  task[key] = planStr(p);
+  saveData(); renderBoard();
+}
+
+// ---- 悬停/点击弹出的 月(12个) / 日(1-31) 选择层 ----
+let _ppEl = null, _ppTimer = null, _ppSlot = null;
+function ppHide() {
+  clearTimeout(_ppTimer);
+  if (_ppEl) _ppEl.style.display = 'none';
+  _ppSlot = null;
+}
+function ppEnsure() {
+  if (!_ppEl) {
+    _ppEl = document.createElement('div');
+    _ppEl.className = 'plan-pop';
+    document.body.appendChild(_ppEl);
+    _ppEl.addEventListener('mouseenter', () => clearTimeout(_ppTimer));
+    _ppEl.addEventListener('mouseleave', () => { clearTimeout(_ppTimer); _ppTimer = setTimeout(ppHide, 280); });
+    document.addEventListener('mousedown', e => {
+      if (!_ppSlot || !_ppEl || _ppEl.style.display === 'none') return;
+      if (!_ppEl.contains(e.target) && e.target !== _ppSlot) ppHide();
+    }, true);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') ppHide(); });
+    document.addEventListener('scroll', () => ppHide(), true);
+    window.addEventListener('resize', () => ppHide());
+  }
+  return _ppEl;
+}
+function placePop(slot, pop) {
+  const r = slot.getBoundingClientRect();
+  const pw = pop.offsetWidth || 220, ph = pop.offsetHeight || 120;
+  let left = r.left;
+  if (left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pw - 8);
+  let top = r.bottom + 6;
+  if (top + ph > window.innerHeight - 8 && r.top - ph - 6 > 8) top = r.top - ph - 6;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+  pop.style.display = 'block';
+}
+function openPlanPicker(task, key, part, slot) {
+  clearTimeout(_ppTimer);
+  const cur = parsePlan(task[key]);
+  const isM = part === 'm';
+  const pop = ppEnsure();
+  _ppSlot = slot;
+  const fld = key === 'planStart' ? '开始' : '结束';
+  let html = '<div class="pp-head"><b>' + fld + ' · ' + (isM ? '选择月份' : '选择日') + '</b><button type="button" class="pp-x">✕</button></div>';
+  html += '<div class="pp-grid' + (isM ? ' pp-m' : ' pp-d') + '">';
+  const n = isM ? 12 : 31;
+  for (let i = 1; i <= n; i++) {
+    const on = cur && ((isM && cur.mo === i) || (!isM && cur.d === i));
+    html += '<button type="button" class="pp-opt' + (on ? ' on' : '') + '" data-v="' + i + '">' + (isM ? i + '月' : i) + '</button>';
+  }
+  html += '</div>';
+  pop.innerHTML = html;
+  const opts = pop.querySelectorAll('.pp-opt');
+  for (let i = 0; i < opts.length; i++) {
+    opts[i].addEventListener('click', () => {
+      const v = parseInt(opts[i].getAttribute('data-v'), 10);
+      ppHide();
+      setPlanPart(task, key, part, v);
+    });
+  }
+  const x = pop.querySelector('.pp-x');
+  if (x) x.addEventListener('click', ppHide);
+  placePop(slot, pop);
+}
+function bindPlanSlot(slot, task, key, part) {
+  slot.type = 'button';
+  slot.title = (part === 'm' ? '鼠标放到这里 → 弹出 12 个月可选' : '鼠标放到这里 → 可选 1-31 日');
+  slot.addEventListener('mouseenter', () => {
+    clearTimeout(_ppTimer);
+    if (_ppEl && _ppEl.style.display === 'block' && _ppSlot === slot) return;
+    _ppTimer = setTimeout(() => openPlanPicker(task, key, part, slot), 180);
+  });
+  slot.addEventListener('mouseleave', () => {
+    clearTimeout(_ppTimer);
+    if (_ppEl && _ppEl.style.display === 'block' && _ppSlot === slot) {
+      _ppTimer = setTimeout(ppHide, 300);
+    }
+  });
+  slot.addEventListener('click', () => {
+    if (_ppEl && _ppEl.style.display === 'block' && _ppSlot === slot) { ppHide(); return; }
+    openPlanPicker(task, key, part, slot);
+  });
+}
+function buildQuickDate(task, key, lbl) {
+  const wrap = document.createElement('div');
+  wrap.className = 'qfield';
+  const lab = document.createElement('span');
+  lab.className = 'qlbl';
+  lab.textContent = lbl;
+  const ctl = document.createElement('div');
+  ctl.className = 'qctl';
+  const btn = (txt, t, cls, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'qbtn' + (cls ? ' ' + cls : '');
+    b.textContent = txt;
+    b.title = t;
+    b.addEventListener('click', fn);
+    return b;
+  };
+  const minus = btn('−', '提前 1 天（可反复点按任意加减）', '', () => nudgePlan(task, key, -1));
+  const plus = btn('+', '推迟 1 天（可反复点按任意加减）', '', () => nudgePlan(task, key, 1));
+  const mSlot = document.createElement('button');
+  const dSlot = document.createElement('button');
+  const mu = document.createElement('span');
+  mu.className = 'qunit'; mu.textContent = '月';
+  const du = document.createElement('span');
+  du.className = 'qunit'; du.textContent = '日';
+  const p = parsePlan(task[key]);
+  mSlot.type = 'button';
+  dSlot.type = 'button';
+  mSlot.className = 'qslot' + (p ? '' : ' empty');
+  dSlot.className = 'qslot' + (p ? '' : ' empty');
+  mSlot.textContent = p ? p.mo : '＿';
+  dSlot.textContent = p ? p.d : '＿';
+  bindPlanSlot(mSlot, task, key, 'm');
+  bindPlanSlot(dSlot, task, key, 'd');
+  const clr = btn('✕', '清除' + lbl + '日期', 'qclr', () => { task[key] = ''; saveData(); renderBoard(); });
+  ctl.appendChild(minus);
+  ctl.appendChild(mSlot);
+  ctl.appendChild(mu);
+  ctl.appendChild(dSlot);
+  ctl.appendChild(du);
+  ctl.appendChild(plus);
+  ctl.appendChild(clr);
+  wrap.appendChild(lab);
+  wrap.appendChild(ctl);
+  return wrap;
+}
+
 function buildDatesRow(task, col, readonly) {
   const row = document.createElement('div');
   row.className = 'dates';
-
   const has = task.planStart || task.planEnd;
   const summarize = () => {
-    const s = (task.planStart || '').slice(5).replace('-', '/');
-    const e = (task.planEnd || '').slice(5).replace('-', '/');
-    if (s && e) return ` ${s} ~ ${e}`;
-    if (s) return ` ${s} 起`;
-    if (e) return ` 止 ${e}`;
+    const s = fmtPlanMD(task.planStart);
+    const e = fmtPlanMD(task.planEnd);
+    if (s && e) return ' ' + s + ' ~ ' + e;
+    if (s) return ' ' + s + ' 起';
+    if (e) return ' 止 ' + e;
     return '计划日期';
   };
 
+  // 只读展示（近期已完成归档列等）
+  if (readonly) {
+    if (has) {
+      const t = document.createElement('span');
+      t.className = 'd-view';
+      t.textContent = '🗓' + summarize();
+      row.appendChild(t);
+    } else {
+      row.style.display = 'none';
+    }
+    return row;
+  }
+
+  // 未设置日期：显示“🗓 计划日期”入口
   if (!has && !task._dp) {
     const chip = document.createElement('span');
     chip.className = 'd-edit';
     chip.textContent = '🗓 计划日期';
     chip.title = '设置预计开始 / 结束日期';
-    if (!readonly) chip.onclick = () => { setTaskDatesOpen(task, true); renderBoard(); };
+    chip.onclick = () => { setTaskDatesOpen(task, true); renderBoard(); };
     row.appendChild(chip);
     return row;
   }
 
+  // 已设置日期：显示 “🗓 9月10日 ~ 9月15日” 汇总入口
   if (has && !task._dp) {
     const chip = document.createElement('span');
     chip.className = 'd-edit';
     chip.textContent = '🗓' + summarize();
-    chip.title = '点击修改预计日期';
-    if (!readonly) chip.onclick = () => { setTaskDatesOpen(task, true); renderBoard(); };
+    chip.title = '点击展开后，鼠标放到 _月 / _日 上即可快速修改';
+    chip.onclick = () => { setTaskDatesOpen(task, true); renderBoard(); };
+    row.appendChild(chip);
     const clear = document.createElement('span');
     clear.textContent = '✕';
     clear.title = '清除计划日期';
     clear.style.cssText = 'cursor:pointer;color:#c0392b;font-size:11px;padding:2px 3px;';
-    if (!readonly) clear.onclick = () => {
+    clear.onclick = () => {
       task.planStart = ''; task.planEnd = '';
       if (task.status === 'done') task._noDoneDate = true;
       saveData(); renderBoard();
     };
-    row.appendChild(chip);
-    if (!readonly) row.appendChild(clear);
+    row.appendChild(clear);
     return row;
   }
 
-  // 展开编辑模式
-  const mkField = (lbl, key) => {
-    const f = document.createElement('div');
-    f.className = 'field on';
-    const span = document.createElement('span');
-    span.className = 'lbl';
-    span.textContent = lbl;
-    const inp = document.createElement('input');
-    inp.type = 'date';
-    inp.value = task[key] || '';
-    inp.onchange = () => {
-      task[key] = inp.value || '';
-      saveData();
-    };
-    f.appendChild(span);
-    f.appendChild(inp);
-    return f;
-  };
-  row.appendChild(mkField('开始', 'planStart'));
-  row.appendChild(mkField('结束', 'planEnd'));
-
+  // 展开编辑：_月_日 快捷选择 + −/+ 任意加减
+  row.className = 'dates dates-edit';
+  row.appendChild(buildQuickDate(task, 'planStart', '开始'));
+  row.appendChild(buildQuickDate(task, 'planEnd', '结束'));
   const done = document.createElement('span');
   done.className = 'd-edit';
   done.textContent = '收起';
@@ -1606,9 +1799,8 @@ function renderDoneView() {
       list.appendChild(empty);
     } else {
       doneTasks.forEach(t => {
-        const plan = (t.planStart || t.planEnd)
-          ? ` · 计划 ${t.planStart || '?'} ~ ${t.planEnd || '?'}`.replace(/ \?~/g, ' ~').replace(/~ \?/g, '~ ')
-          : '';
+        const pS = fmtPlanMD(t.planStart), pE = fmtPlanMD(t.planEnd);
+        const plan = (pS || pE) ? ' · 计划 ' + (pS ? pS + (pE ? ' ~ ' + pE : '') : '止 ' + pE) : '';
         const card = document.createElement('div');
         card.className = 'done-card';
         card.innerHTML = `<div class="t">${esc(t.title)}</div>
@@ -2009,6 +2201,7 @@ if (typeof globalThis !== 'undefined') {
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
     renderUserTable, userBadge, activeInWindow, activeDayCount,
     dayKey, dayKeyOffset, trackActive, pickUser,
+    parsePlan, fmtPlanMD, nudgePlan, setPlanPart, buildQuickDate, buildDatesRow,
     cloud: {
       isOn: () => cloudEnabled(),
       cfg: (t, g) => { CLOUD.token = t; CLOUD.gistId = g; },
