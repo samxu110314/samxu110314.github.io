@@ -157,6 +157,16 @@
     flex: 0 0 214px;
     min-height: 240px;
   }
+  /* 列拖拽排序 */
+  .column-header { cursor: grab; }
+  .column-header:active { cursor: grabbing; }
+  .column.dragging { opacity: .4; }
+  .column.drop-before { box-shadow: -5px 0 0 0 #e67e22, var(--shadow); }
+  .column.drop-after { box-shadow: 5px 0 0 0 #e67e22, var(--shadow); }
+  @media (max-width: 768px) {
+    .column.drop-before { box-shadow: 0 -5px 0 0 #e67e22, var(--shadow); }
+    .column.drop-after { box-shadow: 0 5px 0 0 #e67e22, var(--shadow); }
+  }
   .column-header {
     padding: 10px 11px 8px;
     color: #fff;
@@ -563,7 +573,7 @@
   </div>
 
   <div class="footer">
-    点击状态标签切换 待办 / 进行中 / 已完成 · 点击任务名可改名 · 点击 🗓 设置日期（_月_日，鼠标放到 月/日 空格弹出选择，−/+ 任意加减） · 点击百分比可输入进度 · 开启云端后数据自动多端同步
+    点击状态标签切换 待办 / 进行中 / 已完成 · 点击任务名可改名 · 点击 🗓 设置日期（_月_日，鼠标放到 月/日 空格弹出选择，−/+ 任意加减） · 点击百分比可输入进度 · 按住列标题拖动可调整分类顺序 · 开启云端后数据自动多端同步
     <div class="footer-tools">
       <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
       <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
@@ -1510,6 +1520,75 @@ function addColumn() {
   renderBoard();
 }
 
+// ================= 列拖拽排序（按住列标题左右拖动） =================
+let colDragId = null;   // 当前拖拽的列 id
+
+function clearDropMarks() {
+  document.querySelectorAll('.column.drop-before, .column.drop-after').forEach(el => {
+    el.classList.remove('drop-before', 'drop-after');
+  });
+}
+
+// 把 dragId 列移动到 targetId 列的前/后；targetId 为空则移到末尾
+function moveColumn(dragId, targetId, before) {
+  const from = COLUMNS.findIndex(c => c.id === dragId);
+  if (from < 0) return false;
+  const [moved] = COLUMNS.splice(from, 1);
+  let to = targetId ? COLUMNS.findIndex(c => c.id === targetId) : COLUMNS.length;
+  if (targetId && to < 0) { COLUMNS.splice(from, 0, moved); return false; }
+  if (targetId && !before) to++;
+  COLUMNS.splice(to, 0, moved);
+  saveData();
+  renderBoard();
+  return true;
+}
+
+// 判断指针在目标列的哪一侧（宽屏看水平位置，窄屏纵向堆叠看垂直位置）
+function isPointerBefore(el, e) {
+  const r = el.getBoundingClientRect();
+  const vertical = window.matchMedia('(max-width: 768px)').matches;
+  return vertical ? (e.clientY - r.top) < r.height / 2 : (e.clientX - r.left) < r.width / 2;
+}
+
+function enableColDrag(colEl, col) {
+  const header = colEl.querySelector(':scope > .column-header');
+  if (!header) return;
+  header.title = '按住可拖动调整本列位置';
+  header.draggable = true;
+
+  header.addEventListener('dragstart', e => {
+    colDragId = col.id;
+    colEl.classList.add('dragging');
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', col.id);
+    } catch (_) {}
+  });
+  header.addEventListener('dragend', () => {
+    colDragId = null;
+    colEl.classList.remove('dragging');
+    clearDropMarks();
+  });
+
+  colEl.addEventListener('dragover', e => {
+    if (!colDragId || colDragId === col.id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clearDropMarks();
+    colEl.classList.add(isPointerBefore(colEl, e) ? 'drop-before' : 'drop-after');
+  });
+  colEl.addEventListener('dragleave', e => {
+    if (e.target === colEl || !colEl.contains(e.relatedTarget)) colEl.classList.remove('drop-before', 'drop-after');
+  });
+  colEl.addEventListener('drop', e => {
+    e.preventDefault();
+    const before = isPointerBefore(colEl, e);
+    clearDropMarks();
+    if (colDragId && colDragId !== col.id) moveColumn(colDragId, col.id, before);
+    colDragId = null;
+  });
+}
+
 function updateHeaderStats(cols) {
   let totalDone = 0, totalAll = 0, totalDoing = 0, sumProgress = 0;
   cols.forEach(col => {
@@ -1542,6 +1621,7 @@ function renderBoard() {
 
     const colEl = document.createElement('div');
     colEl.className = 'column';
+    colEl.dataset.colId = col.id;
 
     const header = document.createElement('div');
     header.className = 'column-header';
@@ -1615,11 +1695,29 @@ function renderBoard() {
     colEl.appendChild(list);
 
     if (!readonly) colEl.appendChild(buildAddArea(col));
+    if (!readonly) enableColDrag(colEl, col);
     board.appendChild(colEl);
   });
 
   // 右侧「近期已完成」归档列（放在新增分类按钮之前）
   board.appendChild(buildRecentColumn(cols));
+
+  // 拖到看板空白处 / 归档列区域 → 移到最后一列
+  if (!readonly) {
+    board.addEventListener('dragover', e => {
+      if (!colDragId) return;
+      if (e.target.closest && e.target.closest('.column[data-col-id]')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    board.addEventListener('drop', e => {
+      if (!colDragId) return;
+      if (e.target.closest && e.target.closest('.column[data-col-id]')) return;
+      e.preventDefault();
+      moveColumn(colDragId, null, true);
+      colDragId = null;
+    });
+  }
 
   if (!readonly) {
     const addCol = document.createElement('div');
@@ -2202,6 +2300,7 @@ if (typeof globalThis !== 'undefined') {
     renderUserTable, userBadge, activeInWindow, activeDayCount,
     dayKey, dayKeyOffset, trackActive, pickUser,
     parsePlan, fmtPlanMD, nudgePlan, setPlanPart, buildQuickDate, buildDatesRow,
+    moveColumn, enableColDrag, isPointerBefore,
     cloud: {
       isOn: () => cloudEnabled(),
       cfg: (t, g) => { CLOUD.token = t; CLOUD.gistId = g; },
