@@ -387,19 +387,41 @@
   .done-col-list { padding: 10px 12px; }
   .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 
-  /* ===== 近期已完成（主看板下方） ===== */
-  .recent-section { margin: 20px auto 0; max-width: 1200px; }
-  .recent-head { display: flex; align-items: center; justify-content: space-between; }
-  .recent-head h2 { font-size: 15px; color: var(--text); margin: 0; display: flex; align-items: center; gap: 6px; }
-  .recent-head .recent-count { color: var(--text-light); font-weight: 500; font-size: 13px; }
-  .recent-toggle { border: none; background: #eef2f6; color: #556; border-radius: 20px; padding: 4px 13px; font-size: 12px; cursor: pointer; font-family: inherit; }
-  .recent-toggle:hover { background: #e2e8ee; }
-  .recent-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-  .recent-card { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; min-width: 190px; max-width: 280px; box-shadow: var(--shadow); }
-  .recent-card .rc-title { font-size: 13px; color: var(--text); font-weight: 500; word-break: break-word; }
-  .recent-card .rc-meta { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
-  .recent-card .rc-col { color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 11px; white-space: nowrap; }
-  .recent-card .rc-time { font-size: 11px; color: #98a2ad; white-space: nowrap; }
+  /* ===== 底部小工具栏 ===== */
+  .toolbox { margin: 20px auto 24px; max-width: 1200px; }
+  .tool-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tool-bar .tool-label { font-size: 13px; font-weight: 600; color: var(--text-light); white-space: nowrap; }
+  .tool-chip {
+    border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 20px;
+    padding: 5px 13px; font-size: 12.5px; cursor: pointer; font-family: inherit; transition: all .15s;
+  }
+  .tool-chip:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  .tool-chip.on { background: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); color: #fff; }
+  .tool-panel {
+    margin-top: 12px; background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  .tool-panel h4 { margin: 0 0 10px; font-size: 13.5px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+  .tool-panel .t-tip { font-size: 11.5px; color: var(--text-light); margin-top: 8px; }
+  .tool-panel input, .tool-panel select, .tool-panel textarea, .tool-panel button {
+    font-family: inherit; font-size: 13px; border: 1px solid #d4dae0; border-radius: 6px;
+    padding: 5px 8px; outline: none; background: #fff; color: var(--text);
+  }
+  .tool-panel input:focus, .tool-panel textarea:focus { border-color: var(--c-sales, #3498db); }
+  .tool-panel button { cursor: pointer; background: #f4f7fa; }
+  .tool-panel button:hover { background: #e8eef4; }
+  .tool-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tool-out { font-size: 13px; color: var(--text); font-weight: 600; }
+  .tool-out small { color: var(--text-light); font-weight: 400; }
+  .tool-mini { font-size: 11.5px; border: 1px dashed #c9d2da; border-radius: 14px; padding: 3px 10px; cursor: pointer; color: var(--text-light); background: #fff; }
+  .tool-mini:hover { color: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); }
+  .tool-swatch { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
+  .tool-cd-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px dashed #e4e9ee; font-size: 13px; }
+  .tool-cd-item:last-child { border-bottom: none; }
+  .tool-cd-item .cd-num { font-weight: 700; color: #e67e22; white-space: nowrap; }
+  .tool-cd-item .cd-del { color: #c0392b; cursor: pointer; font-size: 12px; padding: 2px 5px; }
+  .tool-pomo-time { font-size: 40px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: 2px; }
+  .tool-calc-hist { font-size: 12px; color: var(--text-light); margin-top: 8px; line-height: 1.7; word-break: break-all; }
 
   /* ===== 管理后台 ===== */
   .admin-wrap { max-width: 1300px; margin: 0 auto; }
@@ -528,12 +550,12 @@
 
   <div class="board" id="board"></div>
 
-  <div class="recent-section" id="recentSection">
-    <div class="recent-head">
-      <h2>🗂 近期已完成 <span class="recent-count" id="recentCount"></span></h2>
-      <button class="recent-toggle" id="recentToggle">收起</button>
+  <div class="toolbox" id="toolbox" style="display:none">
+    <div class="tool-bar">
+      <span class="tool-label">🧰 小工具</span>
+      <div class="tool-row" id="toolChips"></div>
     </div>
-    <div class="recent-grid" id="recentGrid"></div>
+    <div class="tool-panel" id="toolPanel" style="display:none"></div>
   </div>
 
   <div id="doneView" style="display:none">
@@ -1729,7 +1751,6 @@ function renderBoard() {
   }
 
   updateHeaderStats(cols);
-  renderRecentDone(cols);
 
   // 只读预览横幅
   const banner = $('previewBanner');
@@ -1802,30 +1823,360 @@ function buildRecentColumn(cols = COLUMNS) {
   return colEl;
 }
 
-// ================= 近期已完成（主看板下方） =================
-function renderRecentDone(cols = COLUMNS) {
-  const sec = $('recentSection');
-  const grid = $('recentGrid');
-  if (!sec || !grid) return;
-  const items = [];
-  cols.forEach(col => (col.tasks || []).forEach(t => {
-    if (t.status === 'done') items.push({ t, colTitle: col.title, colColor: col.color });
-  }));
-  items.sort((a, b) => (b.t.doneAt || 0) - (a.t.doneAt || 0));
-  if (!items.length) { sec.style.display = 'none'; return; }
-  sec.style.display = '';
-  $('recentCount').textContent = items.length + ' 项';
-  grid.innerHTML = '';
-  items.slice(0, 12).forEach(it => {
-    const card = document.createElement('div');
-    card.className = 'recent-card';
-    card.innerHTML = `<div class="rc-title">${esc(it.t.title)}</div>
-      <div class="rc-meta"><span class="rc-col" style="background:${it.colColor}">${esc(it.colTitle)}</span>
-        <span class="rc-time">✓ ${it.t.doneAt ? fmtDate(it.t.doneAt) : '较早前'}</span></div>`;
-    grid.appendChild(card);
+// ================= 底部小工具栏 =================
+const MEMO_KEY = 'wb_memo_v1';
+const CD_KEY = 'wb_countdowns_v1';
+const RATE_KEY = 'wb_rates_v1';
+let activeTool = null;
+
+function loadJSON(key, def) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch (_) { return def; }
+}
+function saveJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (_) {} }
+
+// 按本地日历解析 YYYY-MM-DD（避免 new Date('YYYY-MM-DD') 走 UTC 造成的跨时区差一天）
+function parseDay(ds) {
+  const m = String(ds || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(ds);
+}
+function dayNum(ds) { return parseDay(ds).getTime(); }
+function isoDay(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+
+// ---- 1) 尺寸换算（英寸 ↔ 厘米，含常用画框尺寸） ----
+function buildToolSize() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>📏 尺寸换算（英寸 ↔ 厘米）</h4>
+    <div class="tool-row">
+      <input id="tsIn" type="number" step="0.001" style="width:110px" placeholder="英寸">
+      <span style="color:var(--text-light)">in</span>
+      <span style="color:var(--text-light)">=</span>
+      <input id="tsCm" type="number" step="0.001" style="width:110px" placeholder="厘米">
+      <span style="color:var(--text-light)">cm</span>
+      <span class="tool-out" id="tsOut"></span>
+    </div>
+    <div class="tool-row" id="tsSizes" style="margin-top:10px"></div>
+    <div class="t-tip">常用画框尺寸（英寸 → 厘米），点击任一尺寸自动填入上方换算</div>`;
+  const inEl = box.querySelector('#tsIn'), cmEl = box.querySelector('#tsCm'), out = box.querySelector('#tsOut');
+  const sync = (from) => {
+    if (from === 'in') { const v = parseFloat(inEl.value); cmEl.value = isNaN(v) ? '' : (v * 2.54).toFixed(2); }
+    else { const v = parseFloat(cmEl.value); inEl.value = isNaN(v) ? '' : (v / 2.54).toFixed(3); }
+    out.textContent = '';
+  };
+  inEl.oninput = () => sync('in');
+  cmEl.oninput = () => sync('cm');
+  const sizes = box.querySelector('#tsSizes');
+  [['5×7', 5, 7], ['8×10', 8, 10], ['11×14', 11, 14], ['16×20', 16, 20], ['20×24', 20, 24], ['24×36', 24, 36], ['A4', null, null], ['A3', null, null]].forEach(([name, w, h]) => {
+    const chip = document.createElement('span');
+    chip.className = 'tool-mini';
+    if (w) {
+      const cmW = (w * 2.54).toFixed(1), cmH = (h * 2.54).toFixed(1);
+      chip.textContent = `${name}" ${cmW}×${cmH}cm`;
+      chip.title = `${w}×${h} 英寸`;
+      chip.onclick = () => { inEl.value = w; sync('in'); };
+    } else {
+      const a = name === 'A4' ? [21.0, 29.7] : [29.7, 42.0];
+      chip.textContent = `${name} ${a[0]}×${a[1]}cm`;
+      chip.title = `${name} 厘米尺寸`;
+      chip.onclick = () => { cmEl.value = a[0]; sync('cm'); };
+    }
+    sizes.appendChild(chip);
   });
-  const toggle = $('recentToggle');
-  if (toggle) toggle.style.display = items.length > 0 ? '' : 'none';
+  return box;
+}
+
+// ---- 2) 颜色转换（HEX → RGB / CMYK / HSL + 互补色） ----
+function buildToolColor() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🎨 颜色转换</h4>
+    <div class="tool-row">
+      <input id="tcHex" value="#e74c3c" style="width:100px" maxlength="7" placeholder="#RRGGBB">
+      <div class="tool-swatch" id="tcSwatch"></div>
+      <span class="tool-out" id="tcOut"></span>
+    </div>
+    <div class="tool-row" style="margin-top:8px">
+      <span class="tool-mini" id="tcComp" title="点击填入互补色"></span>
+      <span class="t-tip" style="margin-top:0">HEX → RGB / CMYK / HSL，点击互补色可继续转换</span>
+    </div>`;
+  const hexEl = box.querySelector('#tcHex'), sw = box.querySelector('#tcSwatch'), out = box.querySelector('#tcOut'), comp = box.querySelector('#tcComp');
+  const run = () => {
+    let m = (hexEl.value || '').trim().replace(/^#/, '');
+    if (m.length === 3) m = m.split('').map(c => c + c).join('');
+    if (!/^[0-9a-fA-F]{6}$/.test(m)) { out.textContent = '请输入 6 位 HEX'; sw.style.background = '#eee'; comp.textContent = ''; return; }
+    const r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16);
+    const k = 1 - Math.max(r, g, b) / 255;
+    const c = k >= 1 ? 0 : Math.round((1 - r / 255 - k) / (1 - k) * 100);
+    const mg = k >= 1 ? 0 : Math.round((1 - g / 255 - k) / (1 - k) * 100);
+    const y = k >= 1 ? 0 : Math.round((1 - b / 255 - k) / (1 - k) * 100);
+    const mx = Math.max(r, g, b) / 255, mn = Math.min(r, g, b) / 255, d = mx - mn;
+    let h = 0;
+    if (d) {
+      if (mx === r / 255) h = ((g - b) / 255 / d + 6) % 6;
+      else if (mx === g / 255) h = (b - r) / 255 / d + 2;
+      else h = (r - g) / 255 / d + 4;
+      h = Math.round(h * 60);
+    }
+    const l = (mx + mn) / 2 * 100;
+    const s = d ? Math.round(d / (1 - Math.abs(2 * l / 100 - 1)) * 100) : 0;
+    sw.style.background = '#' + m;
+    out.innerHTML = `RGB ${r},${g},${b} <small>·</small> CMYK ${c},${mg},${y},${Math.round(k * 100)} <small>·</small> HSL ${h},${s}%,${Math.round(l)}%`;
+    const cr = 255 - r, cg = 255 - g, cb = 255 - b;
+    const hx = v => v.toString(16).padStart(2, '0');
+    const compHex = '#' + hx(cr) + hx(cg) + hx(cb);
+    comp.textContent = '互补色 ' + compHex.toUpperCase();
+    comp.style.borderColor = compHex;
+    comp.onclick = () => { hexEl.value = compHex; run(); };
+  };
+  hexEl.oninput = run;
+  run();
+  return box;
+}
+
+// ---- 3) 日期计算（相差天数 / 日期加减） ----
+function buildToolDate() {
+  const box = document.createElement('div');
+  const today = new Date(); const t = d => isoDay(d);
+  box.innerHTML = `<h4>📅 日期计算</h4>
+    <div class="tool-row">
+      <input id="tdA" type="date" value="${t(today)}" style="width:140px">
+      <span style="color:var(--text-light)">→</span>
+      <input id="tdB" type="date" value="${t(new Date(Date.now() + 30 * 864e5))}" style="width:140px">
+      <span class="tool-out" id="tdOut"></span>
+    </div>
+    <div class="tool-row" style="margin-top:10px">
+      <input id="tdBase" type="date" value="${t(today)}" style="width:140px">
+      <span style="color:var(--text-light)">±</span>
+      <input id="tdN" type="number" value="30" style="width:70px">
+      <span style="color:var(--text-light)">天</span>
+      <span class="tool-out" id="tdOut2"></span>
+    </div>
+    <div class="t-tip">上行算两日期相差天数；下行算某日期加/减 N 天后的日期（负数为往前）</div>`;
+  const A = box.querySelector('#tdA'), B = box.querySelector('#tdB'), out = box.querySelector('#tdOut');
+  const base = box.querySelector('#tdBase'), N = box.querySelector('#tdN'), out2 = box.querySelector('#tdOut2');
+  const days = (a, b) => Math.round((dayNum(b) - dayNum(a)) / 864e5);
+  const fmt = ds => { const d = parseDay(ds); return `${d.getMonth() + 1}月${d.getDate()}日`; };
+  const run1 = () => {
+    if (!A.value || !B.value) return;
+    const n = days(A.value, B.value);
+    out.textContent = `相差 ${Math.abs(n)} 天（${n >= 0 ? '往后' : '往前'}）· 终点 ${fmt(B.value)}`;
+  };
+  const run2 = () => {
+    if (!base.value) return;
+    const v = parseInt(N.value, 10);
+    if (isNaN(v)) { out2.textContent = ''; return; }
+    const d = new Date(dayNum(base.value) + v * 864e5);
+    out2.textContent = `= ${isoDay(d)}（${fmt(d)}，周${'日一二三四五六'[d.getDay()]}）`;
+  };
+  A.oninput = run1; B.oninput = run1; base.oninput = run2; N.oninput = run2;
+  run1(); run2();
+  return box;
+}
+
+// ---- 4) 倒计时（自定义事项，如展会开幕） ----
+function buildToolCount() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>⏳ 倒计时</h4>
+    <div class="tool-row">
+      <input id="tcName" placeholder="事项名称（如 广交会开幕）" style="width:190px">
+      <input id="tcDate" type="date" style="width:140px">
+      <button id="tcAdd">添加</button>
+    </div>
+    <div id="tcList" style="margin-top:10px"></div>
+    <div class="t-tip">数据保存在本机浏览器，如需换设备不丢可告诉我接入云端</div>`;
+  const list = box.querySelector('#tcList');
+  const render = () => {
+    const items = loadJSON(CD_KEY, []);
+    list.innerHTML = '';
+    if (!items.length) { list.innerHTML = '<div class="t-tip">暂无倒计时事项</div>'; return; }
+    const today0 = dayNum(isoDay(new Date()));
+    items.slice().sort((a, b) => dayNum(a.date) - dayNum(b.date)).forEach(it => {
+      const n = Math.round((dayNum(it.date) - today0) / 864e5);
+      const row = document.createElement('div');
+      row.className = 'tool-cd-item';
+      row.innerHTML = `<span>${esc(it.name)}</span>
+        <span><span class="cd-num">${n > 0 ? '还剩 ' + n + ' 天' : n === 0 ? '就是今天' : '已过 ' + (-n) + ' 天'}</span>
+        <span style="color:var(--text-light);font-size:11.5px"> ${it.date}</span>
+        <span class="cd-del" title="删除">✕</span></span>`;
+      row.querySelector('.cd-del').onclick = () => {
+        const all = loadJSON(CD_KEY, []);
+        const i = all.findIndex(x => x && x.name === it.name && x.date === it.date);
+        if (i >= 0) all.splice(i, 1);
+        saveJSON(CD_KEY, all);
+        render();
+      };
+      list.appendChild(row);
+    });
+  };
+  box.querySelector('#tcAdd').onclick = () => {
+    const name = box.querySelector('#tcName').value.trim();
+    const date = box.querySelector('#tcDate').value;
+    if (!name || !date) { alert('请填写事项名称和日期'); return; }
+    const items = loadJSON(CD_KEY, []);
+    items.push({ name, date });
+    saveJSON(CD_KEY, items);
+    box.querySelector('#tcName').value = '';
+    render();
+  };
+  render();
+  return box;
+}
+
+// ---- 5) 汇率换算（汇率可编辑，默认近似值） ----
+function buildToolRate() {
+  const box = document.createElement('div');
+  const rates = loadJSON(RATE_KEY, { usd: 7.10, eur: 7.85 });
+  box.innerHTML = `<h4>💱 汇率换算 <small style="color:var(--text-light);font-weight:400">（1 外币 = ? 人民币，可改）</small></h4>
+    <div class="tool-row">
+      <input id="trAmt" type="number" value="100" style="width:100px">
+      <select id="trCur"><option value="cny">人民币 CNY</option><option value="usd">美元 USD</option><option value="eur">欧元 EUR</option></select>
+      <span class="tool-out" id="trOut"></span>
+    </div>
+    <div class="tool-row" style="margin-top:8px">
+      <span style="color:var(--text-light);font-size:12px">1 USD =</span><input id="trUsd" type="number" step="0.01" value="${rates.usd}" style="width:80px">
+      <span style="color:var(--text-light);font-size:12px">CNY　1 EUR =</span><input id="trEur" type="number" step="0.01" value="${rates.eur}" style="width:80px">
+      <span style="color:var(--text-light);font-size:12px">CNY</span>
+    </div>
+    <div class="t-tip">默认为近似汇率，做报价前请按当日牌价修改；汇率保存在本机</div>`;
+  const amt = box.querySelector('#trAmt'), cur = box.querySelector('#trCur'), out = box.querySelector('#trOut');
+  const usdEl = box.querySelector('#trUsd'), eurEl = box.querySelector('#trEur');
+  const run = () => {
+    const u = parseFloat(usdEl.value) || 0, e = parseFloat(eurEl.value) || 0;
+    saveJSON(RATE_KEY, { usd: u, eur: e });
+    const v = parseFloat(amt.value);
+    if (isNaN(v)) { out.textContent = ''; return; }
+    const cny = cur.value === 'usd' ? v * u : cur.value === 'eur' ? v * e : v;
+    out.innerHTML = `≈ ¥${cny.toFixed(2)} <small>｜ $${(cny / (u || 1)).toFixed(2)} · €${(cny / (e || 1)).toFixed(2)}</small>`;
+  };
+  [amt, usdEl, eurEl].forEach(el => el.oninput = run);
+  cur.onchange = run;
+  run();
+  return box;
+}
+
+// ---- 6) 番茄钟 ----
+const pomoState = { left: 25 * 60, running: false, timer: null };
+function buildToolPomo() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🍅 番茄钟</h4>
+    <div class="tool-row" style="justify-content:center">
+      <div class="tool-pomo-time" id="tpTime">25:00</div>
+    </div>
+    <div class="tool-row" style="justify-content:center;margin-top:10px">
+      <button id="tpStart">开始</button>
+      <button id="tpReset">重置</button>
+      <span class="tool-mini" id="tp25">25 分钟</span>
+      <span class="tool-mini" id="tp45">45 分钟</span>
+    </div>
+    <div class="t-tip" style="text-align:center">专注一个番茄钟，时间到会弹窗提醒</div>`;
+  const timeEl = box.querySelector('#tpTime');
+  const paint = () => {
+    const m = Math.floor(pomoState.left / 60), s = pomoState.left % 60;
+    timeEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    box.querySelector('#tpStart').textContent = pomoState.running ? '暂停' : '开始';
+  };
+  const stop = () => { if (pomoState.timer) { clearInterval(pomoState.timer); pomoState.timer = null; } pomoState.running = false; };
+  const tick = () => {
+    pomoState.left--;
+    if (pomoState.left <= 0) { stop(); pomoState.left = 0; alert('🍅 番茄钟时间到，休息一下吧！'); }
+    paint();
+  };
+  box.querySelector('#tpStart').onclick = () => {
+    if (pomoState.running) { stop(); paint(); return; }
+    if (pomoState.left <= 0) pomoState.left = 25 * 60;
+    pomoState.running = true;
+    pomoState.timer = setInterval(tick, 1000);
+    paint();
+  };
+  box.querySelector('#tpReset').onclick = () => { stop(); pomoState.left = 25 * 60; paint(); };
+  box.querySelector('#tp25').onclick = () => { stop(); pomoState.left = 25 * 60; paint(); };
+  box.querySelector('#tp45').onclick = () => { stop(); pomoState.left = 45 * 60; paint(); };
+  paint();
+  return box;
+}
+
+// ---- 7) 快速备忘 ----
+function buildToolMemo() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>📝 快速备忘 <small id="tmSaved" style="color:#27ae60;font-weight:400"></small></h4>
+    <textarea id="tmText" rows="5" style="width:100%;max-width:640px;resize:vertical;line-height:1.6" placeholder="随手记：电话、灵感、待确认的尺寸/色号…"></textarea>
+    <div class="t-tip">自动保存在本机浏览器（每敲一个字即存）<span id="tmCnt"></span></div>`;
+  const ta = box.querySelector('#tmText'), saved = box.querySelector('#tmSaved'), cnt = box.querySelector('#tmCnt');
+  ta.value = localStorage.getItem(MEMO_KEY) || '';
+  let tid = null;
+  ta.oninput = () => {
+    localStorage.setItem(MEMO_KEY, ta.value);
+    cnt.textContent = ' · 当前 ' + ta.value.length + ' 字';
+    saved.textContent = '✓ 已保存';
+    if (tid) clearTimeout(tid);
+    tid = setTimeout(() => { saved.textContent = ''; }, 1500);
+  };
+  cnt.textContent = ta.value ? ' · 当前 ' + ta.value.length + ' 字' : '';
+  return box;
+}
+
+// ---- 8) 计算器 ----
+function buildToolCalc() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🧮 计算器</h4>
+    <div class="tool-row">
+      <input id="tcExpr" placeholder="输入算式，如 (12.5+3)*2/5" style="width:260px">
+      <span class="tool-out" id="tcRes"></span>
+    </div>
+    <div class="tool-calc-hist" id="tcHist"></div>
+    <div class="t-tip">支持 + - * / ( ) 和小数，回车或实时计算</div>`;
+  const expr = box.querySelector('#tcExpr'), res = box.querySelector('#tcRes'), hist = box.querySelector('#tcHist');
+  const calcHist = [];
+  const run = () => {
+    const s = (expr.value || '').trim();
+    if (!s) { res.textContent = ''; return; }
+    if (!/^[0-9+\-*/().\s]+$/.test(s)) { res.textContent = '含不支持的字符'; return; }
+    try {
+      const v = Function('"use strict";return (' + s + ')')();
+      if (typeof v !== 'number' || !isFinite(v)) { res.textContent = '算式无效'; return; }
+      const txt = Math.round(v * 1e8) / 1e8;
+      res.textContent = '= ' + txt;
+      expr.dataset.ok = s + ' = ' + txt;
+    } catch (_) { res.textContent = '算式无效'; }
+  };
+  expr.oninput = run;
+  expr.onkeydown = e => {
+    if (e.key === 'Enter' && expr.dataset.ok) {
+      calcHist.unshift(expr.dataset.ok);
+      if (calcHist.length > 5) calcHist.pop();
+      hist.innerHTML = calcHist.map(h => '<div>' + esc(h) + '</div>').join('');
+    }
+  };
+  return box;
+}
+
+const TOOLS = [
+  { id: 'size', name: '尺寸换算', icon: '📏', build: buildToolSize },
+  { id: 'color', name: '颜色转换', icon: '🎨', build: buildToolColor },
+  { id: 'date', name: '日期计算', icon: '📅', build: buildToolDate },
+  { id: 'count', name: '倒计时', icon: '⏳', build: buildToolCount },
+  { id: 'rate', name: '汇率换算', icon: '💱', build: buildToolRate },
+  { id: 'pomo', name: '番茄钟', icon: '🍅', build: buildToolPomo },
+  { id: 'memo', name: '快速备忘', icon: '📝', build: buildToolMemo },
+  { id: 'calc', name: '计算器', icon: '🧮', build: buildToolCalc },
+];
+
+function renderToolbox() {
+  const chips = $('toolChips');
+  const panel = $('toolPanel');
+  if (!chips || !panel) return;
+  chips.innerHTML = '';
+  TOOLS.forEach(t => {
+    const chip = document.createElement('button');
+    chip.className = 'tool-chip' + (activeTool === t.id ? ' on' : '');
+    chip.textContent = t.icon + ' ' + t.name;
+    chip.title = t.name;
+    chip.onclick = () => { activeTool = activeTool === t.id ? null : t.id; renderToolbox(); };
+    chips.appendChild(chip);
+  });
+  if (!activeTool) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
+  const t = TOOLS.find(x => x.id === activeTool);
+  panel.style.display = '';
+  panel.innerHTML = '';
+  if (t) panel.appendChild(t.build());
 }
 
 // ================= 已完成统计看板 =================
@@ -2132,7 +2483,7 @@ function renderAdminView() {
 function previewUser(id) {
   previewUid = id;
   $('board').style.display = 'flex';
-  $('recentSection').style.display = '';
+  $('toolbox').style.display = '';
   $('doneView').style.display = 'none';
   $('adminView').style.display = 'none';
   $('progressBox').style.display = '';
@@ -2157,7 +2508,7 @@ function switchView(v) {
   previewUid = null;
   $('previewBanner').style.display = 'none';
   $('board').style.display = v === 'board' ? 'flex' : 'none';
-  $('recentSection').style.display = v === 'board' ? '' : 'none';
+  $('toolbox').style.display = v === 'board' ? '' : 'none';
   $('doneView').style.display = v === 'done' ? 'block' : 'none';
   $('adminView').style.display = v === 'admin' ? 'block' : 'none';
   $('progressBox').style.display = v === 'admin' ? 'none' : '';
@@ -2269,18 +2620,12 @@ async function init() {
     e.target.value = '';
   };
 
-  // 近期已完成 折叠/展开
-  const recentToggle = $('recentToggle');
-  if (recentToggle) recentToggle.onclick = () => {
-    const grid = $('recentGrid');
-    const collapsed = grid.style.display === 'none';
-    grid.style.display = collapsed ? '' : 'none';
-    recentToggle.textContent = collapsed ? '收起' : '展开';
-  };
-
   // 后台管理 虚拟演示数据 切换
   const demoToggle = $('adminDemoToggle');
   if (demoToggle) demoToggle.onchange = () => syncAdminDemoToggle();
+
+  // 底部小工具栏
+  renderToolbox();
 
   // 自动登录（会话仍有效时）
   const users = loadUsers();
@@ -2295,7 +2640,7 @@ if (typeof globalThis !== 'undefined') {
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
-    renderRecentDone, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
+    renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
     renderUserTable, userBadge, activeInWindow, activeDayCount,
     dayKey, dayKeyOffset, trackActive, pickUser,
