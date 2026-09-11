@@ -387,7 +387,7 @@
   .done-col-list { padding: 10px 12px; }
   .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 
-  /* ===== 底部小工具栏 ===== */
+  /* ===== 底部实用功能中心 ===== */
   .toolbox { margin: 20px auto 24px; max-width: 1200px; }
   .tool-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .tool-bar .tool-label { font-size: 13px; font-weight: 600; color: var(--text-light); white-space: nowrap; }
@@ -416,12 +416,30 @@
   .tool-mini { font-size: 11.5px; border: 1px dashed #c9d2da; border-radius: 14px; padding: 3px 10px; cursor: pointer; color: var(--text-light); background: #fff; }
   .tool-mini:hover { color: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); }
   .tool-swatch { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
-  .tool-cd-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px dashed #e4e9ee; font-size: 13px; }
-  .tool-cd-item:last-child { border-bottom: none; }
-  .tool-cd-item .cd-num { font-weight: 700; color: #e67e22; white-space: nowrap; }
-  .tool-cd-item .cd-del { color: #c0392b; cursor: pointer; font-size: 12px; padding: 2px 5px; }
-  .tool-pomo-time { font-size: 40px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: 2px; }
   .tool-calc-hist { font-size: 12px; color: var(--text-light); margin-top: 8px; line-height: 1.7; word-break: break-all; }
+  .tool-preview-img { max-width: 100%; max-height: 240px; border-radius: 8px; border: 1px solid var(--border); margin-top: 10px; }
+  /* 装柜估算表 */
+  .ct-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+  .ct-table th, .ct-table td { padding: 7px 9px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+  .ct-table th { background: #f5f7f9; color: var(--text-light); font-size: 11.5px; }
+  .ct-table tr:last-child td { border-bottom: none; }
+  .ct-table .ct-num { font-weight: 700; color: var(--c-sales, #3498db); }
+  .ct-warn { color: #e67e22; font-weight: 600; }
+  /* 全球时差 */
+  .tz-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 2px; border-bottom: 1px dashed #e4e9ee; font-size: 13px; flex-wrap: wrap; }
+  .tz-row:last-child { border-bottom: none; }
+  .tz-city { font-weight: 600; }
+  .tz-city small { display: block; font-weight: 400; color: var(--text-light); font-size: 10.5px; }
+  .tz-time { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .tz-diff { font-size: 11px; color: #e67e22; white-space: nowrap; }
+  /* 取色板 */
+  .pal-grid { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
+  .pal-cell { width: 92px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
+  .pal-cell:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--c-sales, #3498db); }
+  .pal-chip { height: 54px; display: block; }
+  .pal-hex { display: block; font-size: 11.5px; font-weight: 700; padding: 5px 0 1px; font-variant-numeric: tabular-nums; }
+  .pal-pct { display: block; font-size: 10.5px; color: var(--text-light); padding-bottom: 6px; }
+  .tool-progress { font-size: 12.5px; color: var(--text-light); margin-top: 8px; }
 
   /* ===== 管理后台 ===== */
   .admin-wrap { max-width: 1300px; margin: 0 auto; }
@@ -552,7 +570,7 @@
 
   <div class="toolbox" id="toolbox" style="display:none">
     <div class="tool-bar">
-      <span class="tool-label">🧰 小工具</span>
+      <span class="tool-label">🧰 实用功能中心</span>
       <div class="tool-row" id="toolChips"></div>
     </div>
     <div class="tool-panel" id="toolPanel" style="display:none"></div>
@@ -1823,11 +1841,10 @@ function buildRecentColumn(cols = COLUMNS) {
   return colEl;
 }
 
-// ================= 底部小工具栏 =================
-const MEMO_KEY = 'wb_memo_v1';
-const CD_KEY = 'wb_countdowns_v1';
+// ================= 底部实用功能中心 =================
 const RATE_KEY = 'wb_rates_v1';
 let activeTool = null;
+let tzTimer = null;
 
 function loadJSON(key, def) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch (_) { return def; }
@@ -1884,50 +1901,107 @@ function buildToolSize() {
   return box;
 }
 
-// ---- 2) 颜色转换（HEX → RGB / CMYK / HSL + 互补色） ----
-function buildToolColor() {
+// ---- 2) 图片尺寸调整 Resize ----
+function fmtKB(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+function loadImgEl(src) { return new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('图片读取失败')); i.src = src; }); }
+function canvasToBlob(cv, type, q) { return new Promise(ok => { try { cv.toBlob(b => ok(b), type, q); } catch (_) { ok(null); } }); }
+async function blobToImage(blob) {
+  const url = URL.createObjectURL(blob);
+  try { return await loadImgEl(url); } finally { URL.revokeObjectURL(url); }
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
+}
+function buildToolResize() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🎨 颜色转换</h4>
-    <div class="tool-row">
-      <input id="tcHex" value="#e74c3c" style="width:100px" maxlength="7" placeholder="#RRGGBB">
-      <div class="tool-swatch" id="tcSwatch"></div>
-      <span class="tool-out" id="tcOut"></span>
+  box.innerHTML = `<h4>🖼️ 图片尺寸调整 Resize <small id="rsInfo" style="color:var(--text-light);font-weight:400"></small></h4>
+    <div class="tool-row"><input type="file" id="rsFile" accept="image/*"></div>
+    <div class="tool-row" id="rsOpts" style="margin-top:10px;display:none">
+      <span style="color:var(--text-light);font-size:12px">宽</span><input id="rsW" type="number" min="1" style="width:82px">
+      <span style="color:var(--text-light);font-size:12px">高</span><input id="rsH" type="number" min="1" style="width:82px">
+      <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="rsLock" checked style="width:auto;vertical-align:-2px"> 锁比例</label>
+      <select id="rsFmt"><option value="jpeg">JPG</option><option value="png">PNG</option><option value="webp">WebP</option></select>
+      <span style="color:var(--text-light);font-size:12px">质量</span><input id="rsQ" type="number" min="10" max="100" value="90" style="width:56px">%
     </div>
-    <div class="tool-row" style="margin-top:8px">
-      <span class="tool-mini" id="tcComp" title="点击填入互补色"></span>
-      <span class="t-tip" style="margin-top:0">HEX → RGB / CMYK / HSL，点击互补色可继续转换</span>
-    </div>`;
-  const hexEl = box.querySelector('#tcHex'), sw = box.querySelector('#tcSwatch'), out = box.querySelector('#tcOut'), comp = box.querySelector('#tcComp');
-  const run = () => {
-    let m = (hexEl.value || '').trim().replace(/^#/, '');
-    if (m.length === 3) m = m.split('').map(c => c + c).join('');
-    if (!/^[0-9a-fA-F]{6}$/.test(m)) { out.textContent = '请输入 6 位 HEX'; sw.style.background = '#eee'; comp.textContent = ''; return; }
-    const r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16);
-    const k = 1 - Math.max(r, g, b) / 255;
-    const c = k >= 1 ? 0 : Math.round((1 - r / 255 - k) / (1 - k) * 100);
-    const mg = k >= 1 ? 0 : Math.round((1 - g / 255 - k) / (1 - k) * 100);
-    const y = k >= 1 ? 0 : Math.round((1 - b / 255 - k) / (1 - k) * 100);
-    const mx = Math.max(r, g, b) / 255, mn = Math.min(r, g, b) / 255, d = mx - mn;
-    let h = 0;
-    if (d) {
-      if (mx === r / 255) h = ((g - b) / 255 / d + 6) % 6;
-      else if (mx === g / 255) h = (b - r) / 255 / d + 2;
-      else h = (r - g) / 255 / d + 4;
-      h = Math.round(h * 60);
-    }
-    const l = (mx + mn) / 2 * 100;
-    const s = d ? Math.round(d / (1 - Math.abs(2 * l / 100 - 1)) * 100) : 0;
-    sw.style.background = '#' + m;
-    out.innerHTML = `RGB ${r},${g},${b} <small>·</small> CMYK ${c},${mg},${y},${Math.round(k * 100)} <small>·</small> HSL ${h},${s}%,${Math.round(l)}%`;
-    const cr = 255 - r, cg = 255 - g, cb = 255 - b;
-    const hx = v => v.toString(16).padStart(2, '0');
-    const compHex = '#' + hx(cr) + hx(cg) + hx(cb);
-    comp.textContent = '互补色 ' + compHex.toUpperCase();
-    comp.style.borderColor = compHex;
-    comp.onclick = () => { hexEl.value = compHex; run(); };
+    <div class="tool-row" id="rsPresets" style="margin-top:8px;display:none"></div>
+    <div id="rsPrevWrap" style="display:none"><img id="rsPrev" class="tool-preview-img" alt="预览"></div>
+    <div class="tool-row" style="margin-top:10px"><button id="rsGo" style="display:none">生成并下载</button><span class="tool-out" id="rsOut"></span></div>
+    <div class="t-tip">点击预设一键填入尺寸；锁比例时改宽或高，另一个自动按原比例计算。输出 JPG/WebP 时透明底会变白</div>`;
+  const fileEl = box.querySelector('#rsFile'), info = box.querySelector('#rsInfo');
+  const opts = box.querySelector('#rsOpts'), wEl = box.querySelector('#rsW'), hEl = box.querySelector('#rsH');
+  const lock = box.querySelector('#rsLock'), fmt = box.querySelector('#rsFmt'), qEl = box.querySelector('#rsQ');
+  const presets = box.querySelector('#rsPresets'), prevWrap = box.querySelector('#rsPrevWrap'), prev = box.querySelector('#rsPrev');
+  const go = box.querySelector('#rsGo'), out = box.querySelector('#rsOut');
+  let state = null; // { img, w, h, name }
+  fileEl.onchange = async () => {
+    const f = fileEl.files && fileEl.files[0];
+    if (!f) return;
+    out.textContent = ''; go.style.display = 'none'; prevWrap.style.display = 'none';
+    try {
+      const img = await blobToImage(f);
+      state = { img, w: img.naturalWidth, h: img.naturalHeight, name: f.name || 'image.png' };
+      info.textContent = `（原图 ${state.w}×${state.h} · ${fmtKB(f.size)}）`;
+      wEl.value = state.w; hEl.value = state.h;
+      opts.style.display = ''; presets.style.display = ''; go.style.display = '';
+      const url = URL.createObjectURL(f);
+      prev.src = url; prevWrap.style.display = '';
+    } catch (e) { out.textContent = '图片读取失败'; }
+    fileEl.value = '';
   };
-  hexEl.oninput = run;
-  run();
+  const sync = (from) => {
+    if (!state) return;
+    const v = from === 'w' ? parseInt(wEl.value, 10) : parseInt(hEl.value, 10);
+    if (isNaN(v) || v <= 0) return;
+    if (lock.checked) {
+      if (from === 'w') hEl.value = Math.max(1, Math.round(v * state.h / state.w));
+      else wEl.value = Math.max(1, Math.round(v * state.w / state.h));
+    }
+  };
+  wEl.oninput = () => sync('w');
+  hEl.oninput = () => sync('h');
+  [['50% 原尺寸', () => { wEl.value = Math.round(state.w / 2); hEl.value = Math.round(state.h / 2); }],
+   ['1080px 宽', () => { wEl.value = 1080; hEl.value = Math.max(1, Math.round(1080 * state.h / state.w)); }],
+   ['750px 宽', () => { wEl.value = 750; hEl.value = Math.max(1, Math.round(750 * state.h / state.w)); }],
+   ['800×800 方图', () => { wEl.value = 800; hEl.value = 800; }],
+   ['恢复原尺寸', () => { wEl.value = state.w; hEl.value = state.h; }]].forEach(([label, fn]) => {
+    const chip = document.createElement('span');
+    chip.className = 'tool-mini';
+    chip.textContent = label;
+    chip.onclick = fn;
+    presets.appendChild(chip);
+  });
+  go.onclick = async () => {
+    if (!state) return;
+    const w = parseInt(wEl.value, 10), h = parseInt(hEl.value, 10);
+    if (!w || !h || w < 1 || h < 1) { out.textContent = '请输入有效的宽高'; return; }
+    const type = fmt.value === 'png' ? 'image/png' : fmt.value === 'webp' ? 'image/webp' : 'image/jpeg';
+    const q = Math.min(1, Math.max(0.1, (parseInt(qEl.value, 10) || 90) / 100));
+    go.disabled = true; out.textContent = '生成中…';
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      if (type !== 'image/png') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); }
+      ctx.drawImage(state.img, 0, 0, w, h);
+      const blob = await canvasToBlob(cv, type, q);
+      if (!blob) { out.textContent = '该格式不支持，请换 JPG 试试'; return; }
+      const ext = fmt.value === 'jpeg' ? 'jpg' : fmt.value;
+      const base = state.name.replace(/\.[^.]+$/, '');
+      downloadBlob(blob, `${base}_${w}x${h}.${ext}`);
+      out.textContent = `✓ 已生成 ${w}×${h} · ${fmtKB(blob.size)}`;
+    } catch (e) { out.textContent = '生成失败：' + (e && e.message ? e.message : e); }
+    go.disabled = false;
+  };
   return box;
 }
 
@@ -1971,52 +2045,179 @@ function buildToolDate() {
   return box;
 }
 
-// ---- 4) 倒计时（自定义事项，如展会开幕） ----
-function buildToolCount() {
+// ---- 4) 文件压缩（PPT / PDF / JPG / PNG） ----
+const CDN_CACHE = {};
+function loadScript(url, globalKey) {
+  if (globalKey && typeof globalThis[globalKey] !== 'undefined' && globalThis[globalKey]) return Promise.resolve(globalThis[globalKey]);
+  if (CDN_CACHE[url]) return CDN_CACHE[url];
+  CDN_CACHE[url] = new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => ok(globalThis[globalKey]);
+    s.onerror = () => { delete CDN_CACHE[url]; no(new Error('组件加载失败（需联网）')); };
+    document.head.appendChild(s);
+  });
+  return CDN_CACHE[url];
+}
+async function reencodeJpeg(img, q) {
+  const cv = document.createElement('canvas');
+  cv.width = img.naturalWidth || img.width; cv.height = img.naturalHeight || img.height;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(img, 0, 0);
+  return await canvasToBlob(cv, 'image/jpeg', q);
+}
+async function imageHasAlpha(img) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 250) return true;
+  return false;
+}
+async function compressPdfFile(buf, scale, quality, onProg) {
+  await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', 'pdfjsLib');
+  globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', 'jspdf');
+  const doc = await globalThis.pdfjsLib.getDocument({ data: buf }).promise;
+  const jsPDF = globalThis.jspdf.jsPDF;
+  let pdf = null;
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const vp1 = page.getViewport({ scale: 1 });
+    if (!pdf) pdf = new jsPDF({ unit: 'pt', format: [vp1.width, vp1.height], orientation: vp1.width > vp1.height ? 'landscape' : 'portrait' });
+    else pdf.addPage([vp1.width, vp1.height], vp1.width > vp1.height ? 'landscape' : 'portrait');
+    const vp = page.getViewport({ scale });
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.ceil(vp.width)); cv.height = Math.max(1, Math.ceil(vp.height));
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    pdf.addImage(cv.toDataURL('image/jpeg', quality), 'JPEG', 0, 0, vp1.width, vp1.height);
+    if (onProg) onProg(p, doc.numPages);
+  }
+  return pdf.output('blob');
+}
+async function compressPptxFile(buf, quality, onProg) {
+  const JSZip = await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js', 'JSZip');
+  const zin = await JSZip.loadAsync(buf);
+  const zout = new JSZip();
+  const mediaNames = Object.keys(zin.files).filter(n => /^ppt\/media\/[^\/]+\.(jpe?g|png)$/i.test(n) && !zin.files[n].dir);
+  const renames = {};
+  let done = 0;
+  for (const n of mediaNames) {
+    const f = zin.files[n];
+    const blob = new Blob([await f.async('arraybuffer')]);
+    let outBlob = blob, newName = n;
+    try {
+      const img = await blobToImage(blob);
+      const isPng = /\.png$/i.test(n);
+      if (!isPng) {
+        const jb = await reencodeJpeg(img, quality);
+        if (jb && jb.size < blob.size * 0.95) outBlob = jb;
+      } else if (!(await imageHasAlpha(img))) {
+        const jb = await reencodeJpeg(img, quality);
+        if (jb && jb.size < blob.size * 0.85) {
+          outBlob = jb;
+          newName = n.replace(/\.png$/i, '.jpg');
+          renames[n.split('/').pop()] = newName.split('/').pop();
+        }
+      }
+    } catch (_) { /* 该图片处理失败则保留原样 */ }
+    zout.file(newName, outBlob);
+    if (onProg) onProg(++done, mediaNames.length);
+  }
+  for (const n of Object.keys(zin.files)) {
+    if (zin.files[n].dir || mediaNames.includes(n)) continue;
+    let data = await zin.files[n].async('uint8array');
+    if (/\.rels$/i.test(n) || /\[Content_Types\]\.xml$/i.test(n)) {
+      let s = new TextDecoder().decode(data);
+      const rk = Object.keys(renames);
+      if (rk.length) {
+        for (const o of rk) s = s.split(o).join(renames[o]);
+        if (!/Extension="jpg"/i.test(s)) s = s.replace('</Types>', '<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+      }
+      data = new TextEncoder().encode(s);
+    }
+    zout.file(n, data);
+  }
+  return await zout.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 9 } });
+}
+function buildToolCompress() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>⏳ 倒计时</h4>
-    <div class="tool-row">
-      <input id="tcName" placeholder="事项名称（如 广交会开幕）" style="width:190px">
-      <input id="tcDate" type="date" style="width:140px">
-      <button id="tcAdd">添加</button>
+  box.innerHTML = `<h4>🗜️ 文件压缩 <small style="color:var(--text-light);font-weight:400">（PPT / PDF / JPG / PNG）</small></h4>
+    <div class="tool-row"><input type="file" id="cpFile" accept=".pdf,.ppt,.pptx,.jpg,.jpeg,.png"></div>
+    <div class="tool-row" id="cpOpts" style="margin-top:10px;display:none">
+      <span style="color:var(--text-light);font-size:12px">压缩强度</span>
+      <select id="cpLv"><option value="strong">强压（文件最小，画质略降）</option><option value="mid" selected>均衡（推荐）</option><option value="light">轻压（画质优先）</option></select>
+      <button id="cpGo">开始压缩</button>
     </div>
-    <div id="tcList" style="margin-top:10px"></div>
-    <div class="t-tip">数据保存在本机浏览器，如需换设备不丢可告诉我接入云端</div>`;
-  const list = box.querySelector('#tcList');
-  const render = () => {
-    const items = loadJSON(CD_KEY, []);
-    list.innerHTML = '';
-    if (!items.length) { list.innerHTML = '<div class="t-tip">暂无倒计时事项</div>'; return; }
-    const today0 = dayNum(isoDay(new Date()));
-    items.slice().sort((a, b) => dayNum(a.date) - dayNum(b.date)).forEach(it => {
-      const n = Math.round((dayNum(it.date) - today0) / 864e5);
-      const row = document.createElement('div');
-      row.className = 'tool-cd-item';
-      row.innerHTML = `<span>${esc(it.name)}</span>
-        <span><span class="cd-num">${n > 0 ? '还剩 ' + n + ' 天' : n === 0 ? '就是今天' : '已过 ' + (-n) + ' 天'}</span>
-        <span style="color:var(--text-light);font-size:11.5px"> ${it.date}</span>
-        <span class="cd-del" title="删除">✕</span></span>`;
-      row.querySelector('.cd-del').onclick = () => {
-        const all = loadJSON(CD_KEY, []);
-        const i = all.findIndex(x => x && x.name === it.name && x.date === it.date);
-        if (i >= 0) all.splice(i, 1);
-        saveJSON(CD_KEY, all);
-        render();
-      };
-      list.appendChild(row);
-    });
+    <div class="tool-progress" id="cpProg"></div>
+    <div class="tool-row" style="margin-top:8px"><button id="cpDl" style="display:none">下载压缩结果</button><span class="tool-out" id="cpOut"></span></div>
+    <div class="t-tip">图片：重新编码压缩；PDF：逐页转图重建（适合以图片为主的样册/画册，文字类 PDF 不建议）；PPT：仅支持 .pptx（重新压缩内嵌图片）。全程在本机浏览器完成，文件不会上传</div>`;
+  const fileEl = box.querySelector('#cpFile'), opts = box.querySelector('#cpOpts'), lv = box.querySelector('#cpLv');
+  const prog = box.querySelector('#cpProg'), go = box.querySelector('#cpGo'), dl = box.querySelector('#cpDl'), out = box.querySelector('#cpOut');
+  let file = null, resultBlob = null, resultName = '';
+  fileEl.onchange = () => {
+    file = fileEl.files && fileEl.files[0];
+    resultBlob = null; dl.style.display = 'none'; out.textContent = ''; prog.textContent = '';
+    opts.style.display = file ? '' : 'none';
+    if (file) prog.textContent = `已选择 ${file.name} · ${fmtKB(file.size)}`;
+    fileEl.value = '';
   };
-  box.querySelector('#tcAdd').onclick = () => {
-    const name = box.querySelector('#tcName').value.trim();
-    const date = box.querySelector('#tcDate').value;
-    if (!name || !date) { alert('请填写事项名称和日期'); return; }
-    const items = loadJSON(CD_KEY, []);
-    items.push({ name, date });
-    saveJSON(CD_KEY, items);
-    box.querySelector('#tcName').value = '';
-    render();
+  go.onclick = async () => {
+    if (!file) return;
+    go.disabled = true; out.textContent = ''; dl.style.display = 'none';
+    const lvCfg = { strong: [1.0, 0.55, 0.42], mid: [1.5, 0.72, 0.6], light: [2.0, 0.85, 0.78] }[lv.value];
+    const name = file.name, lower = name.toLowerCase();
+    try {
+      if (/\.(jpg|jpeg|png)$/.test(lower)) {
+        prog.textContent = '处理中…';
+        const img = await blobToImage(file);
+        const hasAlpha = /\.png$/i.test(lower) && (await imageHasAlpha(img));
+        let blob;
+        if (hasAlpha) {
+          const cv = document.createElement('canvas');
+          cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+          cv.getContext('2d').drawImage(img, 0, 0);
+          blob = await canvasToBlob(cv, 'image/png');
+        } else {
+          blob = await reencodeJpeg(img, lvCfg[1]);
+        }
+        resultBlob = blob;
+        resultName = name.replace(/\.[^.]+$/, '') + '-压缩.' + (hasAlpha ? 'png' : 'jpg');
+      } else if (/\.pdf$/.test(lower)) {
+        prog.textContent = '加载组件…（首次需联网）';
+        const buf = await file.arrayBuffer();
+        resultBlob = await compressPdfFile(buf, lvCfg[0], lvCfg[1], (p, n) => { prog.textContent = `PDF 第 ${p}/${n} 页…`; });
+        resultName = name.replace(/\.pdf$/i, '') + '-压缩.pdf';
+      } else if (/\.pptx$/.test(lower)) {
+        prog.textContent = '加载组件…（首次需联网）';
+        const buf = await file.arrayBuffer();
+        resultBlob = await compressPptxFile(buf, lvCfg[2], (i, n) => { prog.textContent = `PPT 内嵌图片 ${i}/${n}…`; });
+        resultName = name.replace(/\.pptx$/i, '') + '-压缩.pptx';
+      } else if (/\.ppt$/.test(lower)) {
+        throw new Error('旧版 .ppt 格式不支持，请先在 PowerPoint 里另存为 .pptx');
+      } else {
+        throw new Error('请选择 PDF / PPT / JPG / PNG 文件');
+      }
+      if (!resultBlob || resultBlob.size >= file.size) {
+        out.textContent = '该文件已经很小，压缩收益有限，保留原文件更好';
+        prog.textContent = '';
+      } else {
+        const pct = Math.round((1 - resultBlob.size / file.size) * 100);
+        out.textContent = `✓ ${fmtKB(file.size)} → ${fmtKB(resultBlob.size)}（小了 ${pct}%）`;
+        dl.style.display = '';
+        prog.textContent = '';
+      }
+    } catch (e) {
+      out.textContent = '压缩失败：' + (e && e.message ? e.message : e);
+      prog.textContent = '';
+    }
+    go.disabled = false;
   };
-  render();
+  dl.onclick = () => { if (resultBlob) downloadBlob(resultBlob, resultName); };
   return box;
 }
 
@@ -2052,64 +2253,157 @@ function buildToolRate() {
   return box;
 }
 
-// ---- 6) 番茄钟 ----
-const pomoState = { left: 25 * 60, running: false, timer: null };
-function buildToolPomo() {
+// ---- 6) 装柜估算（20GP / 40GP / 40HQ） ----
+const CONTAINERS = [
+  { id: '20GP', L: 589, W: 235, H: 239, cbm: 33.2, payload: 21700 },
+  { id: '40GP', L: 1203, W: 235, H: 239, cbm: 67.7, payload: 26500 },
+  { id: '40HQ', L: 1203, W: 235, H: 269, cbm: 76.4, payload: 26500 },
+];
+function containerEstimate(bL, bW, bH, qty, unitKg) {
+  const boxVol = bL * bW * bH / 1e6; // CBM
+  return CONTAINERS.map(c => {
+    let best = { per: 0, perLayer: 0, layers: 0, ori: null };
+    const oris = [[bL, bW, bH], [bL, bH, bW], [bW, bL, bH], [bW, bH, bL], [bH, bL, bW], [bH, bW, bL]];
+    for (const [x, y, z] of oris) {
+      const perLayer = Math.floor(c.L / x) * Math.floor(c.W / y);
+      const layers = Math.floor(c.H / z);
+      const per = perLayer * layers;
+      if (per > best.per) best = { per, perLayer, layers, ori: [x, y, z] };
+    }
+    const volRate = Math.round(best.per * boxVol / c.cbm * 100);
+    const need = best.per ? Math.ceil(qty / best.per) : 0;
+    let weightLimit = null;
+    if (unitKg > 0 && best.per > 0) {
+      const perByWeight = Math.floor(c.payload / unitKg);
+      weightLimit = { perByWeight, weightFirst: perByWeight < best.per };
+    }
+    return { c, per: best.per, perLayer: best.perLayer, layers: best.layers, ori: best.ori, volRate, need, boxVol, weightLimit };
+  });
+}
+function buildToolContainer() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🍅 番茄钟</h4>
-    <div class="tool-row" style="justify-content:center">
-      <div class="tool-pomo-time" id="tpTime">25:00</div>
+  box.innerHTML = `<h4>🚢 装柜估算（20GP / 40GP / 40HQ）</h4>
+    <div class="tool-row">
+      <span style="color:var(--text-light);font-size:12px">纸箱 长</span><input id="ctL" type="number" value="40" min="1" style="width:70px">
+      <span style="color:var(--text-light);font-size:12px">宽</span><input id="ctW" type="number" value="30" min="1" style="width:70px">
+      <span style="color:var(--text-light);font-size:12px">高 cm</span><input id="ctH" type="number" value="20" min="1" style="width:70px">
+      <span style="color:var(--text-light);font-size:12px">数量</span><input id="ctN" type="number" value="1000" min="0" style="width:80px">
+      <span style="color:var(--text-light);font-size:12px">单箱毛重 kg（选填）</span><input id="ctKg" type="number" min="0" step="0.1" style="width:70px">
     </div>
-    <div class="tool-row" style="justify-content:center;margin-top:10px">
-      <button id="tpStart">开始</button>
-      <button id="tpReset">重置</button>
-      <span class="tool-mini" id="tp25">25 分钟</span>
-      <span class="tool-mini" id="tp45">45 分钟</span>
-    </div>
-    <div class="t-tip" style="text-align:center">专注一个番茄钟，时间到会弹窗提醒</div>`;
-  const timeEl = box.querySelector('#tpTime');
-  const paint = () => {
-    const m = Math.floor(pomoState.left / 60), s = pomoState.left % 60;
-    timeEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-    box.querySelector('#tpStart').textContent = pomoState.running ? '暂停' : '开始';
+    <div id="ctResult"></div>
+    <div class="t-tip">按纸箱整数堆叠估算（自动尝试 6 种摆放方向取最优）；柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、混装与码头限重</div>`;
+  const L = box.querySelector('#ctL'), W = box.querySelector('#ctW'), H = box.querySelector('#ctH'), N = box.querySelector('#ctN'), KG = box.querySelector('#ctKg');
+  const res = box.querySelector('#ctResult');
+  const run = () => {
+    const l = parseFloat(L.value), w = parseFloat(W.value), h = parseFloat(H.value);
+    const qty = parseInt(N.value, 10) || 0, kg = parseFloat(KG.value) || 0;
+    if (!l || !w || !h || l <= 0 || w <= 0 || h <= 0) { res.innerHTML = '<div class="t-tip">请填写纸箱长宽高</div>'; return; }
+    const rows = containerEstimate(l, w, h, qty, kg);
+    const boxVol = rows[0].boxVol;
+    let html = `<div class="tool-out" style="margin-top:10px">单箱体积 ${boxVol.toFixed(3)} m³</div>
+      <table class="ct-table"><tr><th>柜型</th><th>每柜可装</th><th>堆叠方式</th><th>需柜数</th><th>体积利用率</th></tr>`;
+    rows.forEach(r => {
+      const per = r.weightLimit && r.weightLimit.weightFirst ? r.weightLimit.perByWeight : r.per;
+      const perTxt = r.weightLimit && r.weightLimit.weightFirst
+        ? `<span class="ct-num">${per}</span> <span class="ct-warn">(限重)</span>`
+        : `<span class="ct-num">${r.per}</span>`;
+      const need = per ? Math.ceil(qty / per) : '—';
+      html += `<tr><td><b>${r.c.id}</b></td><td>${perTxt} 箱</td>
+        <td style="color:var(--text-light)">每层 ${r.perLayer} × ${r.layers} 层</td>
+        <td>${need} 柜</td>
+        <td>${r.volRate}%</td></tr>`;
+    });
+    html += '</table>';
+    if (rows.some(r => r.weightLimit && r.weightLimit.weightFirst)) {
+      html += '<div class="t-tip ct-warn">⚠ 按单箱毛重计算已超柜子限重，每柜可装数量以重量为准</div>';
+    }
+    res.innerHTML = html;
   };
-  const stop = () => { if (pomoState.timer) { clearInterval(pomoState.timer); pomoState.timer = null; } pomoState.running = false; };
-  const tick = () => {
-    pomoState.left--;
-    if (pomoState.left <= 0) { stop(); pomoState.left = 0; alert('🍅 番茄钟时间到，休息一下吧！'); }
-    paint();
-  };
-  box.querySelector('#tpStart').onclick = () => {
-    if (pomoState.running) { stop(); paint(); return; }
-    if (pomoState.left <= 0) pomoState.left = 25 * 60;
-    pomoState.running = true;
-    pomoState.timer = setInterval(tick, 1000);
-    paint();
-  };
-  box.querySelector('#tpReset').onclick = () => { stop(); pomoState.left = 25 * 60; paint(); };
-  box.querySelector('#tp25').onclick = () => { stop(); pomoState.left = 25 * 60; paint(); };
-  box.querySelector('#tp45').onclick = () => { stop(); pomoState.left = 45 * 60; paint(); };
-  paint();
+  [L, W, H, N, KG].forEach(el => el.oninput = run);
+  run();
   return box;
 }
 
-// ---- 7) 快速备忘 ----
-function buildToolMemo() {
+// ---- 7) 全球时差 ----
+const TZ_CITIES = [
+  { city: '北京 / 上海', sub: 'China', zone: 'Asia/Shanghai' },
+  { city: '东京', sub: 'Japan', zone: 'Asia/Tokyo' },
+  { city: '迪拜', sub: 'UAE', zone: 'Asia/Dubai' },
+  { city: '米兰', sub: 'Italy', zone: 'Europe/Rome' },
+  { city: '法兰克福', sub: 'Germany', zone: 'Europe/Berlin' },
+  { city: '伦敦', sub: 'UK', zone: 'Europe/London' },
+  { city: '纽约', sub: 'USA East', zone: 'America/New_York' },
+  { city: '洛杉矶', sub: 'USA West', zone: 'America/Los_Angeles' },
+  { city: '悉尼', sub: 'Australia', zone: 'Australia/Sydney' },
+];
+function zoneOffsetMin(zone, d) {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const p = {};
+    for (const it of dtf.formatToParts(d)) p[it.type] = it.value;
+    const asUTC = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+    return Math.round((asUTC - (d.getTime() - d.getMilliseconds())) / 60000);
+  } catch (_) { return null; }
+}
+function fmtOffsetDiff(min) {
+  if (min === 0) return '同时区';
+  const h = min / 60;
+  const txt = Number.isInteger(h) ? h + 'h' : h.toFixed(1) + 'h';
+  return (min > 0 ? '早 ' : '晚 ') + Math.abs(txt);
+}
+function buildToolTime() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>📝 快速备忘 <small id="tmSaved" style="color:#27ae60;font-weight:400"></small></h4>
-    <textarea id="tmText" rows="5" style="width:100%;max-width:640px;resize:vertical;line-height:1.6" placeholder="随手记：电话、灵感、待确认的尺寸/色号…"></textarea>
-    <div class="t-tip">自动保存在本机浏览器（每敲一个字即存）<span id="tmCnt"></span></div>`;
-  const ta = box.querySelector('#tmText'), saved = box.querySelector('#tmSaved'), cnt = box.querySelector('#tmCnt');
-  ta.value = localStorage.getItem(MEMO_KEY) || '';
-  let tid = null;
-  ta.oninput = () => {
-    localStorage.setItem(MEMO_KEY, ta.value);
-    cnt.textContent = ' · 当前 ' + ta.value.length + ' 字';
-    saved.textContent = '✓ 已保存';
-    if (tid) clearTimeout(tid);
-    tid = setTimeout(() => { saved.textContent = ''; }, 1500);
+  box.innerHTML = `<h4>🕐 全球时差 <small id="tzNow" style="color:var(--text-light);font-weight:400"></small></h4>
+    <div id="tzList"></div>
+    <div class="tool-row" style="margin-top:12px">
+      <span style="color:var(--text-light);font-size:12px">按北京时间查</span>
+      <input id="tzPick" type="datetime-local" style="width:200px">
+    </div>
+    <div id="tzPicked" style="margin-top:6px"></div>
+    <div class="t-tip">上方为各城市当前时间（每秒刷新）；填一个北京时间，下方显示各城市对应时刻，方便约客户会议</div>`;
+  const list = box.querySelector('#tzList'), nowEl = box.querySelector('#tzNow');
+  const pick = box.querySelector('#tzPick'), picked = box.querySelector('#tzPicked');
+  const bjOffset = 8 * 60;
+  const wall = (instant, offMin) => {
+    const d = new Date(instant + offMin * 60000);
+    const p2 = n => String(n).padStart(2, '0');
+    return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())} 周${'日一二三四五六'[d.getUTCDay()]} ${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
   };
-  cnt.textContent = ta.value ? ' · 当前 ' + ta.value.length + ' 字' : '';
+  const paint = () => {
+    const now = new Date();
+    nowEl.textContent = `（本机 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}）`;
+    let html = '';
+    TZ_CITIES.forEach(cz => {
+      const off = zoneOffsetMin(cz.zone, now);
+      if (off === null) return;
+      const d = new Date(now.getTime() + off * 60000);
+      const p2 = n => String(n).padStart(2, '0');
+      const time = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`;
+      const diff = off - bjOffset;
+      html += `<div class="tz-row"><span class="tz-city">${cz.city}<small>${cz.sub}</small></span>
+        <span><span class="tz-time">${time}</span> <span class="tz-diff">${diff === 0 ? '＝北京' : fmtOffsetDiff(diff)}</span></span></div>`;
+    });
+    list.innerHTML = html;
+  };
+  const runPick = () => {
+    const v = (pick.value || '').trim();
+    if (!v) { picked.innerHTML = ''; return; }
+    const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) { picked.innerHTML = '<div class="t-tip">时间格式不对</div>'; return; }
+    // 输入按北京时间解释 → UTC 瞬时
+    const instant = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - 8 * 3600000;
+    let html = `<div class="tool-out" style="margin-bottom:4px">北京时间 ${m[1]}年${+m[2]}月${+m[3]}日 ${m[4]}:${m[5]} 对应：</div>`;
+    TZ_CITIES.forEach(cz => {
+      const off = zoneOffsetMin(cz.zone, new Date(instant));
+      if (off === null) return;
+      html += `<div class="tz-row"><span class="tz-city">${cz.city}</span><span class="tz-time">${wall(instant, off)}</span></div>`;
+    });
+    picked.innerHTML = html;
+  };
+  pick.oninput = runPick;
+  paint();
+  if (tzTimer) clearInterval(tzTimer);
+  tzTimer = setInterval(paint, 1000);
   return box;
 }
 
@@ -2148,14 +2442,84 @@ function buildToolCalc() {
   return box;
 }
 
+// ---- 9) Copy HEX（上传图片 → 自动提取色板） ----
+const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+function paletteFromPixels(data, maxColors) {
+  const buckets = new Map();
+  const total = Math.max(1, Math.floor(data.length / 4));
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 125) continue; // 跳过透明像素
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const bk = buckets.get(key);
+    if (bk) { bk.r += r; bk.g += g; bk.b += b; bk.n++; }
+    else buckets.set(key, { r, g, b, n: 1 });
+  }
+  const arr = [];
+  buckets.forEach(bk => arr.push({ r: Math.round(bk.r / bk.n), g: Math.round(bk.g / bk.n), b: Math.round(bk.b / bk.n), pct: bk.n / total }));
+  arr.sort((a, b) => b.pct - a.pct);
+  const out = [];
+  for (const c of arr) {
+    const near = out.find(o => Math.hypot(o.r - c.r, o.g - c.g, o.b - c.b) < 48);
+    if (near) { near.pct += c.pct; continue; }
+    out.push({ ...c });
+    if (out.length >= maxColors) break;
+  }
+  return out;
+}
+function buildToolPalette() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🎯 Copy HEX <small style="color:var(--text-light);font-weight:400">（上传图片 → 自动获取色板）</small></h4>
+    <div class="tool-row"><input type="file" id="plFile" accept="image/*"><span class="tool-out" id="plOut"></span></div>
+    <div class="pal-grid" id="palGrid"></div>
+    <div class="t-tip">提取图片主要颜色（自动跳过透明背景）；点击任一色块复制 HEX 色号</div>`;
+  const fileEl = box.querySelector('#plFile'), grid = box.querySelector('#palGrid'), out = box.querySelector('#plOut');
+  fileEl.onchange = async () => {
+    const f = fileEl.files && fileEl.files[0];
+    grid.innerHTML = ''; out.textContent = '';
+    if (!f) { fileEl.value = ''; return; }
+    try {
+      const img = await blobToImage(f);
+      const MAX = 320; // 采样尺寸，足够还原主色
+      const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(img.naturalWidth * k));
+      cv.height = Math.max(1, Math.round(img.naturalHeight * k));
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      const colors = paletteFromPixels(data, 8);
+      colors.forEach(c => {
+        const hex = rgbToHex(c.r, c.g, c.b);
+        const cell = document.createElement('div');
+        cell.className = 'pal-cell';
+        cell.title = '点击复制 ' + hex;
+        cell.innerHTML = `<span class="pal-chip" style="background:${hex}"></span>
+          <span class="pal-hex">${hex}</span><span class="pal-pct">${(c.pct * 100).toFixed(1)}%</span>`;
+        cell.onclick = async () => {
+          let ok = false;
+          try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(hex); ok = true; } } catch (_) {}
+          if (!ok) { try { prompt('请手动复制色号：', hex); ok = true; } catch (_) {} }
+          out.textContent = ok ? `已复制 ${hex} ✓` : hex;
+        };
+        grid.appendChild(cell);
+      });
+      out.textContent = `共提取 ${colors.length} 个主色（来自 ${f.name}）`;
+    } catch (e) { out.textContent = '图片读取失败'; }
+    fileEl.value = '';
+  };
+  return box;
+}
+
 const TOOLS = [
   { id: 'size', name: '尺寸换算', icon: '📏', build: buildToolSize },
-  { id: 'color', name: '颜色转换', icon: '🎨', build: buildToolColor },
+  { id: 'resize', name: '图片Resize', icon: '🖼️', build: buildToolResize },
+  { id: 'compress', name: '文件压缩', icon: '🗜️', build: buildToolCompress },
+  { id: 'palette', name: 'Copy HEX', icon: '🎯', build: buildToolPalette },
   { id: 'date', name: '日期计算', icon: '📅', build: buildToolDate },
-  { id: 'count', name: '倒计时', icon: '⏳', build: buildToolCount },
+  { id: 'container', name: '装柜估算', icon: '🚢', build: buildToolContainer },
+  { id: 'tz', name: '全球时差', icon: '🕐', build: buildToolTime },
   { id: 'rate', name: '汇率换算', icon: '💱', build: buildToolRate },
-  { id: 'pomo', name: '番茄钟', icon: '🍅', build: buildToolPomo },
-  { id: 'memo', name: '快速备忘', icon: '📝', build: buildToolMemo },
   { id: 'calc', name: '计算器', icon: '🧮', build: buildToolCalc },
 ];
 
@@ -2163,6 +2527,7 @@ function renderToolbox() {
   const chips = $('toolChips');
   const panel = $('toolPanel');
   if (!chips || !panel) return;
+  if (tzTimer) { clearInterval(tzTimer); tzTimer = null; }
   chips.innerHTML = '';
   TOOLS.forEach(t => {
     const chip = document.createElement('button');
@@ -2624,7 +2989,7 @@ async function init() {
   const demoToggle = $('adminDemoToggle');
   if (demoToggle) demoToggle.onchange = () => syncAdminDemoToggle();
 
-  // 底部小工具栏
+  // 底部实用功能中心
   renderToolbox();
 
   // 自动登录（会话仍有效时）
@@ -2641,6 +3006,9 @@ if (typeof globalThis !== 'undefined') {
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
+    buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
+    fmtKB, downloadBlob, loadScript, reencodeJpeg,
+    containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
     renderUserTable, userBadge, activeInWindow, activeDayCount,
     dayKey, dayKeyOffset, trackActive, pickUser,
