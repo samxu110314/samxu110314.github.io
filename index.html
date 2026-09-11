@@ -434,11 +434,29 @@
   .tz-diff { font-size: 11px; color: #e67e22; white-space: nowrap; }
   /* 取色板 */
   .pal-grid { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
-  .pal-cell { width: 92px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
+  .pal-cell { width: 118px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
   .pal-cell:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--c-sales, #3498db); }
   .pal-chip { height: 54px; display: block; }
   .pal-hex { display: block; font-size: 11.5px; font-weight: 700; padding: 5px 0 1px; font-variant-numeric: tabular-nums; }
   .pal-pct { display: block; font-size: 10.5px; color: var(--text-light); padding-bottom: 6px; }
+  .pal-code { display: block; font-size: 9.5px; color: #5b6b73; font-variant-numeric: tabular-nums; letter-spacing: .2px; white-space: nowrap; }
+  .pal-name { display: block; font-size: 10px; color: var(--text-light); padding-top: 2px; line-height: 1.4; white-space: nowrap; }
+  /* 配色建议 */
+  .scheme-list { margin-top: 14px; }
+  .scheme-hint { font-size: 12px; color: var(--text-light); margin-bottom: 8px; }
+  .scheme-row { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; margin-bottom: 9px; background: #fcfdfe; }
+  .scheme-head { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin-bottom: 7px; }
+  .scheme-head b { font-size: 12.5px; color: var(--text); white-space: nowrap; }
+  .scheme-head small { font-size: 11px; color: var(--text-light); line-height: 1.5; }
+  .scheme-bar { display: flex; gap: 3px; height: 46px; border-radius: 7px; overflow: hidden; }
+  .sch-seg { display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; min-width: 0; overflow: hidden; transition: box-shadow .15s; }
+  .sch-seg:hover { box-shadow: inset 0 0 0 2px rgba(52,152,219,.6); }
+  .sch-seg b { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sch-seg em, .sch-seg i { font-style: normal; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sch-seg em { font-size: 9.5px; opacity: .82; }
+  .sch-seg i { font-size: 9.5px; opacity: .72; margin-top: 2px; }
+  .pal-sheet-wrap { margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; background: #fff; max-height: 560px; }
+  .pal-sheet-wrap canvas { display: block; width: 100%; height: auto; }
   .tool-progress { font-size: 12.5px; color: var(--text-light); margin-top: 8px; }
 
   /* ===== 管理后台 ===== */
@@ -2442,8 +2460,15 @@ function buildToolCalc() {
   return box;
 }
 
-// ---- 9) Copy HEX（上传图片 → 自动提取色板） ----
+// ---- 9) Copy HEX + Coloro 配色建议（上传图片 → 5 主色 + 配色建议图） ----
 const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+function hexToRgb(hex) {
+  const s = String(hex == null ? '' : hex).replace(/[^0-9a-fA-F]/g, '');
+  const v = s.length === 3 ? s[0] + s[0] + s[1] + s[1] + s[2] + s[2] : s.slice(0, 6).padEnd(6, '0');
+  const n = parseInt(v, 16);
+  const bad = isNaN(n);
+  return { r: bad ? 0 : (n >> 16) & 255, g: bad ? 0 : (n >> 8) & 255, b: bad ? 0 : n & 255 };
+}
 function paletteFromPixels(data, maxColors) {
   const buckets = new Map();
   const total = Math.max(1, Math.floor(data.length / 4));
@@ -2467,16 +2492,309 @@ function paletteFromPixels(data, maxColors) {
   }
   return out;
 }
+
+// ===== Coloro 色彩体系换算：sRGB → CIELAB → LCh（色相H 0-360 / 明度L 0-99 / 彩度C 0-99）=====
+function srgbToLab(r, g, b) {
+  const lin = v => { v = v / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const R = lin(r), G = lin(g), B = lin(b);
+  const X = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047;
+  const Y = 0.2126729 * R + 0.7151522 * G + 0.0721750 * B;
+  const Z = (0.0193339 * R + 0.1191920 * G + 0.9503041 * B) / 1.08883;
+  const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+  const fx = f(X), fy = f(Y), fz = f(Z);
+  return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
+}
+function labToLch(L, a, b) {
+  const C = Math.sqrt(a * a + b * b);
+  let H = Math.atan2(b, a) * 180 / Math.PI;
+  if (H < 0) H += 360;
+  return { L, C, H };
+}
+function lchToRgbRaw(L, C, H) {
+  const rad = H * Math.PI / 180;
+  const a = C * Math.cos(rad), b = C * Math.sin(rad);
+  const fy = (L + 16) / 116, fx = fy + a / 500, fz = fy - b / 200;
+  const fi = t => { const t3 = t * t * t; return t3 > 0.008856 ? t3 : (t - 16 / 116) / 7.787; };
+  const X = 0.95047 * fi(fx), Y = fi(fy), Z = 1.08883 * fi(fz);
+  const R = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
+  const G = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z;
+  const B = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
+  return { R, G, B, inGamut: R >= -0.002 && R <= 1.002 && G >= -0.002 && G <= 1.002 && B >= -0.002 && B <= 1.002 };
+}
+// LCh → HEX：超出 sRGB 色域时按 0.92 逐级降彩度收敛
+function lchToHex(L, C, H) {
+  L = Math.max(0, Math.min(100, L));
+  let c = Math.max(0, C), g = lchToRgbRaw(L, c, H), guard = 0;
+  while (!g.inGamut && guard++ < 30) { c *= 0.92; g = lchToRgbRaw(L, c, H); }
+  const gm = v => { v = Math.max(0, Math.min(1, v)); return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; };
+  return rgbToHex(gm(g.R) * 255, gm(g.G) * 255, gm(g.B) * 255);
+}
+function hexToLch(hex) {
+  const c = hexToRgb(hex), lab = srgbToLab(c.r, c.g, c.b);
+  return labToLch(lab.L, lab.a, lab.b);
+}
+// CIELAB 色相角锚点（取自实测：红 40° / 橙 60° / 黄 103° / 绿 136° / 青 196° / 蓝 306° / 品红 328°）
+const HUE_ANCHORS = [
+  { h: 40, name: '红' }, { h: 62, name: '橙' }, { h: 82, name: '黄橙' }, { h: 103, name: '黄' },
+  { h: 122, name: '黄绿' }, { h: 140, name: '绿' }, { h: 168, name: '青绿' }, { h: 205, name: '青' },
+  { h: 250, name: '天蓝' }, { h: 302, name: '蓝' }, { h: 318, name: '蓝紫' }, { h: 330, name: '紫' }, { h: 5, name: '玫红' },
+];
+function hueName(H) {
+  let best = '红', bd = 999;
+  HUE_ANCHORS.forEach(a => {
+    const d = Math.abs(H - a.h), d2 = Math.min(d, 360 - d);
+    if (d2 < bd) { bd = d2; best = a.name; }
+  });
+  return best;
+}
+function coloroName(L, C, H) {
+  if (C < 6) {
+    if (L >= 92) return '近白';
+    if (L >= 72) return '浅灰';
+    if (L >= 42) return '中灰';
+    if (L >= 20) return '深灰';
+    return '近黑';
+  }
+  const tone = L >= 78 ? '浅' : L >= 58 ? '亮' : L >= 40 ? '中' : L >= 24 ? '深' : '暗';
+  const sat = C >= 55 ? '艳' : C >= 32 ? '饱和' : '柔';
+  return tone + sat + hueName(H);
+}
+// Coloro 编码（HHH-LL-CC）：色相 1-360 / 明度 0-99 / 彩度 0-99
+function coloroCode(hex) {
+  const lch = hexToLch(hex);
+  // 无彩色（彩度极低）时色相无意义，统一记 360
+  const hue = lch.C < 2 ? 360 : Math.min(360, Math.max(1, Math.round(lch.H) || 360));
+  const L = Math.min(99, Math.max(0, Math.round(lch.L * 0.99)));
+  const C = Math.min(99, Math.max(0, Math.round(lch.C * 99 / 135)));
+  const p = (v, n) => String(v).padStart(n, '0');
+  return p(hue, 3) + '-' + p(L, 2) + '-' + p(C, 2);
+}
+function coloroOf(hex) {
+  const lch = hexToLch(hex);
+  return { hex: hex, H: lch.H, L: lch.L, C: lch.C, code: coloroCode(hex), name: coloroName(lch.L, lch.C, lch.H) };
+}
+
+// ===== 配色建议：按 Coloro 三属性（色相H / 明度L / 彩度C）推导 5 套方案 =====
+function buildSchemes(base) {
+  const b = { L: base.L, C: base.C, H: base.H };
+  const S = (dL, kC, dH) => {
+    const hex = lchToHex(Math.max(6, Math.min(96, b.L + dL)), Math.max(0, b.C * kC), b.H + dH);
+    return { hex: hex, code: coloroCode(hex) };
+  };
+  return [
+    {
+      key: 'tonal', name: '① 同色系明度梯度', en: 'Tonal',
+      note: '色相与彩度基本不动，只拉开明暗层次 —— 最稳的主视觉，画册/样板册/系列款首选',
+      ratio: [20, 20, 20, 20, 20],
+      colors: [S(-30, 1, 0), S(-15, 1, 0), S(0, 1, 0), S(13, 0.94, 0), S(27, 0.84, 0)],
+    },
+    {
+      key: 'analogous', name: '② 邻近色协调', en: 'Analogous',
+      note: '色相左右各偏 20° / 40°，明度轻微起伏 —— 柔和有层次，适合同季多品类延展',
+      ratio: [20, 20, 20, 20, 20],
+      colors: [S(-10, 0.88, -40), S(4, 1, -20), S(0, 1, 0), S(8, 0.95, 20), S(-6, 0.85, 40)],
+    },
+    {
+      key: 'complement', name: '③ 互补撞色', en: 'Complementary',
+      note: '主色 + 180° 对比色，靠明度差压住冲突 —— 抓眼，适合包装/海报/橱窗陈列',
+      ratio: [20, 20, 20, 20, 20],
+      colors: [S(20, 0.85, 0), S(0, 1, 0), S(-22, 1, 0), S(12, 1, 180), S(-14, 1, 180)],
+    },
+    {
+      key: 'triad', name: '④ 三分平衡', en: 'Triadic',
+      note: '色相环三等分（0 / 120 / 240），彩度统一后色彩最丰富 —— 注意响色不超过三个',
+      ratio: [20, 20, 20, 20, 20],
+      colors: [S(16, 0.8, 0), S(-16, 1, 0), S(0, 0.9, 120), S(22, 0.7, 120), S(-8, 1, 240)],
+    },
+    {
+      key: 'business', name: '⑤ 60-30-10 商业配比', en: 'Dominant / Secondary / Accent',
+      note: '主色 60% 定调 + 辅色 30% 同系承接 + 点缀色 10% 对比提亮 —— 成衣/家居/包装通用配比',
+      ratio: [60, 30, 10],
+      colors: [S(0, 1.06, 0), S(24, 0.42, -18), S(-6, 1.3, 180)],
+    },
+  ];
+}
+// 不足 5 色时用同色系明度延展补齐（标记 derived）
+function padPalette(colors, lch) {
+  const out = colors.slice(0, 5);
+  const offs = [-24, 18, -33, 28, -12, 34];
+  let i = 0;
+  while (out.length < 5) {
+    const dL = offs[i++ % offs.length];
+    const hex = lchToHex(Math.max(8, Math.min(94, lch.L + dL)), lch.C * (dL > 0 ? 0.78 : 1), lch.H);
+    const c = hexToRgb(hex);
+    out.push({ r: c.r, g: c.g, b: c.b, pct: 0, derived: true });
+  }
+  return out;
+}
+// 主色：优先取彩度够（C≥10）里占比最大的，否则取占比最大
+function pickBaseColor(colors) {
+  const viable = colors.filter(c => !c.derived && hexToLch(rgbToHex(c.r, c.g, c.b)).C >= 10);
+  const pool = viable.length ? viable : colors;
+  return pool.slice().sort((a, b) => b.pct - a.pct)[0] || colors[0];
+}
+
+// ===== 配色建议图（Canvas 2x 导出 PNG）=====
+const SHEET_FONT = '-apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif';
+// 色块上的文字自动取黑/白（按明度阈值）
+function sheetTextColor(hex) {
+  const c = hexToRgb(hex);
+  return srgbToLab(c.r, c.g, c.b).L > 62 ? '#1f262b' : '#ffffff';
+}
+function sheetRounded(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
+}
+function sheetText(ctx, txt, x, y, maxW) {
+  let s = String(txt);
+  if (maxW && ctx.measureText(s).width > maxW) {
+    while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+    s += '…';
+  }
+  ctx.fillText(s, x, y);
+  return s;
+}
+function renderPaletteSheet(opt) {
+  const main = (opt && opt.main) || [], schemes = (opt && opt.schemes) || [];
+  if (!main.length || !schemes.length) return null;
+  const W = 1240, PAD = 56, GAP = 14, scale = 2;
+  const STRIP = 12, HEAD_H = 134, MAIN_LABEL = 20, MAIN_H = 168, GAP_AFTER_MAIN = 44;
+  const BLOCK = 162, FOOT = 82;
+  const H = HEAD_H + MAIN_LABEL + MAIN_H + GAP_AFTER_MAIN + schemes.length * BLOCK + FOOT;
+  const cv = document.createElement('canvas');
+  cv.width = W * scale;
+  cv.height = Math.round(H * scale);
+  if (!cv.getContext) return null;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(scale, scale);
+  const setFont = (size, weight) => { ctx.font = (weight || 400) + ' ' + size + 'px ' + SHEET_FONT; };
+  // 背景 + 顶部主色条
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  const sw = W / main.length;
+  main.forEach((c, i) => { ctx.fillStyle = c.hex; ctx.fillRect(i * sw, 0, Math.ceil(sw) + 1, STRIP); });
+  // 标题
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  setFont(27, 700); ctx.fillStyle = '#1b1f23';
+  ctx.fillText('配色建议 · Coloro 配色逻辑', PAD, 72);
+  setFont(13, 400); ctx.fillStyle = '#7a8890';
+  ctx.fillText('源图：' + (opt.source || '未命名') + ' · 提取 ' + main.length + ' 个主色 · ' + (opt.date || ''), PAD, 96);
+  ctx.strokeStyle = '#e8edf1'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PAD, 112); ctx.lineTo(W - PAD, 112); ctx.stroke();
+  // 主色板
+  let y = HEAD_H;
+  setFont(13, 700); ctx.fillStyle = '#5b6b73';
+  ctx.fillText('主色板（按画面面积占比）', PAD, y);
+  ctx.textAlign = 'right'; setFont(11.5, 400); ctx.fillStyle = '#a3b1b9';
+  ctx.fillText('Coloro 编码 HHH-LL-CC ＝ 色相 - 明度 - 彩度', W - PAD, y);
+  ctx.textAlign = 'left';
+  y += MAIN_LABEL;
+  const mw = (W - PAD * 2 - GAP * (main.length - 1)) / main.length;
+  main.forEach((c, i) => {
+    const x = PAD + i * (mw + GAP);
+    ctx.fillStyle = c.hex;
+    sheetRounded(ctx, x, y, mw, MAIN_H, 12); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.08)'; ctx.lineWidth = 1; ctx.stroke();
+    const tc = sheetTextColor(c.hex);
+    ctx.fillStyle = tc;
+    setFont(13, 700); ctx.globalAlpha = 0.9;
+    sheetText(ctx, c.name || '', x + 16, y + 30, mw - 32);
+    ctx.globalAlpha = 1;
+    setFont(21, 700);
+    sheetText(ctx, c.hex, x + 16, y + 66, mw - 32);
+    setFont(12.5, 400); ctx.globalAlpha = 0.82;
+    sheetText(ctx, 'Coloro ' + c.code, x + 16, y + 88, mw - 32);
+    ctx.globalAlpha = 1;
+    setFont(12, 400); ctx.globalAlpha = 0.75;
+    sheetText(ctx, c.derived ? '同色系延展' : '占比 ' + (c.pct * 100).toFixed(1) + '%', x + 16, y + MAIN_H - 18, mw - 32);
+    ctx.globalAlpha = 1;
+  });
+  y += MAIN_H + GAP_AFTER_MAIN;
+  // 5 套方案
+  const avail = W - PAD * 2;
+  schemes.forEach(sc => {
+    const total = sc.ratio.reduce((a, b2) => a + b2, 0) || 100;
+    setFont(15.5, 700); ctx.fillStyle = '#1b1f23';
+    sheetText(ctx, sc.name, PAD, y, avail - 220);
+    ctx.textAlign = 'right'; setFont(11.5, 400); ctx.fillStyle = '#a3b1b9';
+    ctx.fillText(sc.en || '', W - PAD, y);
+    ctx.textAlign = 'left';
+    y += 21;
+    setFont(12, 400); ctx.fillStyle = '#7a8890';
+    sheetText(ctx, sc.note || '', PAD, y, avail);
+    y += 15;
+    const swH = 92;
+    let x = PAD;
+    sc.colors.forEach((c, i) => {
+      const cw = avail * (sc.ratio[i] / total) - (i < sc.colors.length - 1 ? GAP : 0);
+      ctx.fillStyle = c.hex;
+      sheetRounded(ctx, x, y, cw, swH, 9); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.08)'; ctx.lineWidth = 1; ctx.stroke();
+      const tc = sheetTextColor(c.hex);
+      ctx.fillStyle = tc;
+      if (cw > 104) {
+        setFont(15, 700); sheetText(ctx, c.hex, x + 13, y + 31, cw - 26);
+        setFont(11, 400); ctx.globalAlpha = 0.82;
+        sheetText(ctx, c.code, x + 13, y + 50, cw - 26);
+        ctx.globalAlpha = 1;
+      }
+      setFont(11, 400); ctx.globalAlpha = 0.72;
+      ctx.fillText(sc.ratio[i] + '%', x + 13, y + swH - 13);
+      ctx.globalAlpha = 1;
+      x += cw + GAP;
+    });
+    y += swH + 34;
+    ctx.strokeStyle = '#eef2f5'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(PAD, y - 18); ctx.lineTo(W - PAD, y - 18); ctx.stroke();
+  });
+  // 页脚
+  ctx.fillStyle = '#f7f9fb';
+  ctx.fillRect(0, y - 10, W, H - (y - 10));
+  setFont(11.5, 400); ctx.fillStyle = '#7a8890';
+  ctx.fillText('配色逻辑：同色系明度梯度 / 邻近色协调 / 互补撞色 / 三分平衡 / 60-30-10 主辅点缀 —— 由图片主色在 CIELAB 空间按色相·明度·彩度三属性推导，可直接用于画册、包装与面料配色参考。', PAD, y + 24);
+  ctx.fillText('Coloro 编码为该色在 Coloro 三属性体系下的换算值（HHH-LL-CC），非官方色卡号，实际订货请以色卡实物比对。', PAD, y + 46);
+  return cv;
+}
+
 function buildToolPalette() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🎯 Copy HEX <small style="color:var(--text-light);font-weight:400">（上传图片 → 自动获取色板）</small></h4>
+  box.innerHTML = `<h4>🎯 Copy HEX + 配色建议 <small style="color:var(--text-light);font-weight:400">（上传图片 → 5 个主色 → Coloro 配色建议图）</small></h4>
     <div class="tool-row"><input type="file" id="plFile" accept="image/*"><span class="tool-out" id="plOut"></span></div>
     <div class="pal-grid" id="palGrid"></div>
-    <div class="t-tip">提取图片主要颜色（自动跳过透明背景）；点击任一色块复制 HEX 色号</div>`;
+    <div id="plSchemes" class="scheme-list"></div>
+    <div class="tool-row" id="plSheetRow" style="margin-top:12px;display:none">
+      <button id="plDl">⬇️ 下载配色建议图 PNG</button>
+      <span class="tool-out" id="plDlOut"></span>
+    </div>
+    <div id="plSheetWrap" class="pal-sheet-wrap" style="display:none"></div>
+    <div class="t-tip">提取图片 5 个主色（自动跳过透明背景）；点击任一色块复制 HEX。配色建议按 Coloro 色相/明度/彩度逻辑生成 5 套方案，并可下载成一张配色建议图。</div>`;
   const fileEl = box.querySelector('#plFile'), grid = box.querySelector('#palGrid'), out = box.querySelector('#plOut');
+  const schemeWrap = box.querySelector('#plSchemes'), sheetWrap = box.querySelector('#plSheetWrap');
+  const sheetRow = box.querySelector('#plSheetRow'), dlBtn = box.querySelector('#plDl'), dlOut = box.querySelector('#plDlOut');
+  let sheetBlob = null, sheetName = '';
+  const copyHex = async (hex, tip) => {
+    let ok = false;
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(hex); ok = true; } } catch (_) {}
+    if (!ok) { try { prompt('请手动复制色号：', hex); ok = true; } catch (_) {} }
+    return ok;
+  };
   fileEl.onchange = async () => {
     const f = fileEl.files && fileEl.files[0];
     grid.innerHTML = ''; out.textContent = '';
+    schemeWrap.innerHTML = ''; sheetWrap.innerHTML = ''; sheetWrap.style.display = 'none';
+    sheetRow.style.display = 'none'; dlOut.textContent = ''; sheetBlob = null;
     if (!f) { fileEl.value = ''; return; }
     try {
       const img = await blobToImage(f);
@@ -2488,23 +2806,84 @@ function buildToolPalette() {
       const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0, cv.width, cv.height);
       const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
-      const colors = paletteFromPixels(data, 8);
+      let colors = paletteFromPixels(data, 5);
+      const baseColor = pickBaseColor(colors);
+      const baseHex = rgbToHex(baseColor.r, baseColor.g, baseColor.b);
+      const baseLch = hexToLch(baseHex);
+      colors = padPalette(colors, baseLch);
       colors.forEach(c => {
         const hex = rgbToHex(c.r, c.g, c.b);
+        const info = coloroOf(hex);
         const cell = document.createElement('div');
         cell.className = 'pal-cell';
-        cell.title = '点击复制 ' + hex;
+        cell.title = '点击复制 ' + hex + '（Coloro ' + info.code + '）';
         cell.innerHTML = `<span class="pal-chip" style="background:${hex}"></span>
-          <span class="pal-hex">${hex}</span><span class="pal-pct">${(c.pct * 100).toFixed(1)}%</span>`;
+          <span class="pal-hex">${hex}</span>
+          <span class="pal-code">Coloro ${info.code}</span>
+          <span class="pal-name">${esc(info.name)}${c.derived ? ' · 延展' : ''}</span>
+          <span class="pal-pct">${c.derived ? '同色系延展' : (c.pct * 100).toFixed(1) + '%'}</span>`;
         cell.onclick = async () => {
-          let ok = false;
-          try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(hex); ok = true; } } catch (_) {}
-          if (!ok) { try { prompt('请手动复制色号：', hex); ok = true; } catch (_) {} }
+          const ok = await copyHex(hex);
           out.textContent = ok ? `已复制 ${hex} ✓` : hex;
         };
         grid.appendChild(cell);
       });
-      out.textContent = `共提取 ${colors.length} 个主色（来自 ${f.name}）`;
+      out.textContent = `共 ${colors.length} 个主色（来自 ${f.name}）· 主色 ${baseHex} ${coloroOf(baseHex).name}`;
+      // —— 配色建议（HTML 可点击复制）——
+      const schemes = buildSchemes(baseLch);
+      const box2 = document.createElement('div');
+      box2.className = 'scheme-hint';
+      box2.textContent = '配色建议（基于主色 ' + baseHex + ' · Coloro ' + coloroCode(baseHex) + '）：';
+      schemeWrap.appendChild(box2);
+      schemes.forEach(sc => {
+        const total = sc.ratio.reduce((a, b) => a + b, 0) || 100;
+        const row = document.createElement('div');
+        row.className = 'scheme-row';
+        const bar = sc.colors.map((c, i) => {
+          const w = Math.round(sc.ratio[i] / total * 100);
+          const tc = sheetTextColor(c.hex);
+          const inner = w >= 12 ? `<b style="color:${tc}">${c.hex}</b><em style="color:${tc}">${c.code}</em>` : '';
+          return `<span class="sch-seg" style="flex:${sc.ratio[i]} 0 0%;background:${c.hex}" title="点击复制 ${c.hex}（Coloro ${c.code}）" data-hex="${c.hex}">${inner}<i style="color:${tc}">${w}%</i></span>`;
+        }).join('');
+        row.innerHTML = `<div class="scheme-head"><b>${esc(sc.name)}</b><small>${esc(sc.note)}</small></div>
+          <div class="scheme-bar">${bar}</div>`;
+        schemeWrap.appendChild(row);
+      });
+      schemeWrap.querySelectorAll('.sch-seg').forEach(seg => {
+        seg.onclick = async () => {
+          const hex = seg.dataset.hex;
+          const ok = await copyHex(hex);
+          out.textContent = ok ? `已复制 ${hex} ✓` : hex;
+        };
+      });
+      // —— 生成配色建议图 ——
+      const mainList = colors.map(c => {
+        const hex = rgbToHex(c.r, c.g, c.b), info = coloroOf(hex);
+        return { hex, code: info.code, name: info.name, pct: c.pct || 0, derived: !!c.derived };
+      });
+      const sheet = renderPaletteSheet({
+        main: mainList, schemes,
+        source: f.name,
+        date: new Date().toLocaleDateString('zh-CN'),
+      });
+      if (sheet) {
+        const d = new Date();
+        const pad2 = n => String(n).padStart(2, '0');
+        sheetName = `配色建议_${baseHex.slice(1)}_${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}.png`;
+        sheetWrap.appendChild(sheet);
+        sheetWrap.style.display = '';
+        sheetRow.style.display = '';
+        if (sheet.toBlob) {
+          sheet.toBlob(b => { sheetBlob = b; }, 'image/png');
+          dlBtn.onclick = () => {
+            if (!sheetBlob) { dlOut.textContent = '图片生成中，请稍候…'; return; }
+            downloadBlob(sheetBlob, sheetName);
+            dlOut.textContent = '已下载 ' + sheetName;
+          };
+        } else {
+          dlBtn.style.display = 'none';
+        }
+      }
     } catch (e) { out.textContent = '图片读取失败'; }
     fileEl.value = '';
   };
@@ -3009,6 +3388,8 @@ if (typeof globalThis !== 'undefined') {
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
+    hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
+    HUE_ANCHORS, buildSchemes, padPalette, pickBaseColor, sheetTextColor, renderPaletteSheet,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
     renderUserTable, userBadge, activeInWindow, activeDayCount,
     dayKey, dayKeyOffset, trackActive, pickUser,
