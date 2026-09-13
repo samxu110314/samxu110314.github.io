@@ -455,6 +455,23 @@
   .sch-seg em, .sch-seg i { font-style: normal; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .sch-seg em { font-size: 9.5px; opacity: .82; }
   .sch-seg i { font-size: 9.5px; opacity: .72; margin-top: 2px; }
+  .eval-box { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #fcfdfe; }
+  .eval-head { display: flex; align-items: center; gap: 13px; margin-bottom: 10px; }
+  .eval-score { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; min-width: 52px; text-align: center; }
+  .eval-head-txt { display: flex; flex-direction: column; gap: 2px; }
+  .eval-grade { font-size: 13.5px; color: var(--text); font-weight: 700; }
+  .eval-verdict { font-style: normal; font-size: 11.5px; color: var(--text-light); }
+  .eval-dims { margin-bottom: 9px; }
+  .eval-dim { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+  .eval-dim-name { width: 58px; font-size: 11.5px; color: var(--text); text-align: right; white-space: nowrap; }
+  .eval-dim-bar { flex: 1; height: 7px; border-radius: 4px; background: #e8edf1; overflow: hidden; }
+  .eval-dim-bar i { display: block; height: 100%; border-radius: 4px; }
+  .eval-dim-score { width: 24px; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+  .eval-line { font-size: 11.5px; line-height: 1.65; margin-top: 2px; }
+  .eval-line b { font-weight: 700; margin-right: 3px; }
+  .eval-pros { color: #1e8449; }
+  .eval-cons { color: #b03a2e; }
+  .eval-tips { color: #9a6d00; }
   .pal-sheet-wrap { margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; background: #fff; max-height: 560px; }
   .pal-sheet-wrap canvas { display: block; width: 100%; height: auto; }
   .tool-progress { font-size: 12.5px; color: var(--text-light); margin-top: 8px; }
@@ -2634,6 +2651,131 @@ function pickBaseColor(colors) {
   return pool.slice().sort((a, b) => b.pct - a.pct)[0] || colors[0];
 }
 
+// ===== 配色点评（对上传图片本身的配色打分 + 优缺点评价）=====
+// WCAG 相对亮度对比度
+function contrastRatio(hexA, hexB) {
+  const lum = hex => {
+    const c = hexToRgb(hex);
+    const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  };
+  const a = lum(hexA), b = lum(hexB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+// 五维评分：明度层次 25% / 色相协调 25% / 彩度节奏 20% / 面积主次 15% / 对比清晰 15%
+// colors: [{hex, pct, derived?}]（derived 的延展色会被忽略，只评真实采样色）
+function evaluatePalette(colors) {
+  const real = (colors || []).filter(c => !c.derived).map(c => ({ hex: c.hex, pct: c.pct || 0, lch: hexToLch(c.hex) }));
+  if (!real.length) return null;
+  const chroma = real.filter(c => c.lch.C >= 8);
+  const neutral = real.filter(c => c.lch.C < 8);
+  const clamp = v => Math.max(0, Math.min(100, Math.round(v)));
+  const dims = [];
+  // ① 明度层次：跨度和档位
+  {
+    const Ls = real.map(c => c.lch.L);
+    const range = Math.max(...Ls) - Math.min(...Ls);
+    const steps = new Set(Ls.map(v => Math.floor(v / 15))).size;
+    let score = clamp((range - 8) / 52 * 100);
+    if (steps <= 2) score = Math.min(score, 45);
+    else if (steps >= 4) score = Math.max(score, 72);
+    dims.push({
+      key: 'lum', name: '明度层次', score,
+      note: '明度跨度 ΔL=' + range.toFixed(0) + '，分 ' + steps + ' 个明度档',
+      good: score >= 75 ? '明度跨度大（ΔL ' + range.toFixed(0) + '），画面主次分明、有空间感' : '',
+      bad: score <= 55 ? '明度过于接近（ΔL 仅 ' + range.toFixed(0) + '），主体与背景容易糊在一起、缺少层次' : '',
+      tip: score <= 55 ? '把最深色再加深、或把背景提亮，拉开明度差（建议 ΔL≥40）' : '',
+    });
+  }
+  // ② 色相协调：色相间是否有明确关系（同色系/邻近/互补/三分）
+  {
+    let score, note, good = '', bad = '', tip = '';
+    if (chroma.length < 2) {
+      score = 72;
+      note = neutral.length === real.length ? '全图以无彩色（黑白灰）为主' : '仅 1 个有彩色，近似单色配色';
+      good = '色相关系极简，安全耐看、不脏不乱';
+    } else {
+      const pairs = [];
+      for (let i = 0; i < chroma.length; i++) for (let j = i + 1; j < chroma.length; j++) {
+        let d = Math.abs(chroma[i].lch.H - chroma[j].lch.H);
+        if (d > 180) d = 360 - d;
+        pairs.push(d);
+      }
+      const zone = d => d < 25 ? '同色系' : d < 70 ? '邻近' : (d >= 150 && d <= 210) ? '互补' : (d >= 100 && d < 150) ? '三分' : '';
+      const hits = pairs.filter(zone);
+      score = clamp(40 + 60 * hits.length / pairs.length);
+      note = '有彩色 ' + chroma.length + ' 个，色相距 ' + pairs.map(d => d.toFixed(0) + '°').join('/');
+      if (score >= 75) {
+        const kinds = hits.map(zone).filter((v, i, a) => a.indexOf(v) === i).join('、');
+        good = '色相之间有明确呼应（' + kinds + '关系），画面协调';
+      }
+      if (score <= 55) { bad = '多个色相各自为政、缺乏呼应，画面显杂'; tip = '收敛到同一色系 ±40° 内，或删掉游离的颜色'; }
+    }
+    dims.push({ key: 'hue', name: '色相协调', score: clamp(score), note, good, bad, tip });
+  }
+  // ③ 彩度节奏：有没有焦点、会不会太躁/太灰
+  {
+    let score, note, good = '', bad = '', tip = '';
+    if (!chroma.length) {
+      score = 62; note = '无彩色配色，无彩度节奏';
+      tip = '可加入 1 个小面积高彩度点缀色提神';
+    } else {
+      const Cs = chroma.map(c => c.lch.C);
+      const maxC = Math.max(...Cs), avgC = Cs.reduce((a, b) => a + b, 0) / Cs.length;
+      const accent = Math.max(0, Math.min(1, (maxC - 25) / 45)) * 100;
+      const clam = avgC > 85 ? Math.max(0, 100 - (avgC - 85) * 3) : 92;
+      score = clamp(accent * 0.55 + clam * 0.45);
+      note = '最高彩度 C=' + maxC.toFixed(0) + '，平均 C=' + avgC.toFixed(0);
+      if (score >= 75) good = '彩度有主有次，既有视觉焦点又不刺眼';
+      if (avgC > 85) { bad = '整体彩度过高，画面躁、没有视觉焦点'; tip = '压低大部分颜色的彩度，只保留 1 个高彩度点缀'; }
+      else if (maxC < 25) { bad = '整体彩度偏低，画面发灰、不够精神'; tip = '把主色彩度提到 C≥40，或加一个小面积亮色点缀'; }
+    }
+    dims.push({ key: 'chroma', name: '彩度节奏', score: clamp(score), note, good, bad, tip });
+  }
+  // ④ 面积主次：是否接近「主色+辅色+点缀」结构
+  {
+    const ps = real.map(c => c.pct).sort((a, b) => b - a);
+    const dom = ps[0];
+    let score = dom >= 0.45 && dom <= 0.75 ? 100 : dom > 0.75 ? 100 - (dom - 0.75) * 120 : dom / 0.45 * 100;
+    dims.push({
+      key: 'area', name: '面积主次', score: clamp(score),
+      note: '最大面积 ' + (dom * 100).toFixed(0) + '%' + (ps.length > 1 ? '，次色 ' + (ps[1] * 100).toFixed(0) + '%' : ''),
+      good: score >= 75 ? '面积结构接近「主色+辅色+点缀」，主次分明' : '',
+      bad: score <= 55 ? '各颜色面积过于平均，缺少主导色，画面偏平' : '',
+      tip: score <= 55 ? '让主色占 60% 左右，其余颜色做辅色和点缀' : '',
+    });
+  }
+  // ⑤ 对比清晰：最亮底色 vs 最有视觉权重的主体色（面积 ≥10% 里彩度最高的）
+  {
+    const bg = real.slice().sort((a, b) => b.lch.L - a.lch.L)[0];
+    const strong = chroma.filter(c => c.pct >= 0.1);
+    const pool = strong.length ? strong : chroma;
+    let fg = pool.length ? pool.slice().sort((a, b) => b.lch.C - a.lch.C)[0] : real.slice().sort((a, b) => a.lch.L - b.lch.L)[0];
+    if (bg === fg && real.length > 1) fg = real.find(c => c !== bg) || fg;
+    const cr = contrastRatio(bg.hex, fg.hex);
+    const score = cr >= 4.5 ? 100 : cr >= 3 ? 70 + (cr - 3) / 1.5 * 30 : cr / 3 * 70;
+    dims.push({
+      key: 'contrast', name: '对比清晰', score: clamp(score),
+      note: '最亮底色与主视觉对比度 ' + cr.toFixed(1) + ':1',
+      good: score >= 75 ? '主体与底色对比充分（' + cr.toFixed(1) + ':1），信息清晰' : '',
+      bad: score <= 55 ? '主体与底色对比不足（' + cr.toFixed(1) + ':1），细节容易看不清' : '',
+      tip: score <= 55 ? '加深主体颜色或提亮底色，对比度建议 ≥3:1' : '',
+    });
+  }
+  const W = { lum: 0.25, hue: 0.25, chroma: 0.2, area: 0.15, contrast: 0.15 };
+  const total = Math.round(dims.reduce((a, d) => a + d.score * W[d.key], 0));
+  const grade = total >= 85 ? 'A' : total >= 75 ? 'B' : total >= 60 ? 'C' : 'D';
+  const gradeName = total >= 85 ? '优秀' : total >= 75 ? '良好' : total >= 60 ? '中等' : '待改进';
+  const verdict = total >= 85 ? '整体配色成熟，可直接用于成品' : total >= 75 ? '整体协调，个别维度还有提升空间'
+    : total >= 60 ? '有可取之处，但存在明显短板' : '配色问题较多，建议参考下方方案重配';
+  return {
+    total, grade, gradeName, verdict, dims,
+    pros: dims.filter(d => d.good).map(d => d.good),
+    cons: dims.filter(d => d.bad).map(d => d.bad),
+    tips: dims.filter(d => d.tip).map(d => d.tip),
+  };
+}
+
 // ===== 配色建议图（Canvas 2x 导出 PNG）=====
 const SHEET_FONT = '-apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif';
 // 色块上的文字自动取黑/白（按明度阈值）
@@ -2666,11 +2808,13 @@ function sheetText(ctx, txt, x, y, maxW) {
 }
 function renderPaletteSheet(opt) {
   const main = (opt && opt.main) || [], schemes = (opt && opt.schemes) || [];
+  const ev = (opt && opt.eval) || null;
   if (!main.length || !schemes.length) return null;
   const W = 1240, PAD = 56, GAP = 14, scale = 2;
   const STRIP = 12, HEAD_H = 134, MAIN_LABEL = 20, MAIN_H = 168, GAP_AFTER_MAIN = 44;
   const BLOCK = 162, FOOT = 82;
-  const H = HEAD_H + MAIN_LABEL + MAIN_H + GAP_AFTER_MAIN + schemes.length * BLOCK + FOOT;
+  const EVAL_H = ev ? (124 + (ev.pros.length ? 19 : 0) + (ev.cons.length ? 19 : 0) + 16) : 0;
+  const H = HEAD_H + MAIN_LABEL + MAIN_H + GAP_AFTER_MAIN + EVAL_H + schemes.length * BLOCK + FOOT;
   const cv = document.createElement('canvas');
   cv.width = W * scale;
   cv.height = Math.round(H * scale);
@@ -2722,6 +2866,49 @@ function renderPaletteSheet(opt) {
     ctx.globalAlpha = 1;
   });
   y += MAIN_H + GAP_AFTER_MAIN;
+  // 配色点评块
+  if (ev) {
+    const avail = W - PAD * 2;
+    setFont(13, 700); ctx.fillStyle = '#5b6b73';
+    ctx.fillText('配色点评', PAD, y);
+    ctx.textAlign = 'right'; setFont(11.5, 400); ctx.fillStyle = '#a3b1b9';
+    ctx.fillText('满分 100 · 五维加权', W - PAD, y);
+    ctx.textAlign = 'left';
+    y += 18;
+    const gcol = ev.total >= 75 ? '#27ae60' : ev.total >= 60 ? '#f39c12' : '#e74c3c';
+    setFont(40, 800); ctx.fillStyle = gcol;
+    ctx.fillText(String(ev.total), PAD, y + 40);
+    setFont(15, 700); ctx.fillStyle = '#1b1f23';
+    ctx.fillText(ev.grade + ' · ' + ev.gradeName, PAD + 96, y + 18);
+    setFont(12, 400); ctx.fillStyle = '#7a8890';
+    sheetText(ctx, ev.verdict, PAD + 96, y + 38, avail - 96);
+    const dw = (avail - 4 * 12) / 5;
+    ev.dims.forEach((d, i) => {
+      const x = PAD + i * (dw + 12);
+      const col = d.score >= 75 ? '#27ae60' : d.score >= 60 ? '#f39c12' : '#e74c3c';
+      setFont(10.5, 400); ctx.fillStyle = '#7a8890';
+      sheetText(ctx, d.name, x, y + 62, dw);
+      setFont(15, 700); ctx.fillStyle = col;
+      ctx.fillText(String(d.score), x, y + 82);
+      ctx.fillStyle = '#e8edf1';
+      ctx.fillRect(x, y + 88, dw, 5);
+      ctx.fillStyle = col;
+      ctx.fillRect(x, y + 88, dw * d.score / 100, 5);
+    });
+    y += 106;
+    // 建议图篇幅有限：亮点/不足各最多 2 条（面板中显示全部）
+    if (ev.pros.length) {
+      setFont(12, 400); ctx.fillStyle = '#1e8449';
+      sheetText(ctx, '亮点 · ' + ev.pros.slice(0, 2).join('；') + (ev.pros.length > 2 ? '（共 ' + ev.pros.length + ' 项）' : ''), PAD, y, avail);
+      y += 19;
+    }
+    if (ev.cons.length) {
+      setFont(12, 400); ctx.fillStyle = '#b03a2e';
+      sheetText(ctx, '不足 · ' + ev.cons.slice(0, 2).join('；') + (ev.cons.length > 2 ? '（共 ' + ev.cons.length + ' 项）' : ''), PAD, y, avail);
+      y += 19;
+    }
+    y += 16;
+  }
   // 5 套方案
   const avail = W - PAD * 2;
   schemes.forEach(sc => {
@@ -2770,17 +2957,19 @@ function renderPaletteSheet(opt) {
 
 function buildToolPalette() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🎯 Copy HEX + 配色建议 <small style="color:var(--text-light);font-weight:400">（上传图片 → 5 个主色 → Coloro 配色建议图）</small></h4>
+  box.innerHTML = `<h4>🎯 Copy HEX + 配色建议 <small style="color:var(--text-light);font-weight:400">（上传图片 → 配色点评打分 → 5 个主色 → Coloro 配色建议图）</small></h4>
     <div class="tool-row"><input type="file" id="plFile" accept="image/*"><span class="tool-out" id="plOut"></span></div>
     <div class="pal-grid" id="palGrid"></div>
+    <div id="plEval" class="eval-box" style="display:none"></div>
     <div id="plSchemes" class="scheme-list"></div>
     <div class="tool-row" id="plSheetRow" style="margin-top:12px;display:none">
       <button id="plDl">⬇️ 下载配色建议图 PNG</button>
       <span class="tool-out" id="plDlOut"></span>
     </div>
     <div id="plSheetWrap" class="pal-sheet-wrap" style="display:none"></div>
-    <div class="t-tip">提取图片 5 个主色（自动跳过透明背景）；点击任一色块复制 HEX。配色建议按 Coloro 色相/明度/彩度逻辑生成 5 套方案，并可下载成一张配色建议图。</div>`;
+    <div class="t-tip">提取图片 5 个主色（自动跳过透明背景），先对图片配色打分点评（好在哪、差在哪），点击任一色块复制 HEX。配色建议按 Coloro 色相/明度/彩度逻辑生成 5 套方案，可下载成一张配色建议图。</div>`;
   const fileEl = box.querySelector('#plFile'), grid = box.querySelector('#palGrid'), out = box.querySelector('#plOut');
+  const evalBox = box.querySelector('#plEval');
   const schemeWrap = box.querySelector('#plSchemes'), sheetWrap = box.querySelector('#plSheetWrap');
   const sheetRow = box.querySelector('#plSheetRow'), dlBtn = box.querySelector('#plDl'), dlOut = box.querySelector('#plDlOut');
   let sheetBlob = null, sheetName = '';
@@ -2793,6 +2982,7 @@ function buildToolPalette() {
   fileEl.onchange = async () => {
     const f = fileEl.files && fileEl.files[0];
     grid.innerHTML = ''; out.textContent = '';
+    evalBox.style.display = 'none'; evalBox.innerHTML = '';
     schemeWrap.innerHTML = ''; sheetWrap.innerHTML = ''; sheetWrap.style.display = 'none';
     sheetRow.style.display = 'none'; dlOut.textContent = ''; sheetBlob = null;
     if (!f) { fileEl.value = ''; return; }
@@ -2829,6 +3019,21 @@ function buildToolPalette() {
         grid.appendChild(cell);
       });
       out.textContent = `共 ${colors.length} 个主色（来自 ${f.name}）· 主色 ${baseHex} ${coloroOf(baseHex).name}`;
+      // —— 配色点评（对上传图片本身的评价）——
+      const ev = evaluatePalette(colors.filter(c => !c.derived).map(c => ({ hex: rgbToHex(c.r, c.g, c.b), pct: c.pct || 0 })));
+      if (ev) {
+        evalBox.style.display = '';
+        const scoreCol = s => s >= 75 ? '#27ae60' : s >= 60 ? '#f39c12' : '#e74c3c';
+        const gcol = scoreCol(ev.total);
+        const dimRow = ev.dims.map(d => `<div class="eval-dim"><span class="eval-dim-name">${esc(d.name)}</span><span class="eval-dim-bar"><i style="width:${d.score}%;background:${scoreCol(d.score)}"></i></span><span class="eval-dim-score" style="color:${scoreCol(d.score)}">${d.score}</span></div>`).join('');
+        const line = (cls, icon, label, arr) => arr.length ? `<div class="eval-line ${cls}"><b>${icon} ${label}</b>${esc(arr.join('；'))}</div>` : '';
+        evalBox.innerHTML = `<div class="eval-head"><span class="eval-score" style="color:${gcol}">${ev.total}</span>
+            <span class="eval-head-txt"><b class="eval-grade">${ev.grade} · ${esc(ev.gradeName)}</b><i class="eval-verdict">${esc(ev.verdict)}</i></span></div>
+          <div class="eval-dims">${dimRow}</div>
+          ${line('eval-pros', '✅', '亮点：', ev.pros)}
+          ${line('eval-cons', '⚠️', '不足：', ev.cons)}
+          ${line('eval-tips', '💡', '建议：', ev.tips)}`;
+      }
       // —— 配色建议（HTML 可点击复制）——
       const schemes = buildSchemes(baseLch);
       const box2 = document.createElement('div');
@@ -2862,7 +3067,7 @@ function buildToolPalette() {
         return { hex, code: info.code, name: info.name, pct: c.pct || 0, derived: !!c.derived };
       });
       const sheet = renderPaletteSheet({
-        main: mainList, schemes,
+        main: mainList, schemes, eval: ev,
         source: f.name,
         date: new Date().toLocaleDateString('zh-CN'),
       });
@@ -3389,7 +3594,7 @@ if (typeof globalThis !== 'undefined') {
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
     hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
-    HUE_ANCHORS, buildSchemes, padPalette, pickBaseColor, sheetTextColor, renderPaletteSheet,
+    HUE_ANCHORS, buildSchemes, padPalette, pickBaseColor, sheetTextColor, renderPaletteSheet, evaluatePalette, contrastRatio,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
     renderUserTable, userBadge, activeInWindow, activeDayCount,
     dayKey, dayKeyOffset, trackActive, pickUser,
