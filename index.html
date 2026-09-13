@@ -472,8 +472,6 @@
   .eval-pros { color: #1e8449; }
   .eval-cons { color: #b03a2e; }
   .eval-tips { color: #9a6d00; }
-  .pal-sheet-wrap { margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; background: #fff; max-height: 560px; }
-  .pal-sheet-wrap canvas { display: block; width: 100%; height: auto; }
   .tool-progress { font-size: 12.5px; color: var(--text-light); margin-top: 8px; }
 
   /* ===== 管理后台 ===== */
@@ -2966,11 +2964,10 @@ function buildToolPalette() {
       <button id="plDl">⬇️ 下载配色建议图 PNG</button>
       <span class="tool-out" id="plDlOut"></span>
     </div>
-    <div id="plSheetWrap" class="pal-sheet-wrap" style="display:none"></div>
     <div class="t-tip">提取图片 5 个主色（自动跳过透明背景），先对图片配色打分点评（好在哪、差在哪），点击任一色块复制 HEX。配色建议按 Coloro 色相/明度/彩度逻辑生成 5 套方案，可下载成一张配色建议图。</div>`;
   const fileEl = box.querySelector('#plFile'), grid = box.querySelector('#palGrid'), out = box.querySelector('#plOut');
   const evalBox = box.querySelector('#plEval');
-  const schemeWrap = box.querySelector('#plSchemes'), sheetWrap = box.querySelector('#plSheetWrap');
+  const schemeWrap = box.querySelector('#plSchemes');
   const sheetRow = box.querySelector('#plSheetRow'), dlBtn = box.querySelector('#plDl'), dlOut = box.querySelector('#plDlOut');
   let sheetBlob = null, sheetName = '';
   const copyHex = async (hex, tip) => {
@@ -2983,8 +2980,7 @@ function buildToolPalette() {
     const f = fileEl.files && fileEl.files[0];
     grid.innerHTML = ''; out.textContent = '';
     evalBox.style.display = 'none'; evalBox.innerHTML = '';
-    schemeWrap.innerHTML = ''; sheetWrap.innerHTML = ''; sheetWrap.style.display = 'none';
-    sheetRow.style.display = 'none'; dlOut.textContent = ''; sheetBlob = null;
+    schemeWrap.innerHTML = ''; sheetRow.style.display = 'none'; dlOut.textContent = ''; sheetBlob = null;
     if (!f) { fileEl.value = ''; return; }
     try {
       const img = await blobToImage(f);
@@ -3075,8 +3071,6 @@ function buildToolPalette() {
         const d = new Date();
         const pad2 = n => String(n).padStart(2, '0');
         sheetName = `配色建议_${baseHex.slice(1)}_${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}.png`;
-        sheetWrap.appendChild(sheet);
-        sheetWrap.style.display = '';
         sheetRow.style.display = '';
         if (sheet.toBlob) {
           sheet.toBlob(b => { sheetBlob = b; }, 'image/png');
