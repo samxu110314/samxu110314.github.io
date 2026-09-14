@@ -388,17 +388,45 @@
   .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 
   /* ===== 底部实用功能中心 ===== */
-  .toolbox { margin: 20px auto 24px; max-width: 1200px; }
-  .tool-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .tool-bar .tool-label { font-size: 13px; font-weight: 600; color: var(--text-light); white-space: nowrap; }
+  .toolbox { margin: 22px auto 28px; max-width: 1500px; }
+  .tool-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 13px; flex-wrap: wrap; }
+  .tool-head .tool-label { font-size: 14.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
+  .tool-head .tool-note { font-size: 11.5px; color: var(--text-light); }
+  .tool-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 11px; }
   .tool-chip {
-    border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 20px;
-    padding: 5px 13px; font-size: 12.5px; cursor: pointer; font-family: inherit; transition: all .15s;
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px;
+    padding: 17px 10px 15px; background: #fff; border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04);
+    cursor: pointer; font-family: inherit; text-align: center; overflow: hidden;
+    transition: transform .16s cubic-bezier(.2,.7,.4,1), box-shadow .16s, border-color .16s, background .16s;
   }
-  .tool-chip:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
-  .tool-chip.on { background: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); color: #fff; }
+  .tool-chip::before {
+    content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: var(--c-sales, #3498db); opacity: 0; transition: opacity .16s;
+  }
+  .tool-chip .tc-ico {
+    width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
+    font-size: 25px; line-height: 1; background: linear-gradient(180deg, rgba(52,152,219,.17), rgba(52,152,219,.08));
+    transition: background .16s, transform .16s;
+  }
+  .tool-chip .tc-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .tool-chip .tc-desc { font-size: 11px; color: var(--text-light); line-height: 1.4; }
+  .tool-chip:hover { border-color: #b9d5ee; box-shadow: 0 10px 22px -8px rgba(52,152,219,.38); transform: translateY(-4px); }
+  .tool-chip:hover::before { opacity: 1; }
+  .tool-chip:hover .tc-ico { background: linear-gradient(180deg, rgba(52,152,219,.27), rgba(52,152,219,.15)); transform: scale(1.08); }
+  .tool-chip.on { border-color: var(--c-sales, #3498db); background: linear-gradient(180deg, #f1f8ff 0%, #fff 72%); box-shadow: 0 10px 22px -9px rgba(52,152,219,.5); }
+  .tool-chip.on::before { opacity: 1; }
+  .tool-chip.on .tc-ico { background: linear-gradient(180deg, rgba(52,152,219,.32), rgba(52,152,219,.18)); }
+  .tool-chip.on .tc-name { color: var(--c-sales, #3498db); }
+  .tool-chip.on::after {
+    content: '✓'; position: absolute; top: 7px; right: 8px; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--c-sales, #3498db); color: #fff; font-size: 9px; line-height: 15px; text-align: center;
+  }
+  @media (max-width: 1040px) { .tool-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 780px) { .tool-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tool-head .tool-note { display: none; } }
   .tool-panel {
-    margin-top: 12px; background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    margin-top: 14px; background: #fff; border: 1px solid var(--border); border-radius: 12px;
     padding: 14px 16px; box-shadow: var(--shadow);
   }
   .tool-panel h4 { margin: 0 0 10px; font-size: 13.5px; color: var(--text); display: flex; align-items: center; gap: 6px; }
@@ -618,10 +646,11 @@
   <div class="board" id="board"></div>
 
   <div class="toolbox" id="toolbox" style="display:none">
-    <div class="tool-bar">
+    <div class="tool-head">
       <span class="tool-label">🧰 实用功能中心</span>
-      <div class="tool-row" id="toolChips"></div>
+      <span class="tool-note">全部在本地运行，文件不上传</span>
     </div>
+    <div class="tool-grid" id="toolChips"></div>
     <div class="tool-panel" id="toolPanel" style="display:none"></div>
   </div>
 
@@ -3841,18 +3870,18 @@ function buildToolColor() {
 }
 
 const TOOLS = [
-  { id: 'size', name: '尺寸换算', icon: '📏', build: buildToolSize },
-  { id: 'resize', name: '图片Resize', icon: '🖼️', build: buildToolResize },
-  { id: 'compress', name: '文件压缩', icon: '🗜️', build: buildToolCompress },
-  { id: 'palette', name: 'Copy HEX', icon: '🎯', build: buildToolPalette },
-  { id: 'colorconv', name: '色值转换', icon: '🎨', build: buildToolColor },
-  { id: 'qr', name: '二维码', icon: '🔳', build: buildToolQr },
-  { id: 'watermark', name: '图片水印', icon: '💧', build: buildToolWatermark },
-  { id: 'date', name: '日期计算', icon: '📅', build: buildToolDate },
-  { id: 'container', name: '装柜估算', icon: '🚢', build: buildToolContainer },
-  { id: 'tz', name: '全球时差', icon: '🕐', build: buildToolTime },
-  { id: 'rate', name: '汇率换算', icon: '💱', build: buildToolRate },
-  { id: 'calc', name: '计算器', icon: '🧮', build: buildToolCalc },
+  { id: 'size', name: '尺寸换算', icon: '📏', desc: '像素 / 厘米互换', build: buildToolSize },
+  { id: 'resize', name: '图片Resize', icon: '🖼️', desc: '批量改尺寸格式', build: buildToolResize },
+  { id: 'compress', name: '文件压缩', icon: '🗜️', desc: 'PPT / PDF / 图片瘦身', build: buildToolCompress },
+  { id: 'palette', name: 'Copy HEX', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
+  { id: 'colorconv', name: '色值转换', icon: '🎨', desc: 'HEX / RGB / PANTONE', build: buildToolColor },
+  { id: 'qr', name: '二维码', icon: '🔳', desc: '文本一键转码', build: buildToolQr },
+  { id: 'watermark', name: '图片水印', icon: '💧', desc: '文字 / Logo 打标', build: buildToolWatermark },
+  { id: 'date', name: '日期计算', icon: '📅', desc: '日期推算与差值', build: buildToolDate },
+  { id: 'container', name: '装柜估算', icon: '🚢', desc: '20GP / 40HQ 装柜量', build: buildToolContainer },
+  { id: 'tz', name: '全球时差', icon: '🕐', desc: '多城市时间对照', build: buildToolTime },
+  { id: 'rate', name: '汇率换算', icon: '💱', desc: '常用货币换算', build: buildToolRate },
+  { id: 'calc', name: '计算器', icon: '🧮', desc: '随手算一算', build: buildToolCalc },
 ];
 
 function renderToolbox() {
@@ -3864,8 +3893,19 @@ function renderToolbox() {
   TOOLS.forEach(t => {
     const chip = document.createElement('button');
     chip.className = 'tool-chip' + (activeTool === t.id ? ' on' : '');
-    chip.textContent = t.icon + ' ' + t.name;
-    chip.title = t.name;
+    chip.title = t.desc ? (t.name + ' · ' + t.desc) : t.name;
+    const ico = document.createElement('span');
+    ico.className = 'tc-ico';
+    ico.textContent = t.icon + ' ';
+    const nm = document.createElement('span');
+    nm.className = 'tc-name';
+    nm.textContent = t.name;
+    const de = document.createElement('span');
+    de.className = 'tc-desc';
+    de.textContent = t.desc || '';
+    chip.appendChild(ico);
+    chip.appendChild(nm);
+    chip.appendChild(de);
     chip.onclick = () => { activeTool = activeTool === t.id ? null : t.id; renderToolbox(); };
     chips.appendChild(chip);
   });
