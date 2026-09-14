@@ -473,6 +473,22 @@
   .eval-cons { color: #b03a2e; }
   .eval-tips { color: #9a6d00; }
   .tool-progress { font-size: 12.5px; color: var(--text-light); margin-top: 8px; }
+  /* 色值转换 */
+  .cc-list { flex: 1; min-width: 260px; }
+  .cc-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px dashed #e9edf1; font-size: 12.5px; }
+  .cc-row:last-child { border-bottom: none; }
+  .cc-k { width: 74px; color: var(--text-light); font-size: 11.5px; flex-shrink: 0; white-space: nowrap; }
+  .cc-v { flex: 1; font-variant-numeric: tabular-nums; word-break: break-all; color: var(--text); }
+  .cc-chip { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--border); flex-shrink: 0; }
+  .cc-chip-empty { background: transparent; border-color: transparent; }
+  .cc-copy { border: 1px solid var(--border); background: #f4f7fa; border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text); }
+  .cc-copy:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  /* 二维码 / 水印 */
+  .qr-canvas-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
+  .qr-canvas-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
+  .wm-canvas-box { margin-top: 10px; max-width: 100%; overflow: auto; background: #fafbfc; border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+  .wm-canvas-box canvas { display: block; max-width: 100%; height: auto; border-radius: 4px; }
+  .wm-t { font-size: 11.5px; color: var(--text-light); }
 
   /* ===== 管理后台 ===== */
   .admin-wrap { max-width: 1300px; margin: 0 auto; }
@@ -3089,11 +3105,749 @@ function buildToolPalette() {
   return box;
 }
 
+// ================= 二维码生成（内联实现，无需联网 · byte 模式 · v1-v10 · 容错 L/M/Q/H） =================
+const QR_TOTAL_CW = [26, 44, 70, 100, 134, 172, 196, 242, 292, 346];
+const QR_REMAINDER = [0, 7, 7, 7, 7, 7, 0, 0, 0, 0];
+const QR_ALIGN = [null, [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+// [每块纠错码字数, 组1块数, 组1数据码字, 组2块数, 组2数据码字]
+const QR_EC = {
+  L: [[7, 1, 19, 0, 0], [10, 1, 34, 0, 0], [15, 1, 55, 0, 0], [20, 1, 80, 0, 0], [26, 1, 108, 0, 0], [18, 2, 68, 0, 0], [20, 2, 78, 0, 0], [24, 2, 97, 0, 0], [30, 2, 116, 0, 0], [18, 2, 68, 2, 69]],
+  M: [[10, 1, 16, 0, 0], [16, 1, 28, 0, 0], [26, 1, 44, 0, 0], [18, 2, 32, 0, 0], [24, 2, 43, 0, 0], [16, 4, 27, 0, 0], [18, 4, 31, 0, 0], [22, 2, 38, 2, 39], [22, 3, 36, 2, 37], [26, 4, 43, 1, 44]],
+  Q: [[13, 1, 13, 0, 0], [22, 1, 22, 0, 0], [18, 2, 17, 0, 0], [26, 2, 24, 0, 0], [18, 2, 15, 2, 16], [24, 4, 19, 0, 0], [18, 2, 14, 4, 15], [22, 4, 18, 2, 19], [20, 4, 16, 4, 17], [24, 6, 19, 2, 20]],
+  H: [[17, 1, 9, 0, 0], [28, 1, 16, 0, 0], [22, 2, 13, 0, 0], [16, 4, 9, 0, 0], [22, 2, 11, 2, 12], [28, 4, 15, 0, 0], [26, 4, 13, 1, 14], [26, 4, 14, 2, 15], [24, 4, 12, 4, 13], [28, 6, 15, 2, 16]],
+};
+const QR_GF_EXP = new Array(512), QR_GF_LOG = new Array(256);
+(function () {
+  let x = 1;
+  for (let i = 0; i < 255; i++) { QR_GF_EXP[i] = x; QR_GF_LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+  for (let i = 255; i < 512; i++) QR_GF_EXP[i] = QR_GF_EXP[i - 255];
+})();
+function qrGfMul(a, b) { return (a === 0 || b === 0) ? 0 : QR_GF_EXP[QR_GF_LOG[a] + QR_GF_LOG[b]]; }
+function qrGenPoly(n) {
+  let g = [1];
+  for (let i = 0; i < n; i++) {
+    const ng = new Array(g.length + 1).fill(0);
+    for (let j = 0; j < g.length; j++) { ng[j] ^= g[j]; ng[j + 1] ^= qrGfMul(g[j], QR_GF_EXP[i]); }
+    g = ng;
+  }
+  return g;
+}
+function qrRsEcc(data, eccLen) {
+  const g = qrGenPoly(eccLen);
+  const res = new Array(data.length + eccLen).fill(0);
+  for (let i = 0; i < data.length; i++) res[i] = data[i];
+  for (let i = 0; i < data.length; i++) {
+    const f = res[i];
+    if (f !== 0) for (let j = 0; j < g.length; j++) res[i + j] ^= qrGfMul(g[j], f);
+  }
+  return res.slice(data.length);
+}
+function utf8Bytes(str) {
+  const out = [];
+  for (const ch of String(str == null ? '' : str)) {
+    let c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+function qrDataCodewords(ec, ver) { const t = QR_EC[ec][ver - 1]; return t[1] * t[2] + t[3] * t[4]; }
+function qrCapacity(ec) { // byte 模式最大字节数（v10）
+  let max = 0;
+  for (let v = 1; v <= 10; v++) {
+    const cc = v < 10 ? 8 : 16;
+    max = Math.max(max, Math.floor((qrDataCodewords(ec, v) * 8 - 4 - cc) / 8));
+  }
+  return max;
+}
+function qrPickVersion(byteLen, ec) {
+  for (let v = 1; v <= 10; v++) {
+    const cc = v < 10 ? 8 : 16;
+    if (4 + cc + byteLen * 8 <= qrDataCodewords(ec, v) * 8) return v;
+  }
+  return 0;
+}
+function qrMakeCodewords(ver, ec, bytes) {
+  const t = QR_EC[ec][ver - 1];
+  const eccLen = t[0];
+  const specs = [];
+  for (let i = 0; i < t[1]; i++) specs.push(t[2]);
+  for (let i = 0; i < t[3]; i++) specs.push(t[4]);
+  const dataTotal = specs.reduce((a, b) => a + b, 0);
+  const bits = [];
+  const push = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); };
+  push(4, 4);
+  push(bytes.length, ver < 10 ? 8 : 16);
+  bytes.forEach(b => push(b, 8));
+  const cap = dataTotal * 8;
+  push(0, Math.min(4, Math.max(0, cap - bits.length)));
+  while (bits.length % 8 !== 0) bits.push(0);
+  const pads = [0xec, 0x11];
+  let pi = 0;
+  while (bits.length < cap) { push(pads[pi++ % 2], 8); }
+  const dataBytes = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let b = 0;
+    for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+    dataBytes.push(b);
+  }
+  const blocks = [], eccs = [];
+  let off = 0;
+  specs.forEach(len => { const blk = dataBytes.slice(off, off + len); off += len; blocks.push(blk); eccs.push(qrRsEcc(blk, eccLen)); });
+  const out = [];
+  const maxLen = Math.max.apply(null, specs);
+  for (let i = 0; i < maxLen; i++) blocks.forEach(b => { if (i < b.length) out.push(b[i]); });
+  for (let i = 0; i < eccLen; i++) eccs.forEach(e => out.push(e[i]));
+  return out;
+}
+const QR_MASKS = [
+  (r, c) => (r + c) % 2 === 0,
+  (r, c) => r % 2 === 0,
+  (r, c) => c % 3 === 0,
+  (r, c) => (r + c) % 3 === 0,
+  (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
+  (r, c) => ((r * c) % 2 + (r * c) % 3) === 0,
+  (r, c) => ((r * c) % 2 + (r * c) % 3) % 2 === 0,
+  (r, c) => ((r + c) % 2 + (r * c) % 3) % 2 === 0,
+];
+function qrFormatBits(ecBits, mask) {
+  const data = (ecBits << 3) | mask;
+  let rem = data;
+  for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+  return (((data << 10) | rem) ^ 0x5412) & 0x7fff;
+}
+function qrVersionBits(ver) {
+  let rem = ver;
+  for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
+  return ((ver << 12) | rem) & 0x3ffff;
+}
+function qrPenalty(m) {
+  const size = m.length;
+  let p = 0;
+  const runScore = (line) => {
+    let s = 0, run = 1;
+    for (let i = 1; i < line.length; i++) {
+      if (line[i] === line[i - 1]) run++;
+      else { if (run >= 5) s += 3 + (run - 5); run = 1; }
+    }
+    if (run >= 5) s += 3 + (run - 5);
+    return s;
+  };
+  for (let r = 0; r < size; r++) p += runScore(m[r]);
+  for (let c = 0; c < size; c++) { const col = []; for (let r = 0; r < size; r++) col.push(m[r][c]); p += runScore(col); }
+  for (let r = 0; r < size - 1; r++) for (let c = 0; c < size - 1; c++) {
+    const v = m[r][c];
+    if (v === m[r][c + 1] && v === m[r + 1][c] && v === m[r + 1][c + 1]) p += 3;
+  }
+  const PAT = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
+  for (let r = 0; r < size; r++) for (let c = 0; c <= size - 11; c++) {
+    let okF = true, okB = true;
+    for (let i = 0; i < 11; i++) {
+      if (m[r][c + i] !== PAT[i]) okF = false;
+      if (m[r][c + i] !== PAT[10 - i]) okB = false;
+    }
+    if (okF) p += 40;
+    if (okB) p += 40;
+  }
+  for (let c = 0; c < size; c++) for (let r = 0; r <= size - 11; r++) {
+    let okF = true, okB = true;
+    for (let i = 0; i < 11; i++) {
+      if (m[r + i][c] !== PAT[i]) okF = false;
+      if (m[r + i][c] !== PAT[10 - i]) okB = false;
+    }
+    if (okF) p += 40;
+    if (okB) p += 40;
+  }
+  let dark = 0;
+  for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) dark += m[r][c];
+  p += 10 * Math.floor(Math.abs(dark * 100 / (size * size) - 50) / 5);
+  return p;
+}
+function qrBuildBase(ver, ec, codewords) {
+  const size = ver * 4 + 17;
+  const m = [], fn = [];
+  for (let i = 0; i < size; i++) { m.push(new Array(size).fill(0)); fn.push(new Array(size).fill(false)); }
+  const set = (r, c, v) => { if (r >= 0 && r < size && c >= 0 && c < size) { m[r][c] = v; fn[r][c] = true; } };
+  const finder = (r0, c0) => {
+    for (let dr = -1; dr <= 7; dr++) for (let dc = -1; dc <= 7; dc++) {
+      const r = r0 + dr, c = c0 + dc;
+      if (r < 0 || r >= size || c < 0 || c >= size) continue;
+      const inRing = (dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6) &&
+        (dr === 0 || dr === 6 || dc === 0 || dc === 6 || (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4));
+      m[r][c] = inRing ? 1 : 0; fn[r][c] = true;
+    }
+  };
+  finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+  for (let i = 8; i < size - 8; i++) { const v = i % 2 === 0 ? 1 : 0; set(6, i, v); set(i, 6, v); }
+  const ac = QR_ALIGN[ver - 1];
+  if (ac) ac.forEach(r => ac.forEach(c => {
+    const nearFinder = (r <= 8 && c <= 8) || (r <= 8 && c >= size - 9) || (r >= size - 9 && c <= 8);
+    if (nearFinder) return;
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+      set(r + dr, c + dc, (Math.abs(dr) === 2 || Math.abs(dc) === 2 || (dr === 0 && dc === 0)) ? 1 : 0);
+    }
+  }));
+  set(size - 8, 8, 1); // 固定黑点
+  for (let i = 0; i <= 8; i++) { if (i !== 6) { set(8, i, 0); set(i, 8, 0); } }
+  for (let i = 0; i < 8; i++) { set(8, size - 1 - i, 0); set(size - 1 - i, 8, 0); }
+  if (ver >= 7) {
+    const vb = qrVersionBits(ver);
+    for (let i = 0; i < 18; i++) {
+      const bit = (vb >> i) & 1;
+      set(Math.floor(i / 3), size - 11 + (i % 3), bit);
+      set(size - 11 + (i % 3), Math.floor(i / 3), bit);
+    }
+  }
+  let bitIdx = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vert = 0; vert < size; vert++) {
+      for (let j = 0; j < 2; j++) {
+        const c = right - j;
+        const upward = ((right + 1) & 2) === 0;
+        const r = upward ? size - 1 - vert : vert;
+        if (fn[r][c]) continue;
+        let bit = 0;
+        if (bitIdx < codewords.length * 8) bit = (codewords[bitIdx >> 3] >> (7 - (bitIdx & 7))) & 1;
+        bitIdx++;
+        m[r][c] = bit;
+      }
+    }
+  }
+  return { m: m, fn: fn, size: size };
+}
+function qrDrawFormat(m, size, ecBits, mask) {
+  const bits = qrFormatBits(ecBits, mask);
+  const bit = (i) => (bits >> i) & 1;
+  for (let i = 0; i <= 5; i++) m[i][8] = bit(i);
+  m[7][8] = bit(6);
+  m[8][8] = bit(7);
+  m[8][7] = bit(8);
+  for (let i = 9; i < 15; i++) m[8][14 - i] = bit(i);
+  for (let i = 0; i < 8; i++) m[8][size - 1 - i] = bit(i);
+  for (let i = 8; i < 15; i++) m[size - 15 + i][8] = bit(i);
+  m[size - 8][8] = 1;
+}
+function qrEncode(text, ec) {
+  const key = (ec === 'L' || ec === 'Q' || ec === 'H') ? ec : 'M';
+  const bytes = utf8Bytes(text);
+  if (!bytes.length) return null;
+  const ver = qrPickVersion(bytes.length, key);
+  if (!ver) return { tooLong: true, byteLen: bytes.length, maxBytes: qrCapacity(key) };
+  const cw = qrMakeCodewords(ver, key, bytes);
+  const base = qrBuildBase(ver, key, cw);
+  const size = base.size;
+  const ecBits = { L: 1, M: 0, Q: 3, H: 2 }[key];
+  let best = null;
+  for (let mask = 0; mask < 8; mask++) {
+    const m = base.m.map(row => row.slice());
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
+      if (!base.fn[r][c] && QR_MASKS[mask](r, c)) m[r][c] ^= 1;
+    }
+    qrDrawFormat(m, size, ecBits, mask);
+    const p = qrPenalty(m);
+    if (!best || p < best.penalty) best = { mask: mask, modules: m, penalty: p };
+  }
+  return {
+    version: ver, size: size, ec: key, mask: best.mask, modules: best.modules,
+    byteLen: bytes.length, dataCodewords: qrDataCodewords(key, ver),
+  };
+}
+function qrCanvas(enc, px, fg, bg, marginModules) {
+  if (!enc || enc.tooLong) return null;
+  const off = marginModules || 0;
+  const total = enc.size + off * 2;
+  const scale = Math.max(1, Math.floor(px / total));
+  const cv = document.createElement('canvas');
+  cv.width = scale * total; cv.height = scale * total;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = bg || '#FFFFFF';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = fg || '#000000';
+  for (let r = 0; r < enc.size; r++) for (let c = 0; c < enc.size; c++) {
+    if (enc.modules[r][c]) ctx.fillRect((c + off) * scale, (r + off) * scale, scale, scale);
+  }
+  return cv;
+}
+function buildToolQr() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🔳 二维码生成器 <small id="qrInfo" style="color:var(--text-light);font-weight:400"></small></h4>
+    <div class="tool-row">
+      <textarea id="qrText" rows="2" style="flex:1;min-width:260px" placeholder="输入网址或文字，例如 https://www.intco-framing.com"></textarea>
+    </div>
+    <div class="tool-row" style="margin-top:8px">
+      <span style="color:var(--text-light);font-size:12px">容错</span>
+      <select id="qrEc"><option value="L">L · 7%</option><option value="M" selected>M · 15%</option><option value="Q">Q · 25%</option><option value="H">H · 30%</option></select>
+      <span style="color:var(--text-light);font-size:12px">尺寸</span>
+      <select id="qrSize"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select>
+      <span style="color:var(--text-light);font-size:12px">前景</span><input type="color" id="qrFg" value="#000000" style="width:40px;padding:2px">
+      <span style="color:var(--text-light);font-size:12px">背景</span><input type="color" id="qrBg" value="#FFFFFF" style="width:40px;padding:2px">
+      <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="qrMargin" checked style="width:auto;vertical-align:-2px"> 留白边</label>
+    </div>
+    <div class="tool-row" style="margin-top:10px">
+      <button id="qrDl" style="display:none">⬇️ 下载 PNG</button>
+      <span class="tool-out" id="qrOut"></span>
+    </div>
+    <div id="qrWrap" style="margin-top:10px;display:none"></div>
+    <div class="t-tip">纯本地生成、内容不上传；容错级别越高越抗污损，但图案更密。当前支持中文与网址，M 级最多 ${qrCapacity('M')} 字节、L 级最多 ${qrCapacity('L')} 字节。</div>`;
+  const ta = box.querySelector('#qrText'), ecEl = box.querySelector('#qrEc'), sizeEl = box.querySelector('#qrSize');
+  const fgEl = box.querySelector('#qrFg'), bgEl = box.querySelector('#qrBg'), mgEl = box.querySelector('#qrMargin');
+  const info = box.querySelector('#qrInfo'), out = box.querySelector('#qrOut');
+  const wrap = box.querySelector('#qrWrap'), dl = box.querySelector('#qrDl');
+  let timer = null, lastCv = null;
+  const render = () => {
+    const text = ta.value.trim();
+    wrap.innerHTML = ''; dl.style.display = 'none'; lastCv = null;
+    if (!text) { info.textContent = ''; out.textContent = ''; return; }
+    const enc = qrEncode(text, ecEl.value);
+    if (!enc) { info.textContent = ''; out.textContent = ''; return; }
+    if (enc.tooLong) {
+      info.textContent = '';
+      out.innerHTML = `<span style="color:#b03a2e">内容过长：${enc.byteLen} 字节（${ecEl.value} 级最多 ${enc.maxBytes} 字节），请缩短或改用 L 级</span>`;
+      return;
+    }
+    const cv = qrCanvas(enc, parseInt(sizeEl.value, 10) || 512, fgEl.value, bgEl.value, mgEl.checked ? 4 : 0);
+    if (!cv) return;
+    lastCv = cv;
+    wrap.style.display = '';
+    wrap.innerHTML = '';
+    const holder = document.createElement('div');
+    holder.className = 'qr-canvas-box';
+    holder.appendChild(cv);
+    wrap.appendChild(holder);
+    dl.style.display = '';
+    const used = enc.byteLen, totalBytes = Math.floor((enc.dataCodewords * 8 - (enc.version < 10 ? 12 : 20)) / 8);
+    info.textContent = `（版本 v${enc.version} · ${enc.size}×${enc.size} 模块 · 掩码 ${enc.mask} · 内容 ${used}/${totalBytes} 字节）`;
+    const cr = contrastRatio(fgEl.value, bgEl.value);
+    out.innerHTML = cr < 3
+      ? `<span style="color:#b03a2e">⚠️ 前景/背景对比度过低（${cr.toFixed(1)}:1），可能扫不出来</span>`
+      : `<span style="color:#1e8449">✓ 已生成 ${cv.width}×${cv.height}px</span>`;
+  };
+  const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(render, 180); };
+  ta.oninput = schedule;
+  [ecEl, sizeEl, fgEl, bgEl, mgEl].forEach(el => { el.oninput = schedule; el.onchange = schedule; });
+  dl.onclick = async () => {
+    if (!lastCv) return;
+    const blob = await canvasToBlob(lastCv, 'image/png');
+    if (!blob) { out.textContent = '导出失败'; return; }
+    const d = new Date(), p2 = n => String(n).padStart(2, '0');
+    const name = `qrcode_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.png`;
+    downloadBlob(blob, name);
+    out.textContent = '已下载 ' + name;
+  };
+  ta.value = 'https://samxu110314.github.io/';
+  render();
+  return box;
+}
+
+// ================= 图片水印 =================
+function drawWatermarkOn(ctx, w, h, opt) {
+  const alpha = Math.max(0.02, Math.min(1, (opt.alpha == null ? 35 : opt.alpha) / 100));
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (opt.kind === 'logo' && opt.logo) {
+    const lw = Math.max(8, w * (opt.logoPct || 20) / 100);
+    const ratio = opt.logo.naturalHeight / opt.logo.naturalWidth;
+    const lh = lw * ratio;
+    const pos = wmPos(w, h, lw, lh, opt.pos, Math.max(8, w * 0.03));
+    if (opt.pos === 'tile') {
+      const stepX = lw * (1 + (opt.gap || 60) / 100), stepY = lh * (1 + (opt.gap || 60) / 100);
+      for (let y = -h; y < h * 2; y += stepY) for (let x = -w; x < w * 2; x += stepX) ctx.drawImage(opt.logo, x, y, lw, lh);
+    } else {
+      ctx.drawImage(opt.logo, pos.x, pos.y, lw, lh);
+    }
+  } else {
+    const text = opt.text || '';
+    if (!text) { ctx.restore(); return; }
+    const fs = Math.max(10, w * (opt.fontPct || 6) / 100);
+    ctx.font = `700 ${fs}px "PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = opt.color || '#000000';
+    if (opt.stroke) {
+      const light = (() => { const c = hexToRgb(opt.color || '#000'); return (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) > 150; })();
+      ctx.lineWidth = Math.max(1, fs * 0.06);
+      ctx.strokeStyle = light ? 'rgba(0,0,0,.55)' : 'rgba(255,255,255,.65)';
+      ctx.lineJoin = 'round';
+    }
+    const draw1 = (x, y) => {
+      if (opt.stroke) ctx.strokeText(text, x, y);
+      ctx.fillText(text, x, y);
+    };
+    if (opt.pos === 'tile') {
+      const rad = (opt.angle == null ? -30 : opt.angle) * Math.PI / 180;
+      const stepX = tw + fs * (0.6 + (opt.gap || 60) / 50);
+      const stepY = fs * (2.2 + (opt.gap || 60) / 40);
+      const diag = Math.sqrt(w * w + h * h);
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(rad);
+      for (let y = -diag; y < diag; y += stepY) for (let x = -diag; x < diag; x += stepX) draw1(x, y);
+    } else {
+      const pos = wmPos(w, h, tw, fs, opt.pos, Math.max(6, fs * 0.8));
+      draw1(pos.x, pos.y);
+    }
+  }
+  ctx.restore();
+}
+function wmPos(w, h, iw, ih, pos, pad) {
+  const x0 = pad, x1 = (w - iw) / 2, x2 = w - iw - pad;
+  const y0 = pad + ih / 2, y1 = h / 2, y2 = h - ih / 2 - pad;
+  switch (pos) {
+    case 'tl': return { x: x0, y: y0 };
+    case 'tc': return { x: x1, y: y0 };
+    case 'tr': return { x: x2, y: y0 };
+    case 'ml': return { x: x0, y: y1 };
+    case 'mr': return { x: x2, y: y1 };
+    case 'bl': return { x: x0, y: y2 };
+    case 'bc': return { x: x1, y: y2 };
+    case 'br': return { x: x2, y: y2 };
+    default: return { x: x1, y: y1 };
+  }
+}
+function buildToolWatermark() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>💧 图片水印 <small id="wmInfo" style="color:var(--text-light);font-weight:400"></small></h4>
+    <div class="tool-row"><input type="file" id="wmFile" accept="image/*"><span style="color:var(--text-light);font-size:12px">支持 JPG / PNG，水印在本地合成，图片不会上传</span></div>
+    <div id="wmOpts" style="display:none">
+      <div class="tool-row" style="margin-top:10px">
+        <select id="wmKind"><option value="text">文字水印</option><option value="logo">图片水印（Logo）</option></select>
+        <span id="wmTextWrap"><input id="wmText" value="© INTCO" style="width:180px" placeholder="水印文字"></span>
+        <span id="wmLogoWrap" style="display:none"><input type="file" id="wmLogo" accept="image/*"></span>
+      </div>
+      <div class="tool-row" style="margin-top:8px">
+        <span class="wm-t" id="wmSizeLbl">字号</span><input id="wmSize" type="number" min="1" max="60" value="6" style="width:64px"><span class="wm-t" id="wmSizeUnit">% 图宽</span>
+        <span class="wm-t">不透明度</span><input id="wmAlpha" type="range" min="5" max="100" value="38" style="width:110px"><span class="wm-t" id="wmAlphaVal">38%</span>
+        <span class="wm-t" id="wmColorLbl">颜色</span><input type="color" id="wmColor" value="#FFFFFF" style="width:40px;padding:2px">
+        <label class="tool-mini" id="wmStrokeWrap" style="cursor:pointer"><input type="checkbox" id="wmStroke" style="width:auto;vertical-align:-2px"> 描边</label>
+      </div>
+      <div class="tool-row" style="margin-top:8px">
+        <span class="wm-t">位置</span>
+        <select id="wmPos">
+          <option value="br">右下</option><option value="bl">左下</option><option value="tr">右上</option><option value="tl">左上</option>
+          <option value="bc">底部居中</option><option value="tc">顶部居中</option><option value="mc">正中</option>
+          <option value="tile" selected>满屏平铺</option>
+        </select>
+        <span id="wmTileWrap"><span class="wm-t">角度</span><input id="wmAngle" type="number" value="-30" style="width:64px">°
+        <span class="wm-t">间距</span><input id="wmGap" type="range" min="0" max="200" value="60" style="width:96px"></span>
+      </div>
+      <div class="tool-row" style="margin-top:10px">
+        <button id="wmPng">⬇️ 下载 PNG</button>
+        <button id="wmJpg">⬇️ 下载 JPG</button>
+        <span class="tool-out" id="wmOut"></span>
+      </div>
+      <div id="wmPrevWrap" class="wm-canvas-box" style="display:none"></div>
+    </div>
+    <div class="t-tip">平铺模式适合样册图/上架图防盗图；描边能让浅色文字在亮底上仍然清晰。导出为原图尺寸。</div>`;
+  const fileEl = box.querySelector('#wmFile'), opts = box.querySelector('#wmOpts'), info = box.querySelector('#wmInfo');
+  const kind = box.querySelector('#wmKind'), textEl = box.querySelector('#wmText'), logoEl = box.querySelector('#wmLogo');
+  const textWrap = box.querySelector('#wmTextWrap'), logoWrap = box.querySelector('#wmLogoWrap');
+  const sizeEl = box.querySelector('#wmSize'), alphaEl = box.querySelector('#wmAlpha'), alphaVal = box.querySelector('#wmAlphaVal');
+  const colorEl = box.querySelector('#wmColor'), strokeEl = box.querySelector('#wmStroke'), strokeWrap = box.querySelector('#wmStrokeWrap');
+  const colorLbl = box.querySelector('#wmColorLbl'), sizeLbl = box.querySelector('#wmSizeLbl'), sizeUnit = box.querySelector('#wmSizeUnit');
+  const posEl = box.querySelector('#wmPos'), angleEl = box.querySelector('#wmAngle'), gapEl = box.querySelector('#wmGap');
+  const tileWrap = box.querySelector('#wmTileWrap');
+  const prevWrap = box.querySelector('#wmPrevWrap'), out = box.querySelector('#wmOut');
+  const btnPng = box.querySelector('#wmPng'), btnJpg = box.querySelector('#wmJpg');
+  let img = null, logo = null, baseName = 'image';
+  const curOpt = () => ({
+    kind: kind.value, text: textEl.value, logo: logo,
+    fontPct: parseFloat(sizeEl.value) || 6, logoPct: parseFloat(sizeEl.value) || 20,
+    alpha: parseFloat(alphaEl.value), color: colorEl.value, stroke: strokeEl.checked,
+    pos: posEl.value, angle: parseFloat(angleEl.value), gap: parseFloat(gapEl.value),
+  });
+  const makeCanvas = () => {
+    if (!img) return null;
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    drawWatermarkOn(ctx, cv.width, cv.height, curOpt());
+    return cv;
+  };
+  const render = () => {
+    if (!img) return;
+    const cv = makeCanvas();
+    prevWrap.innerHTML = '';
+    prevWrap.appendChild(cv);
+    prevWrap.style.display = '';
+  };
+  const syncKind = () => {
+    const isLogo = kind.value === 'logo';
+    textWrap.style.display = isLogo ? 'none' : '';
+    logoWrap.style.display = isLogo ? '' : 'none';
+    colorLbl.style.display = isLogo ? 'none' : '';
+    colorEl.style.display = isLogo ? 'none' : '';
+    strokeWrap.style.display = isLogo ? 'none' : '';
+    sizeLbl.textContent = isLogo ? 'Logo 宽度' : '字号';
+    sizeUnit.textContent = '% 图宽';
+    sizeEl.value = isLogo ? 20 : 6;
+    render();
+  };
+  kind.onchange = syncKind;
+  [textEl, sizeEl, colorEl, posEl, angleEl].forEach(el => { el.oninput = render; el.onchange = render; });
+  [strokeEl, gapEl].forEach(el => { el.onchange = render; el.oninput = render; });
+  alphaEl.oninput = () => { alphaVal.textContent = alphaEl.value + '%'; render(); };
+  posEl.onchange = () => { tileWrap.style.display = posEl.value === 'tile' ? '' : 'none'; render(); };
+  logoEl.onchange = async () => {
+    const f = logoEl.files && logoEl.files[0];
+    if (!f) return;
+    try { logo = await blobToImage(f); render(); } catch (e) { out.textContent = 'Logo 读取失败'; }
+  };
+  fileEl.onchange = async () => {
+    const f = fileEl.files && fileEl.files[0];
+    if (!f) return;
+    out.textContent = '';
+    try {
+      img = await blobToImage(f);
+      baseName = (f.name || 'image').replace(/\.[^.]+$/, '');
+      info.textContent = `（原图 ${img.naturalWidth}×${img.naturalHeight} · ${fmtKB(f.size)}）`;
+      opts.style.display = '';
+      render();
+    } catch (e) { out.textContent = '图片读取失败'; }
+    fileEl.value = '';
+  };
+  const doDownload = async (fmt) => {
+    if (!img) return;
+    const cv = makeCanvas();
+    if (!cv) return;
+    const type = fmt === 'jpg' ? 'image/jpeg' : 'image/png';
+    const blob = await canvasToBlob(cv, type, 0.92);
+    if (!blob) { out.textContent = '导出失败'; return; }
+    downloadBlob(blob, `${baseName}_watermark.${fmt}`);
+    out.textContent = `✓ 已下载 ${cv.width}×${cv.height} · ${fmtKB(blob.size)}`;
+  };
+  btnPng.onclick = () => doDownload('png');
+  btnJpg.onclick = () => doDownload('jpg');
+  return box;
+}
+
+// ================= 色值转换（HEX / RGB / RGBA / HSL / PANTONE） =================
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360; s = clamp01(s / 100); l = clamp01(l / 100);
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
+}
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d) {
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h: Math.round(h), s: Math.round((max ? d / max : 0) * 100), v: Math.round(max * 100) };
+}
+// 解析 HEX / RGB / RGBA / HSL / HSLA / 裸数字
+function parseColorStr(str) {
+  if (str == null) return null;
+  const s = String(str).trim().toLowerCase();
+  if (!s) return null;
+  let m = s.match(/^#?([0-9a-f]{3})$/);
+  if (m) return { r: parseInt(m[1][0] + m[1][0], 16), g: parseInt(m[1][1] + m[1][1], 16), b: parseInt(m[1][2] + m[1][2], 16), a: 1 };
+  m = s.match(/^#?([0-9a-f]{6})([0-9a-f]{2})?$/);
+  if (m) {
+    const n = parseInt(m[1], 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255, a: m[2] ? parseInt(m[2], 16) / 255 : 1 };
+  }
+  const nums = (s.match(/-?\d*\.?\d+%?/g) || []);
+  const val = (i, scale) => {
+    if (nums[i] == null) return null;
+    const isPct = nums[i].indexOf('%') >= 0;
+    const v = parseFloat(nums[i]);
+    if (isNaN(v)) return null;
+    return isPct ? v * scale / 100 : v;
+  };
+  if (/^rgba?/.test(s)) {
+    const r = val(0, 255), g = val(1, 255), b = val(2, 255);
+    if (r == null || g == null || b == null) return null;
+    let a = nums[3] == null ? 1 : parseFloat(nums[3]);
+    if (isNaN(a)) a = 1;
+    return { r: Math.round(Math.max(0, Math.min(255, r))), g: Math.round(Math.max(0, Math.min(255, g))), b: Math.round(Math.max(0, Math.min(255, b))), a: Math.max(0, Math.min(1, a)) };
+  }
+  if (/^hsla?/.test(s)) {
+    const h = val(0, 360), sa = val(1, 100), l = val(2, 100);
+    if (h == null || sa == null || l == null) return null;
+    let a = nums[3] == null ? 1 : parseFloat(nums[3]);
+    if (isNaN(a)) a = 1;
+    const rgb = hslToRgb(h, sa, l);
+    return { r: rgb.r, g: rgb.g, b: rgb.b, a: Math.max(0, Math.min(1, nums[3] != null && nums[3].indexOf('%') >= 0 ? a / 100 : a)) };
+  }
+  if (nums.length >= 3) {
+    const r = val(0, 255), g = val(1, 255), b = val(2, 255);
+    if (r == null || g == null || b == null) return null;
+    return { r: Math.round(Math.max(0, Math.min(255, r))), g: Math.round(Math.max(0, Math.min(255, g))), b: Math.round(Math.max(0, Math.min(255, b))), a: 1 };
+  }
+  return null;
+}
+const PANTONE_TCX_RAW = "11-0103,F3ECE0,Egret;11-0104,F0EADA,Vanilla Ice;11-0105,EDE3D2,Antique White;11-0106,F0EAD6,Sweet Cream;11-0107,F5EDD6,Papyrus;11-0110,EFE0CD,Buttercream;11-0205,ECEAD0,Glass Green;11-0304,DDE3D5,Water Lily;11-0410,E7EACB,Sylvan Green;11-0507,F5ECD2,Winter White;11-0510,F3E6C9,Afterglow;11-0515,F6EBC8,Lemon Icing;11-0601,F4F5F0,Bright White;11-0602,F2F0EB,Snow White;11-0603,E5D9D3,Pastel Parchment;11-0604,F1E8DF,Gardenia;11-0605,EDE6DE,Jet Stream;11-0606,F2E8DA,Pristine;11-0607,F3EEE7,Sugar Swizzle;11-0608,F0EDE5,Coconut Milk;11-0609,F1ECCA,Ethereal Green;11-0615,F3EAC3,Pear Sorbet;11-0616,F2E6B1,Pastel Yellow;11-0617,F4ECC2,Transparent Yellow;11-0618,EDE9AD,Wax Yellow;11-0619,F6E3B4,Flan;11-0620,EEEA97,Elfin Yellow;11-0622,EEE78E,Yellow Iris;11-0623,ECE99B,Yellow Pear;11-0701,EDE6DB,Whisper White;11-0710,EDEDB7,Tender Yellow;11-0809,F3DFCA,Ecru;11-0907,F0DFCC,Pearled Ivory;11-1001,EFEBE7,White Alyssum;11-1005,EEE2DD,Bridal Blush;11-1302,F1E6DE,Sea Salt;11-1305,F3DFD7,Angel Wing;11-1306,F6E4D9,Cream Pink;11-1404,F3E0D6,Powder Puff;11-1408,F6DBD8,Rosewater;11-2309,F2E2E0,Petal Pink;11-2409,F5E3E2,Delicacy;11-2511,F4E1E6,Shrinking Violet;11-4001,EDF1FE,Brilliant White;11-4201,F0EEE9,Cloud Dancer;11-4202,EFEFE8,Star White;11-4300,F0EEE4,Marshmallow;11-4301,E2E2DA,Lily White;11-4302,F0EFE2,Cannoli Cream;11-4303,E1E3DE,Mystic Blue;11-4601,E2EAEB,Bit Of Blue;11-4604,D8E7E7,Billowing Sail;11-4800,E7E9E7,Blanc De Blanc;11-4801,E8E3D9,Tofu;11-4802,E5EBE3,Summer Shower;11-4803,E0E4D9,Ice;11-4804,E4EADF,Lightest Sky;11-4805,D8E8E6,Hint Of Mint;12-0000,E4D7C5,White Swan;12-0104,E1DBC8,White Asparagus;12-0105,D7D0C0,Bone White;12-0106,D3DEC4,Meadow Mist;12-0108,D6DEC9,Canary Green;12-0109,D2E7CA,Ambrosia;12-0110,D7CFBB,Pistachio Shell;12-0225,B9EAB3,Patina Green;12-0304,E0D5C6,Whitecap Gray;12-0311,D2CDB4,Asparagus Green;12-0312,D7E8BC,Lime Cream;12-0313,CBD5B1,Seafoam Green;12-0315,D4DBB2,White Jade;12-0317,BFD1AD,Gleam;12-0322,CADEA5,Butterfly;12-0404,DAD8C9,Light Gray;12-0418,D3CCA3,Hay;12-0426,D5D593,Mellow Green;12-0435,C9D77E,Daiquiri Green;12-0520,DFE69F,Pale Lime Yellow;12-0521,E1E3A9,Young Wheat;12-0524,DFDE9B,Citron;12-0525,E3EAA5,Luminary Green;12-0530,E5E790,Charlock;12-0601,ECE1D3,Eggnog;12-0605,DFD1BB,Angora;12-0607,E9EAC8,Green Essence;12-0619,D4CC9A,Dusty Yellow;12-0626,DCD494,Lemon Grass;12-0633,DFD87E,Canary Yellow;12-0642,EDDD59,Aurora;12-0643,FEE715,Blazing Yellow;12-0646,EBDF67,Celandine;12-0703,E6DAC4,Seedpearl;12-0704,EDDCC9,White Smoke;12-0709,E4CFB6,Macadamia;12-0710,EFDCC3,Navajo;12-0711,F6E199,Lemon Meringue;12-0712,F4E1C1,Vanilla;12-0713,F4EFC1,Almond Oil;12-0714,F2D6AE,Cornhusk;12-0715,F3E0AC,Double Cream;12-0717,F4E3B5,Anise Flower;12-0718,E7D391,Pineapple Slice;12-0720,F0DD9D,Mellow Yellow;12-0721,F0E79D,Lemonade;12-0722,EFE1A7,French Vanilla;12-0727,FADE85,Sunshine;12-0729,EBCF89,Sundress;12-0736,FDD878,Lemon Drop;12-0737,F8DC6C,Goldfinch;12-0738,EFDC75,Yellow Cream;12-0740,F0E87D,Limelight;12-0741,DFEF87,Sunny Lime;12-0742,F3E779,Lemon Verbena;12-0752,FAE03C,Buttercup;12-0758,FACE6D,Yarrow;12-0804,E6DDC5,Cloud Cream;12-0806,ECDDBE,Rutabaga;12-0807,EBD1BB,Sun Kiss;12-0811,EBD2B7,Dawn;12-0812,F0DEBD,Alabaster Gleam;12-0813,EED0AE,Autumn Blonde;12-0815,F3E0BE,Vanilla Custard;12-0817,F5D7AF,Apricot Gelato;12-0822,F2D1A0,Golden Fleece;12-0824,FAE199,Pale Banana;12-0825,F8DE8D,Popcorn;12-0826,FBD897,Golden Haze;12-0910,E5D0B1,Lambs Wool;12-0911,F2D3BC,Nude;12-0912,F8D5B8,Tender Peach;12-0913,F1CEB3,Alesan;12-0915,FED1BD,Pale Peach;12-0917,FCCAAC,Bleached Apricot;12-0921,E6BD8F,Golden Straw;12-1005,E7CFBD,Novelle Peach;12-1006,E9D4C3,Mother Of Pearl;12-1007,E9D1BF,Pastel Rose Tan;12-1008,EDD2C0,Linen;12-1009,F4D8C6,Vanilla Cream;12-1010,FBD8C9,Scallop Shell;12-1011,EFCFBA,Peach Puree;12-1106,F6E5DB,Sheer Pink;12-1107,F0D8CC,Peach Dust;12-1108,EEDED1,Dew;12-1110,F5D6C6,Creme De Peche;12-1206,E7CFC7,Silver Peony;12-1207,F4CEC5,Pearl Blush;12-1209,F2D8CD,Soft Pink;12-1212,F8CDC9,Veiled Rose;12-1304,F9DBD8,Pearl;12-1305,F4DEDE,Heavenly Pink;12-1310,FBD3D9,Blushing Bride;12-1403,DCCDBC,Tapioca;12-1404,DBCBBD,Pink Tint;12-1605,EDD0CE,Crystal Pink;12-1706,F7D1D1,Pink Dogwood;12-1708,FDC3C6,Crystal Rose;12-1813,F7D1D4,Marys Rose;12-2102,ECD6D6,Mauve Morn;12-2103,E7DCD9,Almost Mauve;12-2901,DFCDC6,Morganite;12-2902,E5D0CF,Mauve Chalk;12-2903,DEC6D3,Light Lilac;12-2904,EED4D9,Primrose Pink;12-2905,EDD0DD,Cradle Pink;12-2906,F8D7DD,Barely Pink;12-2907,F8E0E7,Rose Water;12-4301,D6CEBE,Almond Milk;12-4302,DFDDD7,Vaporous Gray;12-4304,E2E6E0,Bluewash;12-4305,D3DEDF,Spa Blue;12-4306,DDE0DF,Barely Blue;12-4604,C8E0E0,Skylight;12-4607,BCD3D5,Pastel Blue;12-4608,AAD5DB,Clearwater;12-4609,B5CED4,Starlight Blue;12-4610,C9DCDC,Whispering Blue;12-4705,D6DBD9,Blue Blush;12-4805,CBDCDF,Wan Blue;12-4806,CCDAD7,Chalk Blue;12-5201,DADCD0,Icicle;12-5202,DED7C8,Turtledove;12-5203,D2D8D2,Murmur;12-5204,CFDFDB,Morning Mist;12-5206,C6E3E1,Blue Glass;12-5209,C3E9E4,Soothing Sea;12-5303,CBD7D2,Sprout Green;12-5403,D0D9D4,Blue Flower;12-5404,E0E6D7,Whisper Green;12-5406,C3DDD6,Opal Blue;12-5407,D2E8E0,Aqua Glass;12-5408,C7E5DF,Moonlight Jade;12-5409,B8E2DC,Fair Aqua;12-5410,BCE3DF,Bleached Aqua;12-5504,CEE1D4,Clearly Aqua;12-5505,C3DBD4,Glacier;12-5506,C0DCCD,Dusty Aqua;12-5507,BAE5D6,Bay;12-5508,D8E9E5,Hushed Green;12-5603,D3D9D1,Zephyr Blue;12-5808,BAE1D3,Honeydew;12-6204,D7D7C7,Silver Green;12-6205,CFDBD1,Milky Green;12-6206,D8E3D7,Fairest Jade;12-6207,DDE2D6,Frost;12-6208,DCE4D7,Phantom Green;13-0000,CDC6BD,Moonbeam;13-0002,DBD5D1,White Sand;13-0107,C4D1C2,Dewkist;13-0111,BFD1B3,Seacrest;13-0116,B4D3B2,Pastel Green;13-0117,A0DAA9,Green Ash;13-0210,C2CBB4,Fog Green;13-0212,C5CFB6,Tender Greens;13-0215,C3D3A8,Reed;13-0220,B2E79F,Paradise Green;13-0221,A9D39E,Pistachio Green;13-0317,C5CF98,Lily Green;13-0319,CFE09D,Shadow Lime;13-0324,BED38E,Lettuce Green;13-0331,AFCB80,Sap Green;13-0333,E1D590,Lima Bean;13-0401,CBC3B4,Oatmeal;13-0403,CABEB5,Gray Morn;13-0442,B0C965,Green Glow;13-0443,C0DB3A,Lime Popsicle;13-0513,D8CFB2,Frozen Dew;13-0522,CBCE91,Pale Green;13-0530,CDD78A,Lime Sherbet;13-0532,C5CC7B,Celery Green;13-0535,C6EC7A,Sharp Green;13-0540,C3D363,Wild Lime;13-0550,C0D725,Lime Punch;13-0607,D0C5B1,Fog;13-0608,D0D3B7,Aloe Wash;13-0611,D2CBAF,Moth;13-0613,D9CAA5,Chino Green;13-0614,DCD8A8,Garden Glade;13-0624,D5CD94,Golden Mist;13-0632,D2CC81,Endive;13-0633,E7DF99,Chardonnay;13-0640,DACD65,Acacia;13-0644,F3DD3E,Golden Kiwi;13-0645,D3D95F,Limeade;13-0646,EAD94E,Meadowlark;13-0648,D9CE52,Green Sheen;13-0650,D5D717,Sulphur Spring;13-0651,CCDB1E,Evening Primrose;13-0711,D4CAB0,Putty;13-0715,D8C9A3,Sea Mist;13-0720,E5D68E,Custard;13-0725,DAC483,Raffia;13-0739,DEC05F,Cream Gold;13-0746,EEC843,Maize;13-0752,F3BF08,Lemon;13-0755,F6D155,Primrose Yellow;13-0756,F9D857,Lemon Zest;13-0758,FFD02E,Dandelion;13-0759,F4BF3A,Solar Power;13-0814,EAD3AE,Summer Melon;13-0815,E7D3AD,Banana Crepe;13-0822,EDD59E,Sunlight;13-0840,FED777,Snapdragon;13-0849,FED450,Habanero Gold;13-0850,FFD662,Aspen Gold;13-0851,FED55D,Minion Yellow;13-0858,FFDA29,Vibrant Yellow;13-0859,FFC300,Lemon Chrome;13-0905,DDD5C7,Birch;13-0907,D8CCBB,Sandshell;13-0908,DFD1BE,Parchment;13-0915,DCC99E,Reed Yellow;13-0916,E8D0A7,Chamomile;13-0917,E7D1A1,Italian Straw;13-0919,D2C29D,Soybean;13-0922,E0C992,Straw;13-0932,EDC373,Cornsilk;13-0935,FFC87D,Flax;13-0939,F7B768,Golden Cream;13-0940,F7C46C,Sunset Gold;13-0941,FFCF73,Banana Cream;13-0942,FAB75A,Amber Yellow;13-0945,FFC66E,Pale Marigold;13-0946,E7AA56,Jurassic Gold;13-0947,FCB953,Banana;13-1006,DBCCB5,Creme Brulee;13-1007,D2CAAF,Oyster White;13-1008,DACCB4,Bleached Sand;13-1009,DAC7AB,Biscotti;13-1010,E5CCAF,Gray Sand;13-1011,DAC0A7,Ivory Cream;13-1012,D2C2AC,Frosted Almond;13-1013,DDBCA0,Appleblossom;13-1014,D8B998,Mellow Buff;13-1015,DCBD9E,Honey Peach;13-1016,DEC5A5,Wheat;13-1017,F4C29F,Almond Cream;13-1018,E3BC8E,Desert Dust;13-1019,F8C19A,Cream Blush;13-1020,FBBE99,Apricot Ice;13-1021,FFBB9E,Prairie Sunset;13-1022,F4BA94,Caramel Cream;13-1023,FFBE98,Peach Fuzz;13-1024,EBC396,Buff;13-1025,F8CE97,Impala;13-1026,FFCDA8,Creampuff;13-1027,F1BD89,Apricot Cream;13-1030,F6C289,Sunburst;13-1031,FACD9E,Apricot Sherbet;13-1105,C7BBA4,Brown Rice;13-1106,DECDBE,Sand Dollar;13-1107,DACBBE,Whisper Pink;13-1108,E4C7B8,Cream Tan;13-1109,EDCAB5,Bisque;13-1114,F4C9B1,Bellini;13-1125,F5B895,Peach Quartz;13-1208,E2BDB3,Peachy Keen;13-1308,DACAB7,Brazilian Sand;13-1310,F4C6C3,English Rose;13-1318,FFC4B2,Tropical Peach;13-1404,EDCDC2,Pale Dogwood;13-1405,E1CFC6,Shell;13-1406,F5D1C8,Cloud Pink;13-1407,F7D5CC,Creole Pink;13-1408,EEC4BE,Chintz Rose;13-1409,F7C8C2,Seashell Pink;13-1504,E4CCC6,Peach Blush;13-1510,FFC4BC,Impatiens Pink;13-1511,F7CDC7,Pink Salt;13-1513,FAC8C3,Gossamer Pink;13-1520,F7CAC9,Rose Quartz;13-1904,E6C5CA,Chalk Pink;13-1906,F9C2CD,Rose Shadow;13-2004,E7C9CA,Potpourri;13-2005,F4C3C4,Strawberry Cream;13-2006,F5BEC7,Almond Blossom;13-2010,F3BBCA,Orchid Pink;13-2802,F2C1D1,Fairy Tale;13-2803,E1C6CC,Pale Lilac;13-2804,E9C3CF,Parfait Pink;13-2805,E6BCCD,Pink Mist;13-2806,EFC1D6,Pink Lady;13-2807,F2CFDC,Ballerina;13-2808,EBCED5,Ballet Slipper;13-3207,F7CEE0,Cherry Blossom;13-3405,E0C7D7,Lilac Snow;13-3406,E0D0DB,Orchid Ice;13-3801,D7CBC4,Crystal Gray;13-3802,DBD2DB,Orchid Tint;13-3803,D7CDCD,Lilac Ash;13-3804,D4CACD,Gray Lilac;13-3805,CEC3D2,Orchid Hush;13-3820,D2C4D6,Lavender Fog;13-3920,BDC6DC,Halogen Blue;13-4103,C9D3DC,Illusion Blue;13-4104,C6C5C6,Antarctica;13-4105,D0D0DA,Lilac Hint;13-4108,D5D5D8,Nimbus Cloud;13-4110,BFC7D6,Arctic Ice;13-4111,BFCAD6,Plein Air;13-4200,B5CEDF,Omphalodes;13-4201,C3C6C8,Oyster Mushroom;13-4303,CACCCB,Dawn Blue;13-4304,C0CEDA,Ballad Blue;13-4305,D1D5D0,Foggy Dew;13-4308,B5C7D3,Baby Blue;13-4403,D2CFC4,Silver Birch;13-4404,C6D2D2,Ice Flow;13-4405,BFCDCC,Misty Blue;13-4409,B2D4DD,Blue Glow;13-4411,A1C8DB,Crystal Blue;13-4720,91DCE8,Tanager Turquoise;13-4804,C4D6D3,Pale Blue;13-4809,A5CFD5,Plume;13-4810,98DDDE,Limpet Shell;13-4909,ACDFDD,Blue Light;13-4910,9FD9D7,Blue Tint;13-5304,CFC8BD,Rainy Day;13-5305,C1CCC2,Pale Aqua;13-5306,B0D3D1,Icy Morn;13-5309,99C5C4,Pastel Turquoise;13-5313,81D7D3,Aruba Blue;13-5409,A1D7C9,Yucca;13-5410,ABD3DB,Iced Aqua;13-5412,96DFCE,Beach Glass;13-5414,87D8C3,Ice Green;13-5714,87D7BE,Cabbage;13-5907,B2CFBE,Gossamer Green;13-5911,AACCB9,Birds Egg Green;13-6006,CAD3C1,Almost Aqua;13-6007,BED3BB,Spray;13-6008,BCD9C8,Misty Jade;13-6009,AFDDCC,Brook Green;13-6105,CBCEBE,Celadon Tint;13-6106,C5CCC0,Green Tint;13-6107,C1CEC1,Green Lily;13-6108,B8CCBA,Celadon;13-6110,AACEBC,Mist Green;13-6208,BCCAB3,Bok Choy;14-0000,C1B7B0,Silver Gray;14-0002,CAC2B9,Pumice Stone;14-0105,C3BDAB,Overcast;14-0108,C8C1AB,Castle Wall;14-0114,B5C1A5,Celadon Green;14-0115,B4C79C,Foam Green;14-0116,B5C38E,Margarita;14-0121,A7C796,Nile Green;14-0123,A3C893,Arcadian Green;14-0127,8BC28C,Greengage;14-0156,7ED37F,Summer Green;14-0210,BFB9A3,Tidal Foam;14-0216,B6BA99,Lint;14-0217,C0CBA1,Seedling;14-0223,B4BB85,Nile;14-0226,A3C57D,Opaline Green;14-0232,A1CA7B,Jade Lime;14-0244,97BC62,Bright Lime Green;14-0340,BADF30,Acid Lime;14-0418,BAB696,Bog;14-0425,C2C18D,Beechnut;14-0434,BABC72,Green Banana;14-0445,B5BF50,Bright Chartreuse;14-0446,B5CC39,Tender Shoots;14-0452,9FC131,Lime Green;14-0615,CAC4A4,Green Haze;14-0626,CCB97E,Dried Moss;14-0627,CFC486,Shadow Green;14-0636,D1C87C,Muted Lime;14-0647,CEC153,Celery;14-0708,C4B6A6,Cement;14-0721,C0AD7C,Hemp;14-0740,D2B04C,Bamboo;14-0754,E4BF45,Super Lemon;14-0755,DDB614,Sulphur;14-0756,F7D000,Empire Yellow;14-0760,FFD400,Cyber Yellow;14-0826,CFBB7B,Pampas;14-0827,E3CC81,Dusky Citron;14-0837,DAB965,Misted Yellow;14-0846,E2B051,Yolk Yellow;14-0847,F1BF70,Buff Yellow;14-0848,F0C05A,Mimosa;14-0850,FDC04E,Daffodil;14-0851,FBC85F,Samoan Sun;14-0852,F3C12C,Freesia;14-0925,D6C69A,Parsnip;14-0935,DABE81,Jojoba;14-0936,DFC08A,Sahara Sun;14-0941,EBA851,Beeswax;14-0951,E2A829,Golden Rod;14-0952,D8AE47,Spicy Mustard;14-0955,F9AC2F,Citrus;14-0957,F7B718,Spectra Yellow;14-1012,B39F8D,Gilded Beige;14-1014,CBBFA2,Gravel;14-1025,C9B27C,Cocoon;14-1031,D1B272,Rattan;14-1036,D6AF66,Ochre;14-1038,D7B57F,New Wheat;14-1041,DDA758,Golden Apricot;14-1045,EFAD55,Amber;14-1050,FADC53,Marigold;14-1051,FFB865,Warm Apricot;14-1052,FBAA4C,Kumquat;14-1064,FFA500,Saffron;14-1106,C5BBAE,Peyote;14-1107,CBC1AE,Oyster Gray;14-1108,D7CAB0,Wood Ash;14-1110,D1BE9B,Boulder;14-1112,CAB698,Pebble;14-1113,D8C09D,Marzipan;14-1116,CCB390,Almond Buff;14-1118,D5BA98,Beige;14-1119,DFC09F,Winter Wheat;14-1120,E2C4A6,Apricot Illusion;14-1122,DAB58F,Sheepskin;14-1127,E0B589,Desert Mist;14-1128,FFBB7C,Buff Orange;14-1133,ECAA79,Apricot Nectar;14-1135,FEAA7B,Salmon Buff;14-1139,F5A26F,Pumpkin;14-1159,FFA010,Zinnia;14-1208,C0AC92,Irish Cream;14-1209,CEBAA8,Smoke Gray;14-1210,D8C0AD,Shifting Sand;14-1212,D1B7A0,Frappe;14-1213,D2B49C,Toasted Almond;14-1217,E2BEA2,Amberlight;14-1219,F8BFA8,Peach Parfait;14-1220,E6AF91,Peach Nougat;14-1224,EDAA86,Coral Sands;14-1225,FBB995,Beach Sand;14-1227,F2A987,Peach;14-1228,FFB59B,Peach Nectar;14-1230,FBAC82,Apricot Wash;14-1231,FFB181,Peach Cobbler;14-1241,F9AA7D,Orange Chiffon;14-1305,BDACA3,Mushroom;14-1307,CDB2A5,Rose Dust;14-1309,DBBEB7,Peach Whip;14-1310,D7B8AB,Cameo Rose;14-1311,DDB6AB,Evening Sand;14-1312,E4BFB3,Pale Blush;14-1313,DBB0A2,Rose Cloud;14-1314,DFBAA9,Spanish Villa;14-1315,CFB095,Hazelnut;14-1316,DEAA9B,Dusty Pink;14-1318,E8A798,Coral Pink;14-1323,FAAA94,Salmon;14-1324,FDB2AB,Peach Bud;14-1418,FBBDAF,Peach Melba;14-1419,FFB2A5,Peach Pearl;14-1420,FEAEA5,Apricot Blush;14-1506,D3B4AD,Rose Smoke;14-1508,DCB1AF,Silver Pink;14-1511,ECB2B3,Powder Pink;14-1513,F2B2AE,Blossom;14-1521,F4A6A3,Peaches N Cream;14-1714,EFA6AA,Quartz Pink;14-1803,D4BAB6,Sepia Rose;14-1905,E2C1C0,Lotus;14-1907,DFB8B6,Peachskin;14-1909,E6B2B8,Coral Blush;14-1911,F5B0BD,Candy Pink;14-2305,D8AAB7,Pink Nectar;14-2307,DBA9B8,Cameo Pink;14-2311,F0A1BF,Prism Pink;14-2710,E9ADCA,Lilac Sachet;14-2808,E8B5CE,Sweet Lilac;14-3204,CEADBE,Fragrant Lilac;14-3206,D4B9CB,Winsome Orchid;14-3207,D9AFCA,Pink Lavender;14-3209,D8A1C4,Pastel Lavender;14-3612,C5AECF,Orchid Bloom;14-3710,BFB4CB,Orchid Petal;14-3803,D1C0BF,Hushed Violet;14-3805,BAAFBC,Iris;14-3812,BDB0D0,Pastel Lilac;14-3903,C3BABF,Lilac Marble;14-3904,BDB8C7,Evening Haze;14-3905,C5C0D0,Lavender Blue;14-3906,B1AAB3,Raindrops;14-3907,B9B3C5,Thistle;14-3911,BAB8D3,Purple Heather;14-3912,9FA9BE,Zen Blue;14-3949,B7C0D7,Xenon Blue;14-4002,CAC5C2,Wind Chime;14-4102,C5C6C7,Glacier Gray;14-4103,BBBCBC,Gray Violet;14-4105,BABCC0,Micro Chip;14-4106,BBC1CC,Gray Dawn;14-4107,B9BABD,Quiet Gray;14-4110,B7C0D6,Heather;14-4112,ADBED3,Skyway;14-4115,A5B8D0,Cashmere Blue;14-4121,93B4D7,Blue Bell;14-4122,92B6D5,Airy Blue;14-4201,C5C5C5,Lunar Rock;14-4202,AFB1B4,Harbor Mist;14-4203,BEBDBD,Vapor Blue;14-4206,B0B7BE,Pearl Blue;14-4210,A3B4C4,Celestial Blue;14-4214,96B3D2,Powder Blue;14-4306,A2B6B9,Cloud Blue;14-4307,A9C0CB,Winter Sky;14-4310,78BDD4,Blue Topaz;14-4311,A9CADA,Corydalis Blue;14-4313,9DC3D4,Aquamarine;14-4315,98BFCA,Sea Angel;14-4317,A5C5D9,Cool Blue;14-4318,8ABAD3,Sky Blue;14-4320,79B5DB,Baltic Sea;14-4500,C2BEB6,Moonstruck;14-4501,BDB6AB,Silver Lining;14-4502,BAC2BA,Mercury;14-4503,BABFBC,Metal;14-4504,BCC8C6,Sky Gray;14-4505,BFC8C3,Smoke;14-4506,9EB6B8,Ether;14-4508,9EC1CC,Stratosphere;14-4510,99C1CC,Aquatic;14-4511,88C3D0,Gulf Stream;14-4512,95C0CB,Porcelain Blue;14-4516,87C2D4,Petit Four;14-4522,4ABBD5,Bachelor Button;14-4615,83C2CD,Antiqua Sand;14-4620,95DEE3,Island Paradise;14-4710,82C2C7,Tibetan Stone;14-4804,B9BCB6,Blue Fox;14-4807,B4C8C2,Surf Spray;14-4809,A3CCC9,Eggshell Blue;14-4810,9CC2C5,Canal Blue;14-4811,7BC4C4,Aqua Sky;14-4812,85CED1,Aqua Splash;14-4814,83C5CD,Angel Blue;14-4816,58C9D4,Blue Radiance;14-4908,A8C0BB,Harbor Gray;14-5002,A2A2A1,Silver;14-5413,81C3B4,Holiday;14-5416,60C9B3,Bermuda;14-5420,58C8B6,Cockatoo;14-5706,A9BDB1,Silt Green;14-5707,ADC3B4,Aqua Foam;14-5711,8EC5B6,Ocean Wave;14-5713,76C1B2,Cascade;14-5714,7ACCB8,Beveled Glass;14-5718,77CFB7,Opal;14-5721,4BC3A8,Electric Green;14-6007,B7C2B2,Sea Foam;14-6008,B5CBBB,Subtle Green;14-6011,9BBEA9,Grayed Jade;14-6017,7FBB9E,Neptune Green;14-6305,C1BCAC,Pelican;14-6308,B7B59F,Alfalfa;14-6312,AAC0AD,Cameo Green;14-6316,9FC09C,Sprucestone;14-6319,8BBA94,Meadow;14-6324,82B185,Peapod;14-6327,7CB083,Zephyr Green;14-6329,76B583,Absinthe Green;14-6330,6BCD9C,Spring Bud;14-6340,6DCE87,Spring Bouquet;14-6408,ABA798,Abbey Stone;15-0000,B3ADA7,Dove;15-0146,79C753,Green Flash;15-0309,AEA692,Spray Green;15-0318,B2AC88,Sage Green;15-0326,A4AE77,Tarragon;15-0332,9FAF6C,Leaf Green;15-0336,9CAD60,Herbal Garden;15-0341,8DB051,Parrot Green;15-0343,88B04B,Greenery;15-0513,B1A992,Eucalyptus;15-0522,B5AD88,Pale Olive Green;15-0523,B0B487,Winter Pear;15-0525,B3B17B,Weeping Willow;15-0531,A3A969,Sweet Pea;15-0533,C4BF71,Linden Green;15-0535,AFAF5E,Palm;15-0538,B0B454,Green Oasis;15-0543,B5B644,Apple Green;15-0545,7EC845,Jasmine Green;15-0548,B8AF23,Citronelle;15-0628,B7B17A,Leek Green;15-0636,BDB369,Golden Green;15-0643,BCA949,Cress Green;15-0646,C7B63C,Warm Olive;15-0703,B5ACAB,Ashes Of Roses;15-0719,BBAA7E,Silver Fern;15-0730,BCA66A,Southern Moss;15-0732,C1A65C,Olivenite;15-0743,C4A647,Oil Yellow;15-0751,CDA323,Lemon Curry;15-0850,D4AE40,Ceylon Yellow;15-0927,BD9865,Pale Gold;15-0942,C5A253,Sauterne;15-0948,C6973F,Golden Spice;15-0953,CB8E16,Golden Yellow;15-0955,ECA825,Old Gold;15-0960,D69C2F,Mango Mojito;15-1020,BFA58A,Ginger Root;15-1040,B18F6A,Iced Coffee;15-1045,D9922E,Autumn Blaze;15-1046,D39C43,Mineral Yellow;15-1049,F2AB46,Artisans Gold;15-1050,D99938,Golden Glow;15-1051,D7942D,Golden Orange;15-1054,EE9626,Cadmium Yellow;15-1058,FC9E21,Radiant Yellow;15-1062,FFB000,Gold Fusion;15-1114,AE997D,Travertine;15-1116,BAAA91,Safari;15-1119,BFA77F,Taos Taupe;15-1125,CCA580,Porcini;15-1132,C9A86A,Fall Leaf;15-1142,D1A054,Honey Gold;15-1145,F7B26A,Chamois;15-1147,E19640,Butterscotch;15-1150,E08119,Dark Cheddar;15-1151,F4963A,Iceland Poppy;15-1153,F19035,Apricot;15-1157,FB8B23,Flame Orange;15-1160,FFA64F,Blazing Orange;15-1164,FF8D00,Bright Marigold;15-1213,BFA387,Candied Ginger;15-1214,C5AE91,Warm Sand;15-1215,BAA38B,Sesame;15-1216,BFAF92,Pale Khaki;15-1217,C7B595,Mojave Desert;15-1218,CEB899,Semolina;15-1220,C5A582,Latte;15-1225,CCA67F,Sand;15-1231,D2A172,Clay;15-1234,DD9C6B,Gold Earth;15-1237,DD9760,Apricot Tan;15-1239,FFA177,Cantaloupe;15-1242,EC935E,Muskmelon;15-1243,FEA166,Papaya;15-1245,FFA368,Mock Orange;15-1247,F88F58,Tangerine;15-1262,FE8C18,Carrot Curl;15-1263,FF8812,Autumn Glory;15-1264,FE840E,Turmeric;15-1304,B7A793,Humus;15-1305,B8AD9E,Feather Gray;15-1306,B8A99A,Oxford Tan;15-1307,B6A893,White Pepper;15-1308,BDAB9B,Doeskin;15-1309,C5B1A0,Moonlight;15-1314,C1A68D,Cuban Sand;15-1315,C2A594,Rugby Tan;15-1316,C9A38D,Maple Sugar;15-1317,C39D88,Sirocco;15-1318,DFB19B,Pink Sand;15-1319,E5B39B,Almost Apricot;15-1322,D29B83,Dusty Coral;15-1327,D99B7C,Peach Bloom;15-1331,FAA181,Coral Reef;15-1333,E1927A,Canyon Sunset;15-1334,EA9575,Shell Coral;15-1335,FE7E03,Tangelo;15-1340,F99471,Cadmium Orange;15-1415,E2A9A1,Coral Cloud;15-1423,FB9F93,Peach Amber;15-1425,C0916C,Fenugreek;15-1429,CC7357,Dusted Clay;15-1430,BD8C66,Pastry Shell;15-1433,FCA289,Papaya Punch;15-1435,FF9687,Desert Flower;15-1506,A5958F,Etherea;15-1511,C5A193,Mahogany Rose;15-1512,CAA39A,Misty Rose;15-1515,D9A6A1,Mellow Rose;15-1516,D3A297,Peach Beige;15-1520,EB9687,Blooming Dahlia;15-1523,E29A86,Shrimp;15-1530,FA9A85,Peach Pink;15-1607,C6A4A4,Pale Mauve;15-1611,D69FA2,Bridal Rose;15-1614,D1969A,Blush;15-1621,F8A39D,Candlelight Peach;15-1624,FC8F9B,Conch Shell;15-1626,FF8D94,Salmon Rose;15-1717,EEA0A6,Pink Icing;15-1816,ED9CA8,Peony;15-1821,F7969E,Flamingo Pink;15-1905,C5AEB1,Burnished Lilac;15-1906,C89FA5,Zephyr;15-1912,DE98AB,Sea Pink;15-1920,EE819F,Morning Glory;15-1922,F6909D,Geranium Pink;15-2205,BFA3AF,Dawn Pink;15-2210,D294AA,Orchid Smoke;15-2214,E290B2,Rosebloom;15-2215,EC9ABE,Begonia Pink;15-2216,F18AAD,Sachet Pink;15-2217,E881A6,Aurora Pink;15-2705,C0A5AE,Keepsake Lilac;15-2706,C2ACB1,Violet Ice;15-2718,DF88B7,Fuchsia Pink;15-2913,DE9BC4,Lilac Chiffon;15-3207,C49BD4,Mauve Mist;15-3214,D198C5,Orchid;15-3412,D1ACCE,Orchid Bouquet;15-3507,BDABBE,Lavender Frost;15-3508,C0AAC0,Fair Orchid;15-3520,B99BC5,Crocus Petal;15-3620,BCA4CB,Lavendula;15-3716,B09FCA,Purple Rose;15-3720,B3A0C9,Lilac Breeze;15-3800,A7A19E,Porpoise;15-3802,B7A9AC,Cloud Gray;15-3807,BCB4C4,Misty Lilac;15-3817,AFA4CE,Lavender;15-3908,A9ADC2,Icelandic Blue;15-3909,AAAAC4,Cosmic Sky;15-3910,A2A1BA,Languid Lavender;15-3912,9A9EB3,Aleutian;15-3915,A5B3CC,Kentucky Blue;15-3919,91A8D0,Serenity;15-3920,8CADD3,Placid Blue;15-3930,81A0D4,Vista Blue;15-3932,819AC1,Bel Air Blue;15-4003,B5BAB6,Storm Gray;15-4005,A0BCD0,Dream Blue;15-4008,9BABBB,Blue Fog;15-4020,9BB7D4,Cerulean;15-4030,9EB4D3,Chambray Blue;15-4101,AEB2B5,High Rise;15-4105,A3BDD3,Angel Falls;15-4225,6DA9D2,Alaskan Blue;15-4305,98A0A5,Quarry;15-4306,A3A9A6,Belgian Block;15-4307,7F8793,Tradewinds;15-4309,A2B9C2,Sterling Blue;15-4312,8FADBD,Forget Me Not;15-4319,77ACC7,Air Blue;15-4323,5CA6CE,Ethereal Blue;15-4415,72A8BA,Milky Blue;15-4421,5CACCE,Blue Grotto;15-4427,4CA5C7,Norse Blue;15-4428,5DAFCE,Crystal Seas;15-4502,BEB7B0,Silver Cloud;15-4503,BBB1A8,Chateau Gray;15-4702,A8B0AE,Puritan Gray;15-4703,ABAFAE,Mirage Gray;15-4704,A9AFAA,Pigeon;15-4706,99AEAE,Gray Mist;15-4707,A5BCBB,Blue Haze;15-4712,76AFB6,Marine Blue;15-4714,61AAB1,Aquarelle;15-4715,6BAAAE,Aqua Sea;15-4717,64A1AD,Aqua;15-4720,38AFCD,River Blue;15-4722,44BBCA,Capri;15-4825,32BECC,Blue Curacao;15-5205,A5B2AA,Aqua Gray;15-5207,89ACAC,Aquifer;15-5209,87B9BC,Aqua Haze;15-5210,76A7AB,Nile Blue;15-5217,53B0AE,Blue Turquoise;15-5218,67BCB3,Pool Blue;15-5416,56BEAB,Florida Keys;15-5421,00B89F,Aqua Green;15-5425,00AF9F,Atlantis;15-5516,3AB0A2,Waterfall;15-5519,45B5AA,Turquoise;15-5534,009B5C,Bright Green;15-5704,B2B6AC,Mineral Gray;15-5706,A3B5A6,Frosty Green;15-5711,7BB5A3,Dusty Jade Green;15-5718,55C6A9,Biscay Green;15-5728,00B694,Mint Leaf;15-5812,9BC2B1,Lichen;15-5819,64BFA4,Spearmint;15-6114,97C1A1,Hemlock;15-6120,7CB08A,Ming;15-6123,60B892,Jade Cream;15-6304,AEACA1,Pussywillow Gray;15-6307,B1B09F,Agate Gray;15-6310,A8B197,Swamp;15-6313,ADBBA1,Laurel Green;15-6315,A8BBA2,Smoke Green;15-6316,92AF88,Fair Green;15-6317,9EBC97,Quiet Green;15-6322,7CB68E,Light Grass Green;15-6340,45BE76,Irish Green;15-6410,AFAB97,Moss Gray;15-6414,A1AD92,Reseda;15-6423,91AC80,Forest Shade;15-6428,86A96F,Green Tea;15-6432,6FA26B,Shamrock;15-6437,7BB369,Grass Green;15-6442,79B465,Bud Green;16-0000,9F9C99,Paloma;16-0110,A7AE9E,Desert Sage;16-0123,89A06B,Tendril;16-0205,9A9186,Vintage Khaki;16-0207,A29E92,London Fog;16-0213,999B85,Tea;16-0220,8AA282,Mistletoe;16-0224,7D956D,Green Eyes;16-0228,759465,Jade Green;16-0230,9BB53E,Macaw Green;16-0233,739957,Meadow Green;16-0235,7AAB55,Kiwi;16-0237,75A14F,Foliage;16-0421,91946E,Sage;16-0430,9AA067,Fern;16-0435,A0AC4F,Dark Citron;16-0439,909B4C,Spinach Green;16-0518,A49A79,Gray Green;16-0526,928E64,Cedar;16-0532,A09D59,Moss;16-0540,A3A04E,Oasis;16-0543,9A9738,Golden Lime;16-0545,9C9A40,Split Pea;16-0550,ABA44D,Lentil Sprout;16-0613,A39F86,Elm;16-0632,9A8B4F,Willow;16-0639,AF9841,Golden Olive;16-0713,A0987C,Slate Green;16-0726,A39264,Khaki;16-0730,B59E5F,Antique Gold;16-0737,AA9855,Burnished Gold;16-0742,AE8E2C,Green Sulphur;16-0806,A89A91,Goat;16-0836,C8B273,Rich Gold;16-0840,B9A023,Antique Moss;16-0847,A98B2D,Olive Oil;16-0906,AD9F93,Simply Taupe;16-0920,BCA483,Curds And Whey;16-0924,C4AB86,Croissant;16-0928,BE9E6F,Curry;16-0940,C39B6A,Taffy;16-0945,C3964D,Tinsel;16-0946,BA9238,Honey;16-0947,CF9F52,Bright Gold;16-0948,B68A3A,Harvest Gold;16-0950,C39449,Narcissus;16-0952,C89720,Nugget Gold;16-0953,C4962C,Tawny Olive;16-0954,BC8D1F,Arrowwood;16-1010,AF9A7E,Incense;16-1054,D39237,Sunflower;16-1103,ADA396,Pure Cashmere;16-1104,A49887,Crockery;16-1105,AEA393,Plaza Taupe;16-1106,A59788,Tuffet;16-1107,9F9586,Aluminum;16-1108,A79B82,Twill;16-1109,928475,Greige;16-1110,A6997A,Olive Gray;16-1118,A49775,Sponge;16-1120,B09A77,Starfish;16-1126,B19664,Antelope;16-1133,B08E51,Mustard Gold;16-1139,C19552,Amber Gold;16-1140,D0893F,Yam;16-1142,DB9B59,Golden Nugget;16-1143,CA9456,Honey Yellow;16-1144,CF9C63,Oak Buff;16-1148,CF8848,Nugget;16-1149,C87629,Desert Sun;16-1150,D08344,Topaz;16-1164,DF7500,Orange Pepper;16-1210,B19D8D,Light Taupe;16-1212,B49F89,Nomad;16-1219,BE9785,Tuscany;16-1220,C79685,Cafe Creme;16-1221,B09080,Roebuck;16-1235,BD8B69,Sandstorm;16-1253,DC793A,Orange Ochre;16-1255,E47127,Russet Orange;16-1257,F48037,Sun Orange;16-1260,D56231,Harvest Pumpkin;16-1305,AA9F96,String;16-1310,AA907D,Natural;16-1315,A9947A,Cornstalk;16-1317,B99984,Brush;16-1318,AF9483,Warm Taupe;16-1320,B69885,Nougat;16-1323,B38B71,Macaroon;16-1324,B89B72,Lark;16-1325,C47E5A,Copper;16-1326,B59A6A,Prairie Sand;16-1327,C08768,Toasted Nut;16-1328,C48A69,Sandstone;16-1329,E38E84,Coral Haze;16-1330,D29380,Muted Clay;16-1331,CA9978,Toast;16-1332,C68463,Pheasant;16-1333,B98E68,Doe;16-1334,B69574,Tan;16-1336,B4835B,Biscuit;16-1337,D27D56,Coral Gold;16-1338,DE8E65,Copper Tan;16-1340,CE7B5B,Brandied Melon;16-1341,C68F65,Butterum;16-1342,D18E54,Buckskin;16-1343,F38554,Autumn Sunset;16-1344,E27A53,Dusty Orange;16-1345,D27F63,Sun Baked;16-1346,C77943,Golden Ochre;16-1347,C5733D,Peach Caramel;16-1348,C57644,Tomato Cream;16-1349,F3774D,Coral Rose;16-1350,DC793E,Amberglow;16-1356,F47327,Persimmon Orange;16-1357,FF8C55,Bird Of Paradise;16-1358,F96714,Orange Tiger;16-1359,FA7A35,Orange Peel;16-1360,FF8656,Nectarine;16-1361,FD6F3B,Carrot;16-1362,F9633B,Vermillion Orange;16-1363,E95C20,Puffins Bill;16-1364,FF7420,Vibrant Orange;16-1406,A89C94,Atmosphere;16-1407,A89A8E,Cobblestone;16-1412,A58D7F,Stucco;16-1414,A28776,Chanterelle;16-1415,A78C8B,Almondine;16-1422,BA8671,Cork;16-1429,B37256,Sunburn;16-1431,CE8477,Canyon Clay;16-1432,A7754D,Almond;16-1434,E29D94,Coral Almond;16-1435,CE785D,Carnelian;16-1438,A46F44,Meerkat;16-1439,C37C54,Caramel;16-1440,CA6C56,Langoustino;16-1441,D16F52,Arabesque;16-1442,FE8863,Melon;16-1443,CD7E4D,Apricot Buff;16-1448,C86733,Burnt Orange;16-1449,B45422,Gold Flame;16-1450,DF7253,Flamingo;16-1451,FE6347,Nasturtium;16-1452,F36944,Firecracker;16-1453,F96531,Exotic Orange;16-1454,D86D39,Jaffa Orange;16-1459,EC6A37,Mandarin Orange;16-1460,FC642D,Dragon Fire;16-1462,F56733,Golden Poppy;16-1506,A99592,Bark;16-1508,BA9F99,Adobe Rose;16-1509,BBA5A0,Shadow Gray;16-1510,AE9490,Fawn;16-1511,D19C97,Rose Tan;16-1516,C08A80,Cameo Brown;16-1518,CE8E8B,Rosette;16-1520,DD9289,Lobster Bisque;16-1522,C2877B,Rose Dawn;16-1526,D38377,Terra Cotta;16-1529,E9897E,Burnt Coral;16-1532,D77E70,Crabapple;16-1539,ED7464,Coral;16-1541,F6745F,Camellia;16-1542,FF7F6A,Fresh Salmon;16-1543,FF8576,Fusion Coral;16-1544,F67866,Persimmon;16-1545,F77464,Coral Quartz;16-1546,FF6F61,Living Coral;16-1548,F7786B,Peach Echo;16-1606,98878C,Purple Dove;16-1610,CA848A,Brandied Apricot;16-1617,D18489,Mauveglow;16-1620,DC7178,Tea Rose;16-1624,DA7E7A,Lantana;16-1626,DE8286,Peach Blossom;16-1632,F88180,Shell Pink;16-1640,F56C73,Sugar Coral;16-1641,F97272,Georgia Peach;16-1703,AB9895,Sphinx;16-1707,AF9294,Deauville Mauve;16-1708,B88995,Lilas;16-1710,B98391,Foxglove;16-1712,C28799,Polignac;16-1715,CE8498,Wild Rose;16-1720,E78B90,Strawberry Ice;16-1723,E6798E,Confetti;16-1731,F57F8E,Strawberry Pink;16-1735,EE6D8A,Pink Lemonade;16-1806,AE8C8E,Woodrose;16-2107,B0879B,Orchid Haze;16-2111,B58299,Mauve Orchid;16-2120,D979A2,Wild Orchid;16-2124,ED7A9E,Pink Carnation;16-2126,E96A97,Azalea Pink;16-2215,CE879F,Cashmere Rose;16-2614,D28FB0,Moonlite Mauve;16-3110,B88AAC,Smoky Grape;16-3115,C67FAE,Crocus;16-3116,CA80B1,Opera Mauve;16-3118,D687BA,Cyclamen;16-3205,B598A3,Mauve Shadows;16-3304,A5929D,Sea Fog;16-3307,AE90A7,Lavender Mist;16-3310,B18EAA,Lavender Herb;16-3320,C17FB5,Violet;16-3416,C193C0,Violet Tulle;16-3520,B085B7,African Violet;16-3521,BE9CC1,Lupine;16-3525,A98BAF,Regal Orchid;16-3617,B793C0,Sheer Lilac;16-3720,9F90C1,Sand Verbena;16-3800,9F8D89,Satellite;16-3801,A49E9E,Opal Gray;16-3802,A09998,Ash;16-3803,A49CA0,Gull Gray;16-3810,A198AF,Wisteria;16-3812,9D96B2,Heirloom Lilac;16-3815,A692BA,Viola;16-3817,9F86AA,Rhapsody;16-3823,9E91C3,Violet Tulip;16-3850,A19FA5,Silver Sconce;16-3905,9896A4,Lilac Gray;16-3907,9C9BA7,Dapple Gray;16-3911,9F99AA,Lavender Aura;16-3915,98979A,Alloy;16-3916,92949B,Sleet;16-3919,959EB7,Eventide;16-3920,8C9CC1,Lavender Lustre;16-3921,96A3C7,Blue Heron;16-3922,9BA9CA,Brunnera Blue;16-3925,919BC9,Easter Egg;16-3929,8398CA,Grapemist;16-3930,9499BB,Thistle Down;16-3931,9A9BC1,Sweet Lavender;16-4010,8C9DAD,Dusty Blue;16-4013,8699AB,Ashley Blue;16-4019,899BB8,Forever Blue;16-4020,7A9DCB,Della Robbia Blue;16-4021,7291B4,Allure;16-4030,849BCC,Hydrangea;16-4031,7391C8,Cornflower Blue;16-4032,658DC6,Provence;16-4033,5D81BB,Granada Sky;16-4109,879BA3,Arona;16-4114,829CA5,Stone Blue;16-4120,7BA0C0,Dusk Blue;16-4127,5D96BC,Heritage Blue;16-4132,6EA2D5,Little Boy Blue;16-4134,539CCC,Bonnie Blue;16-4400,94908B,Mourning Dove;16-4402,A09F9C,Drizzle;16-4404,8F9E9D,Abyss;16-4408,8C9FA1,Slate;16-4411,86A1A9,Tourmaline;16-4414,769DA6,Cameo Blue;16-4421,5BACC3,Blue Mist;16-4427,289DBE,Horizon Blue;16-4519,6198AE,Delphinium Blue;16-4525,52A2B4,Maui Blue;16-4529,14A3C7,Cyan Blue;16-4530,3CADD4,Aquarius;16-4535,00B1D2,Blue Atoll;16-4610,70A4B0,Stillwater;16-4612,6F9FA9,Reef Waters;16-4702,989A98,Limestone;16-4703,9C9B98,Ghost Gray;16-4706,8A9A9A,Silver Blue;16-4712,6D9192,Mineral Blue;16-4719,5D9CA4,Porcelain;16-4725,00ABC0,Scuba Blue;16-4728,00A0B0,Peacock Blue;16-4834,009DAE,Bluebird;16-5101,929090,Wet Weather;16-5106,90A8A4,Blue Surf;16-5109,73A89E,Wasabi;16-5112,6DA29E,Canton;16-5114,649B9E,Dusty Turquoise;16-5119,549F98,Sea Blue;16-5121,60A0A3,Meadowbrook;16-5123,279D9F,Baltic;16-5127,00AAA9,Ceramic;16-5304,95A69F,Jadeite;16-5412,599F99,Agate Green;16-5418,4D9E9A,Lagoon;16-5421,149C88,Sea Green;16-5422,30A299,Bright Aqua;16-5425,00AF9D,Pool Green;16-5427,00AA92,Billiard;16-5431,00A78B,Peacock Green;16-5515,619187,Beryl Green;16-5533,00A28A,Arcadia;16-5721,40A48E,Marine Green;16-5803,A09C98,Flint Gray;16-5804,8A9691,Slate Gray;16-5806,8A9992,Green Milieu;16-5807,818F84,Lily Pad;16-5808,8C9C92,Iceberg Green;16-5810,7E9285,Green Bay;16-5815,729B8B,Feldspar;16-5820,589F7E,Green Spruce;16-5825,2EA785,Gumdrop Green;16-5904,999E98,Wrought Iron;16-5907,86A293,Granite Green;16-5917,709A89,Malachite Green;16-5919,70A38D,Creme De Menthe;16-5924,4F9E81,Winter Green;16-5930,3AA278,Ming Green;16-5932,0F9D76,Holly Green;16-5938,00A170,Mint;16-5942,00A776,Blarney;16-6008,959889,Seagrass;16-6030,66BC91,Katydid;16-6116,739072,Shale Green;16-6127,4B9B69,Greenbriar;16-6138,339C5E,Kelly Green;16-6216,879F84,Basil;16-6240,2BAE66,Island Green;16-6318,7A9B78,Mineral Green;16-6324,77A276,Jadesheen;16-6329,699E6D,Peppermint;16-6339,55A860,Vibrant Green;16-6340,39A845,Classic Green;16-6444,4DB560,Poison Green;17-0000,848283,Frost Gray;17-0115,80856D,Oil Green;17-0119,6F8C69,Turf Green;17-0123,658E67,Stone Green;17-0133,699158,Fluorite Green;17-0145,44883C,Online Lime;17-0205,8F8982,Elephant Skin;17-0207,918C86,Rock Ridge;17-0210,788F74,Loden Frost;17-0215,7E9B76,Aspen Green;17-0220,748C69,Watercress;17-0230,6B8D53,Forest Green;17-0235,769358,Piquant Green;17-0324,849161,Epsom;17-0330,81894E,Turtle Green;17-0336,819548,Peridot;17-0510,938B78,Silver Sage;17-0517,746C57,Dusky Green;17-0525,858961,Mosstone;17-0530,797B3A,Guacamole;17-0535,8D8B55,Green Olive;17-0610,918C7E,Laurel Oak;17-0613,807D6F,Vetiver;17-0618,817A65,Mermaid;17-0620,817A60,Aloe;17-0625,8E855F,Boa;17-0627,847A59,Dried Herb;17-0630,988C75,Tree House;17-0636,857946,Green Moss;17-0808,8E7C71,Taupe Gray;17-0836,927B3C,Ecru Olive;17-0839,AA8805,Golden Palm;17-0840,9A803A,Amber Green;17-0843,9C7E41,Bronze Mist;17-0909,806F63,Fossil;17-0929,998456,Fennel Seed;17-0935,8A6F48,Dull Gold;17-0942,977547,Medal Bronze;17-0949,B1832F,Chai Tea;17-1009,998978,Dune;17-1019,8C7C61,Elmwood;17-1022,988467,Kelp;17-1028,907954,Antique Bronze;17-1036,98754A,Bistre;17-1038,977C61,Tigers Eye;17-1040,BE8A4A,Spruce Yellow;17-1044,976F4C,Chipmunk;17-1045,B0885A,Apple Cinnamon;17-1046,BE752D,Golden Oak;17-1047,B68F52,Honey Mustard;17-1048,BB7A2C,Inca Gold;17-1052,93592B,Roasted Pecan;17-1105,918579,Roasted Cashew;17-1107,9A927F,Seneca Rock;17-1108,948A7A,Winter Twig;17-1109,9C8E7B,Chinchilla;17-1113,938772,Coriander;17-1115,8D7960,Petrified Oak;17-1118,8A7963,Lead Gray;17-1125,97754C,Dijon;17-1128,9D7446,Bone Brown;17-1129,A47D43,Wood Thrush;17-1134,A17249,Brown Sugar;17-1137,A47149,Cashew;17-1140,C16512,Marmalade;17-1142,8B593E,Argan Oil;17-1143,AE7250,Hazel;17-1145,C46215,Autumn Maple;17-1147,A66646,Amber Brown;17-1210,958B84,Moon Rock;17-1212,8F8177,Fungi;17-1223,AD8B75,Praline;17-1224,B0846A,Camel;17-1225,AE856C,Tawny Birch;17-1226,AB856F,Tawny Brown;17-1227,AE8774,Cafe Au Lait;17-1230,A47864,Mocha Mousse;17-1310,8D8070,Timber Wolf;17-1311,8D7E71,Desert Taupe;17-1312,9F8D7C,Silver Mink;17-1314,897560,Sepia Tint;17-1316,937B6A,Portabella;17-1319,9F8672,Amphora;17-1320,A68A6D,Tannin;17-1321,947764,Woodsmoke;17-1327,9A7352,Tobacco Brown;17-1328,AD8567,Indian Tan;17-1330,A0714F,Lion;17-1336,A66E4A,Bran;17-1340,A3623B,Adobe;17-1341,D37F6F,Tawny Orange;17-1342,A15325,Autumnal;17-1345,B95B3F,Spice Route;17-1347,B56A4C,Autumn Leaf;17-1349,E86800,Exuberance;17-1350,FF7913,Orange Popsicle;17-1353,C86B3C,Apricot Orange;17-1360,E8703A,Celosia Orange;17-1361,F45520,Scarlet Ibis;17-1410,827064,Pine Bark;17-1417,997867,Beaver Fur;17-1418,977D70,Ginger Snap;17-1422,92705F,Raw Umber;17-1424,B07069,Brick Dust;17-1430,A36E51,Pecan Brown;17-1436,B9714F,Raw Sienna;17-1444,C96551,Ginger;17-1446,B75E41,Mango;17-1449,C34121,Pureed Pumpkin;17-1450,BE4B3B,Summer Fig;17-1452,D15837,Koi;17-1456,E2583E,Tigerlily;17-1461,E2552C,Orangeade;17-1462,F2552C,Flame;17-1463,DD4124,Tangerine Tango;17-1464,F05627,Red Orange;17-1500,827E7C,Steeple Gray;17-1501,8B8C89,Wild Dove;17-1502,837F7F,Cloudburst;17-1503,787376,Storm Front;17-1505,98868C,Quail;17-1506,8A7E78,Cinder;17-1510,957A76,Antler;17-1511,946C74,Wistful Mauve;17-1512,A4777E,Nostalgia Rose;17-1514,B5817D,Ash Rose;17-1516,9B716B,Burlwood;17-1518,B47B77,Old Rose;17-1520,AF6C67,Canyon Rose;17-1522,A75D67,Mauvewood;17-1524,BD7B74,Desert Sand;17-1525,A1655B,Cedar Wood;17-1532,B06455,Aragon;17-1537,B35457,Mineral Red;17-1540,C26A5A,Apricot Brandy;17-1544,C65D52,Burnt Sienna;17-1545,BB4A4D,Cranberry;17-1547,EA6759,Emberglow;17-1553,CE4D42,Paprika;17-1558,DF3F32,Grenadine;17-1562,E74A33,Mandarin Red;17-1563,EB3C27,Cherry Tomato;17-1564,DD4132,Fiesta;17-1605,9D848E,Elderberry;17-1608,AD6D7F,Heather Rose;17-1609,A66E7A,Mesa Rose;17-1610,9A7182,Dusky Orchid;17-1612,996378,Mellow Mauve;17-1614,985F68,Deco Rose;17-1623,A4596D,Rose Wine;17-1633,B44E5D,Holly Berry;17-1635,DC5B62,Rose Of Sharon;17-1641,BE454F,Chrysanthemum;17-1643,EA6B6A,Porcelain Rose;17-1644,D75C5D,Spiced Coral;17-1647,F25F66,Dubarry;17-1654,CB3441,Poinsettia;17-1656,F35B53,Hot Coral;17-1663,D93744,Bittersweet;17-1664,DC343B,Poppy Red;17-1708,725F69,Moonscape;17-1710,96637B,Bordeaux;17-1718,BA797D,Dusty Rose;17-1723,9F5069,Malaga;17-1736,EA6676,Sunkist Coral;17-1740,C84C61,Claret Red;17-1744,EE5C6C,Calypso Coral;17-1753,DA3D58,Geranium;17-1755,E4445E,Paradise Pink;17-1818,A35776,Red Violet;17-1831,BC4869,Carmine;17-1842,D42E5B,Azalea;17-1926,CE5B78,Fruit Dove;17-1927,CF6977,Desert Rose;17-1928,EA738D,Bubblegum;17-1929,D16277,Rapture Rose;17-1930,EB6081,Camellia Rose;17-1937,E55982,Hot Pink;17-2031,C74375,Fuchsia Rose;17-2033,E04F80,Fandango Pink;17-2034,CE3175,Pink Yarrow;17-2036,D23C77,Magenta;17-2120,D2738F,Chateau Rose;17-2127,DE5B8C,Shocking Pink;17-2227,BD4275,Lilac Rose;17-2230,E35B8F,Carmine Rose;17-2411,988088,Toadstool;17-2520,CA628F,Ibis Rose;17-2601,92898A,Zinc;17-2617,A64F82,Dahlia Mauve;17-2624,C0428A,Rose Violet;17-2625,CE6BA4,Super Pink;17-2627,CE5E9A,Phlox Pink;17-3014,A76C97,Mulberry;17-3020,BA69A1,Spring Crocus;17-3023,B65F9A,Rosebud;17-3240,B76BA3,Bodacious;17-3313,A1759C,Dusty Lavender;17-3323,A767A2,Iris Orchid;17-3410,9F7A93,Valerian;17-3520,9879A2,Diffused Orchid;17-3612,917798,Orchid Mist;17-3615,8F7DA5,Chalk Violet;17-3617,9D7BB0,English Lavendar;17-3619,936CA7,Hyacinth;17-3628,926AA6,Amethyst Orchid;17-3640,9479AF,Fairy Wren;17-3725,9884B9,Bougainvillea;17-3730,8B79B1,Paisley Purple;17-3735,9787BB,Sunlit Allium;17-3802,918C8F,Gull;17-3808,A2919B,Nirvana;17-3810,8F8395,Purple Ash;17-3812,897F98,Dusk;17-3817,8981A0,Daybreak;17-3826,7D74A8,Aster Purple;17-3834,7E6EAC,Dahlia Purple;17-3906,948D99,Minimal Gray;17-3907,7E7D88,Quicksilver;17-3910,9890A2,Lavender Gray;17-3911,7F7C81,Silver Filigree;17-3914,838487,Sharkskin;17-3915,79839B,Tempest;17-3917,74809A,Stonewash;17-3918,717F9B,Country Blue;17-3919,858FB1,Purple Impression;17-3920,7181A4,English Manor;17-3922,70789B,Blue Ice;17-3923,65769A,Colony Blue;17-3924,767BA5,Lavender Violet;17-3925,8C8EB2,Persian Violet;17-3929,8895C5,Pale Iris;17-3930,848DC5,Jacaranda;17-3932,7C83BC,Deep Periwinkle;17-3933,81839A,Silver Bullet;17-3934,6E81BE,Persian Jewel;17-3936,6384B8,Blue Bonnet;17-3940,707BB4,Iolite;17-4014,807D7F,Titanium;17-4015,6E7E99,Infinity;17-4016,848182,Gray Flannel;17-4020,66829A,Blue Shadow;17-4021,798EA4,Faded Denim;17-4023,5B7E98,Blue Heaven;17-4027,5879A2,Riviera;17-4028,4C6A92,Riverside;17-4029,5A789A,Quiet Harbor;17-4030,618BB9,Silver Lake Blue;17-4032,5D89B3,Lichen Blue;17-4033,5480AC,Pacific Coast;17-4037,5B7EBD,Ultramarine;17-4041,4F84C4,Marina;17-4111,748995,Citadel;17-4123,5487A4,Niagara;17-4131,3E7FA5,Cendre Blue;17-4139,4D91C6,Azure Blue;17-4245,007CB7,Ibiza Blue;17-4247,007BB2,Diva Blue;17-4320,5C899B,Adriatic Blue;17-4328,3686A0,Blue Moon;17-4336,0084BD,Blithe;17-4402,8E918F,Neutral Gray;17-4405,84898C,Monument;17-4408,7A898F,Lead;17-4412,6D8994,Smoke Blue;17-4421,3C7D90,Larkspur;17-4427,157EA0,Bluejay;17-4429,3183A0,Navagio Bay;17-4432,0088B0,Vivid Blue;17-4433,0086BB,Dresden Blue;17-4435,008CC1,Malibu Blue;17-4440,0087B6,Blue Danube;17-4530,0084A1,Barrier Reef;17-4540,008DB9,Hawaiian Ocean;17-4716,47788A,Storm Blue;17-4724,1A7F8E,Pagoda Blue;17-4728,00859C,Algiers Blue;17-4730,00849F,Caneel Bay;17-4735,008799,Capri Breeze;17-4818,558F91,Bristol Blue;17-4911,648589,Arctic;17-4919,478589,Teal;17-4928,008C96,Lake Blue;17-5024,007F7C,Teal Blue;17-5025,008583,Navigate;17-5029,008381,Deep Peacock Blue;17-5034,008684,Lapis;17-5102,8D8F8F,Griffin;17-5107,7C8C87,Chinois Green;17-5110,6A8988,Trellis;17-5111,658C88,Oil Blue;17-5117,358082,Green Blue Slate;17-5122,379190,Latigo Bay;17-5126,009499,Viridian Green;17-5130,009288,Columbia;17-5330,008E80,Dynasty Green;17-5335,009B8C,Spectra Green;17-5421,108780,Porcelain Green;17-5430,008778,Alhambra;17-5513,4F7C74,Deep Sea;17-5528,007D69,Greenlake;17-5633,009276,Deep Green;17-5638,009E82,Vivid Green;17-5641,009473,Emerald;17-5722,427D6D,Bottle Green;17-5734,00846B,Viridis;17-5735,008C69,Parakeet;17-5912,5B7763,Dark Ivy;17-5923,3A795E,Pine Green;17-5936,009B75,Simply Green;17-5937,009E6D,Deep Mint;17-6009,616F65,Laurel Wreath;17-6030,008658,Jelly Bean;17-6153,008C45,Fern Green;17-6206,888D82,Shadow;17-6212,717E6F,Sea Spray;17-6219,558367,Deep Grass Green;17-6229,3C824E,Medium Green;17-6319,6F8D6A,Kashmir;17-6323,768A75,Hedge Green;17-6333,487D49,Mint Green;18-0000,656466,Smoked Pearl;18-0107,5A7247,Kale;18-0108,6F7755,Dill;18-0110,61845B,English Ivy;18-0117,5F7355,Vineyard Green;18-0119,59754D,Willow Bough;18-0121,547053,Elm Green;18-0125,4B6D41,Artichoke Green;18-0130,53713D,Cactus;18-0135,476A30,Treetop;18-0201,5F5E62,Castlerock;18-0220,65663F,Mayfly;18-0228,595F34,Pesto;18-0306,5C5D5B,Gunmetal;18-0312,6E6E5C,Deep Lichen Green;18-0316,666B54,Olivine;18-0317,525F48,Bronze Green;18-0322,545A3E,Cypress;18-0324,757A4E,Calliste Green;18-0328,5E6737,Cedar Green;18-0330,4E632C,Twist Of Lime;18-0332,77824A,Grasshopper;18-0403,625D5D,Dark Gull Gray;18-0420,616652,Four Leaf Clover;18-0422,6E7153,Loden Green;18-0426,656344,Capulet Olive;18-0430,676232,Avocado;18-0435,6A6F34,Calla Green;18-0503,686767,Gargoyle;18-0510,646762,Castor Gray;18-0513,696156,Bungee Cord;18-0515,646356,Dusty Olive;18-0521,646049,Burnt Olive;18-0523,5B5A41,Winter Moss;18-0525,818455,Iguana;18-0527,646A45,Olive Branch;18-0538,7B7F32,Woodbine;18-0601,6C6868,Charcoal Gray;18-0615,685E4F,Stone Gray;18-0617,80765F,Covert Green;18-0622,756D47,Olive Drab;18-0625,716A4D,Martini Olive;18-0627,67592A,Fir Green;18-0629,71643E,Lizard;18-0724,7C6E4F,Gothic Olive;18-0820,695E4B,Capers;18-0825,75663E,Nutria;18-0830,7A643F,Butternut;18-0832,7A6332,Plantation;18-0835,997B38,Dried Tobacco;18-0840,805D24,Tapenade;18-0920,725E43,Kangaroo;18-0928,6B543E,Sepia;18-0930,6A513B,Coffee Liqueur;18-0933,815B37,Rubber;18-0935,A76F1F,Buckthorn Brown;18-0937,825E2F,Bronze Brown;18-0939,927240,Cumin;18-0940,91672F,Golden Brown;18-0950,99642C,Cathay Spice;18-1015,736253,Shitake;18-1016,6E5C4B,Cub;18-1017,816D5E,Caribou;18-1018,7F674F,Otter;18-1022,836B4F,Ermine;18-1027,6E4F3A,Bison;18-1028,684832,Emperador;18-1029,8B6A4F,Toasted Coconut;18-1030,936B4F,Thrush;18-1031,755139,Toffee;18-1033,704F37,Dachshund;18-1048,704822,Monks Robe;18-1049,AB6819,Thai Curry;18-1050,A86217,Honey Ginger;18-1108,807669,Fallen Rock;18-1110,82776B,Brindle;18-1112,776A5F,Walnut;18-1124,725440,Partridge;18-1130,7A5747,Aztec;18-1137,865E49,Rawhide;18-1140,8C543A,Mocha Bisque;18-1142,97572B,Leather Brown;18-1148,864C24,Caramel Cafe;18-1154,91552B,Glazed Ginger;18-1155,935529,Sugar Almond;18-1160,AC6B29,Sudan Brown;18-1163,A05C17,Pumpkin Spice;18-1210,847A75,Driftwood;18-1222,6C5043,Cocoa Brown;18-1229,855C4C,Carob Brown;18-1230,874E3C,Coconut Shell;18-1235,8F5F50,Russet;18-1238,855141,Rustic Brown;18-1239,985C41,Sierra;18-1242,834F3D,Brown Patina;18-1244,8C4A2F,Ginger Bread;18-1246,944A1F,Umber;18-1248,B55A30,Rust;18-1249,BB5C14,Hawaiian Sunset;18-1250,9F5130,Bombay Brown;18-1304,6D625B,Falcon;18-1306,736460,Iron;18-1312,7B6660,Deep Taupe;18-1314,7E5E52,Acorn;18-1320,876155,Clove;18-1321,8F7265,Brownie;18-1325,783937,Spiced Apple;18-1326,7E5C54,Nutmeg;18-1336,9A6051,Copper Brown;18-1340,9E4624,Potters Clay;18-1343,A15843,Auburn;18-1345,9B4722,Cinnamon Stick;18-1346,A75949,Bruschetta;18-1350,A14D3A,Burnt Brick;18-1354,BB4F35,Burnt Ochre;18-1355,A23C26,Rooibos Tea;18-1404,69595C,Sparrow;18-1405,705861,Flint;18-1409,6C5656,Peppercorn;18-1411,674550,Plum Wine;18-1415,6E4C4B,Marron;18-1418,804F5A,Crushed Berry;18-1420,7C4C53,Wild Ginger;18-1421,8B645A,Cognac;18-1425,824D46,Mahogany;18-1426,844B4D,Apple Butter;18-1433,98594B,Chutney;18-1434,A2574B,Etruscan Red;18-1435,A26666,Withered Rose;18-1436,AD6D68,Light Mahogany;18-1438,964F4C,Marsala;18-1440,8E3C36,Chili Oil;18-1441,9C5642,Baked Clay;18-1442,913832,Red Ochre;18-1443,A6594C,Redwood;18-1444,9F4440,Tandori Spice;18-1445,D73C26,Spicy Orange;18-1447,C25A3C,Orange Rust;18-1448,BE5141,Chili;18-1449,9A382D,Ketchup;18-1450,BD5745,Mecca Orange;18-1451,B3573F,Autumn Glaze;18-1454,C2452D,Red Clay;18-1506,675657,Plum Truffle;18-1512,80565B,Rose Brown;18-1531,8F423B,Barn Red;18-1535,B65D48,Ginger Spice;18-1536,AB4F41,Hot Sauce;18-1537,BA6B57,Copper Coin;18-1540,9C453B,Cinnabar;18-1541,73362A,Brandy Brown;18-1547,973A36,Bossa Nova;18-1549,BC322C,Valiant Poppy;18-1550,B93A32,Aurora Red;18-1551,B4262A,Aura Orange;18-1555,B5332E,Molten Lava;18-1561,DA321C,Orange Com;18-1564,CA3422,Poinciana;18-1612,806062,Rose Taupe;18-1613,865560,Renaissance Rose;18-1614,7A4B56,Nocturne;18-1616,885157,Roan Rouge;18-1619,834655,Maroon;18-1629,BF6464,Faded Rose;18-1630,AD5D5D,Dusty Cedar;18-1631,95424E,Earth Red;18-1633,AC4B55,Garnet Rose;18-1634,B35A66,Baroque Rose;18-1635,B45865,Slate Rose;18-1643,AD3E48,Cardinal;18-1648,B34646,Baked Apple;18-1649,D9615B,Deep Sea Coral;18-1651,E04951,Cayenne;18-1652,BB363F,Rococco Red;18-1653,B61032,Toreador;18-1654,BA0B32,Lychee;18-1655,BC2731,Mars Red;18-1657,AA182B,Salsa;18-1658,A4292E,Pompeian Red;18-1659,B91228,Goji Berry;18-1660,CE2939,Tomato;18-1661,C53346,Tomato Puree;18-1662,CD212A,Flame Scarlet;18-1663,BE132D,Chinese Red;18-1664,D01C1F,Fiery Red;18-1703,6D636B,Shark;18-1705,735B6A,Arctic Dusk;18-1706,6C5765,Black Plum;18-1708,6F5965,Ephemera;18-1709,805466,Tulipwood;18-1710,8D5C74,Grape Nectar;18-1716,854C65,Damson;18-1718,884C5E,Hawthorn Rose;18-1720,8B4963,Violet Quartz;18-1725,8C4759,Dry Rose;18-1741,B63753,Raspberry Wine;18-1754,D32E5E,Raspberry;18-1755,E24666,Rouge Red;18-1756,DC3855,Teaberry;18-1759,B2103C,Jalapeno Red;18-1760,BF1945,Barberry;18-1761,BB1237,Ski Patrol;18-1762,DD3848,Hibiscus;18-1763,C71F2D,High Risk Red;18-1764,CC1C3B,Lollipop;18-1807,8B6F70,Twilight Mauve;18-1852,C92351,Rose Red;18-1856,C6174E,Virtual Pink;18-1945,C51959,Bright Rose;18-1950,B61C50,Jazzy;18-1951,C01352,Love Potion;18-2027,80304C,Beaujolais;18-2043,D2386C,Raspberry Sorbet;18-2045,C62168,Pink Peacock;18-2109,886971,Grape Shake;18-2120,D94F70,Honeysuckle;18-2133,D3507A,Pink Flambe;18-2140,CB3373,Cabaret;18-2143,CF2D71,Beetroot Purple;18-2320,8A3371,Clover;18-2326,A83E6C,Cactus Flower;18-2328,AB3475,Fuchsia Red;18-2333,CC4385,Raspberry Rose;18-2336,B73275,Very Berry;18-2436,D33479,Fuchsia Purple;18-2525,9D446E,Magenta Haze;18-2527,973C6C,Baton Rouge;18-2929,8C3573,Purple Wine;18-3011,895C79,Argyle Purple;18-3012,7A596F,Purple Gumdrop;18-3013,765269,Berry Conserve;18-3014,7B4368,Grape Kiss;18-3015,864D75,Amethyst;18-3022,903F75,Deep Orchid;18-3025,944E87,Striking Purple;18-3027,AD4D8C,Purple Orchid;18-3120,8E4483,Willowherb;18-3211,85677B,Grapeade;18-3218,7C5379,Concord Grape;18-3220,927288,Very Grape;18-3224,AD5E99,Radiant Orchid;18-3230,A9568C,Meadow Mauve;18-3324,843E83,Dahlia;18-3331,8D4687,Hyacinth Violet;18-3339,993C7C,Vivid Viola;18-3340,632A60,Charisma;18-3410,634F62,Vintage Violet;18-3415,725671,Grape Jam;18-3418,835E81,Chinese Violet;18-3513,6B5876,Grape Compote;18-3518,6C4E79,Patrician Purple;18-3520,745587,Purple Heart;18-3521,624076,Plum Jam;18-3522,7A547F,Crushed Grape;18-3530,936A98,Lavender Crystal;18-3531,774D8E,Royal Lilac;18-3533,8B5987,Dewberry;18-3540,6F4685,Purple Sapphire;18-3615,604E7A,Imperial Palace;18-3620,5F4E72,Mystical;18-3628,9469A2,Bellflower;18-3633,775496,Deep Lavender;18-3634,7D5D99,Chive Blossom;18-3635,634878,Picasso Lily;18-3710,847986,Gray Ridge;18-3712,75697E,Purple Sage;18-3714,675A74,Mulled Grape;18-3715,6C5971,Montana Grape;18-3718,807396,Purple Haze;18-3737,6D5698,Passion Flower;18-3812,6A6378,Cadet;18-3817,62617E,Heron;18-3820,66648B,Twilight Purple;18-3828,646093,Corsican Blue;18-3833,696BA0,Dusted Peri;18-3834,6D6695,Veronica;18-3838,5F4B8B,Ultra Violet;18-3839,5A4E8F,Purple Corallite;18-3840,60569A,Purple Opulence;18-3905,676168,Excalibur;18-3907,5E5B60,Tornado;18-3908,615C60,Volcanic Glass;18-3910,626879,Folkstone Gray;18-3912,585E6F,Grisaille;18-3916,677283,Flint Stone;18-3917,4D587A,Gray Blue;18-3918,546477,China Blue;18-3920,505D7E,Coastal Fjord;18-3921,4E5E7F,Bijou Blue;18-3922,59728E,Coronet Blue;18-3927,60688D,Velvet Morning;18-3928,4A638D,Dutch Blue;18-3929,4E6482,Blue Horizon;18-3930,646F9B,Bleached Denim;18-3932,515B87,Marlin;18-3933,717388,Blue Granite;18-3935,6479B3,Wedgewood;18-3937,5A77A8,Blue Yonder;18-3943,5A5B9F,Blue Iris;18-3944,5C619D,Violet Storm;18-3945,4960A8,Amparo Blue;18-3946,5F6DB0,Baja Blue;18-3949,3850A0,Dazzling Blue;18-3950,5B609E,Iris Bloom;18-3963,3D3C7C,Spectrum Blue;18-4005,726F70,Steel Gray;18-4006,66676D,Quiet Shade;18-4011,5F7278,Goblin Blue;18-4016,767275,December Sky;18-4018,405D73,Real Teal;18-4020,557088,Captains Blue;18-4023,3B5F78,Blue Ashes;18-4025,516B84,Copen Blue;18-4026,46647E,Stellar;18-4027,506886,Moonlight Blue;18-4028,4B5B6E,Bering Sea;18-4029,43628B,Federal Blue;18-4032,266691,Deep Water;18-4034,30658E,Vallarta Blue;18-4036,4F7CA4,Parisian Blue;18-4039,487AB7,Regatta;18-4041,386192,Star Sapphire;18-4043,346CB0,Palace Blue;18-4045,0F5F9A,Daphne;18-4048,2D62A3,Nebulas Blue;18-4051,1F5DA0,Strong Blue;18-4105,80817D,Moon Mist;18-4140,0072B5,French Blue;18-4141,3272AF,Campanula;18-4148,08589D,Victoria Blue;18-4214,58646D,Stormy Weather;18-4215,5C6D7C,Blue Mirage;18-4217,577284,Bluestone;18-4220,5C798E,Provincial Blue;18-4222,35637C,Bluesteel;18-4225,1F6680,Saxony Blue;18-4231,09577B,Blue Sapphire;18-4232,2A6A8B,Faience;18-4244,0061A3,Directoire Blue;18-4247,0075B3,Brilliant Blue;18-4250,006CA9,Indigo Bunting;18-4252,0077B3,Blue Aster;18-4320,4E6E81,Aegean Blue;18-4330,007EB1,Swedish Blue;18-4334,1478A7,Mediterranean Blue;18-4417,436573,Tapestry;18-4430,007290,Fjord Blue;18-4432,00698B,Turkish Tile;18-4434,005780,Mykonos Blue;18-4440,0075AF,Cloisonne;18-4510,697A7E,Trooper;18-4522,2D6471,Colonial Blue;18-4525,00819D,Caribbean Sea;18-4528,00758F,Mosaic Blue;18-4530,006380,Celestial;18-4535,007BAA,Blue Jewel;18-4537,0074A8,Methyl Blue;18-4538,0078A7,Hawaiian Surf;18-4612,536D70,North Atlantic;18-4630,006B7E,Tahitian Tide;18-4711,6E8082,Stormy Sea;18-4718,426972,Hydro;18-4726,097988,Biscay Bay;18-4728,00656E,Harbor Blue;18-4733,007A8E,Enamel Blue;18-4735,008491,Tile Blue;18-4834,00656B,Deep Lake;18-4930,008786,Tropical Green;18-4936,006D70,Fanfare;18-5020,00736C,Parasailing;18-5025,006865,Quetzal Green;18-5102,73706F,Brushed Nickel;18-5105,686D6C,Sedona Sage;18-5112,4C6969,Sea Pine;18-5115,316C6B,North Sea;18-5121,20706F,Bayou;18-5128,007C7A,Blue Grass;18-5203,666564,Pewter;18-5204,615E5F,Granite Gray;18-5210,5C5658,Eiffel Tower;18-5308,486B67,Blue Spruce;18-5315,255958,Bayberry;18-5322,005F56,Alpine Green;18-5338,006B54,Ultramarine Green;18-5410,4E6866,Silver Pine;18-5418,29675C,Antique Green;18-5424,00675B,Cadmium Green;18-5606,576664,Balsam Green;18-5610,4C7E86,Brittany Blue;18-5611,556962,Dark Forest;18-5612,567572,Sagebrush Green;18-5616,325B51,Posy Green;18-5618,36716F,Deep Jungle;18-5619,0A6F69,Tidepool;18-5620,226C63,Ivy;18-5621,3A725F,Fir;18-5622,578270,Frosty Spruce;18-5624,006E5B,Shady Glade;18-5633,007558,Bosphorus;18-5642,008763,Golf Green;18-5718,3E6257,Smoke Pine;18-5725,29685F,Galapagos Green;18-5806,6B7169,Agave Green;18-5841,007D60,Pepper Green;18-5845,006E51,Lush Meadow;18-5913,3E524B,Garden Topiary;18-6011,53665C,Duck Green;18-6018,3E6F58,Foliage Green;18-6022,378661,Leprechaun;18-6024,1F7349,Amazon;18-6030,007844,Jolly Green;18-6114,4F6B58,Myrtle;18-6216,5B7961,Comfrey;18-6320,477050,Fairway;18-6330,3D7245,Juniper;19-0000,413E3D,Raven;19-0201,434447,Asphalt;19-0203,49494D,Gray Pinstripe;19-0230,495E35,Garden Green;19-0303,2D2C2F,Jet Black;19-0307,444940,Climbing Ivy;19-0309,50574C,Thyme;19-0312,55584C,Beetle;19-0315,414F3C,Black Forest;19-0323,4A5335,Chive;19-0403,5E5749,Sea Turtle;19-0405,4A4843,Beluga;19-0413,46483C,Deep Depths;19-0414,434237,Forest Night;19-0415,394034,Duffel Bag;19-0417,3A4032,Kombu Green;19-0419,414832,Rifle Green;19-0506,44413C,Black Ink;19-0508,3B3A36,Peat;19-0509,36362D,Rosin;19-0510,5F5B4C,Kalamata;19-0511,545144,Grape Leaf;19-0512,585442,Ivy Green;19-0515,535040,Olive Night;19-0516,574D35,Dark Olive;19-0608,48413B,Black Olive;19-0614,4A4139,Wren;19-0617,655341,Teak;19-0618,5B4F3B,Beech;19-0622,63563B,Military Olive;19-0712,40342B,Demitasse;19-0808,685C53,Morel;19-0809,685A4E,Chocolate Chip;19-0810,5B5149,Major Brown;19-0812,483F39,Turkish Coffee;19-0814,4B3D33,Slate Black;19-0815,5A4632,Desert Palm;19-0820,5E5347,Canteen;19-0822,5A5348,Tarmac;19-0823,5D5348,Crocodile;19-0840,3F352F,Delicioso;19-0910,433937,Mulch;19-0912,4E403B,Chocolate Brown;19-0915,40312F,Coffee Bean;19-0916,5F4C40,Rain Drum;19-1012,58423F,French Roast;19-1015,4F3F3B,Bracken;19-1016,433331,Java;19-1018,34292A,Ganache;19-1020,5C4939,Dark Earth;19-1034,795D34,Breen;19-1101,3C3535,After Dark;19-1102,3A3536,Licorice;19-1103,363031,Espresso;19-1106,392D2B,Mole;19-1109,382E2D,Chocolate Torte;19-1110,3C2D2E,Chocolate Plum;19-1111,3B302F,Black Coffee;19-1116,5D473A,Carafe;19-1118,584039,Chestnut;19-1121,61473B,Pinecone;19-1213,5A4743,Shopping Bag;19-1214,5C3E35,Chocolate Lab;19-1215,543B35,Shaved Chocolate;19-1217,684B40,Mustang;19-1218,54392D,Potting Soil;19-1220,633F33,Cappuccino;19-1224,5D4236,Fondue Fudge;19-1228,714A41,Root Beer;19-1230,6E493A,Friar Brown;19-1233,634235,Tiramisu;19-1234,5A3E36,Rocky Road;19-1235,664238,Brunette;19-1241,754734,Tortoise Shell;19-1245,884332,Arabian Spice;19-1250,8D3F2D,Picante;19-1314,493B39,Seal Brown;19-1317,503130,Bitter Chocolate;19-1320,6E403C,Sable;19-1321,583432,Rum Raisin;19-1322,593C39,Brown Stone;19-1325,683B39,Hot Chocolate;19-1327,603535,Andorra;19-1331,6A3331,Madder Brown;19-1333,804839,Sequoia;19-1334,7C423C,Henna;19-1337,6A2E2A,Fired Brick;19-1338,743332,Russet Brown;19-1419,4A342E,Chicory Coffee;19-1420,553B39,Deep Mahogany;19-1429,6E362C,Smoked Paprika;19-1430,734B42,Mink;19-1431,63403A,Fudgesickle;19-1432,56352D,Chocolate Fondant;19-1435,66352B,Cherry Mahogany;19-1436,6B4139,Cinnamon;19-1518,503938,Puce;19-1521,60373D,Red Mahogany;19-1522,5C2935,Zinfandel;19-1524,70393F,Oxblood Red;19-1525,663336,Port;19-1526,612E35,Chocolate Truffle;19-1528,582B36,Windsor Wine;19-1530,7E3940,Burnt Russet;19-1531,752329,Sun Dried Tomato;19-1532,813639,Rosewood;19-1533,884344,Cowhide;19-1534,72262C,Merlot;19-1535,6A282C,Syrah;19-1536,7B3539,Red Pear;19-1540,7E392F,Burnt Henna;19-1543,8C373E,Brick Red;19-1555,7D2027,Red Dahlia;19-1557,9B1B30,Chili Pepper;19-1559,9D202F,Scarlet Sage;19-1606,524144,Raisin;19-1608,5C3A4D,Prune Purple;19-1617,64313E,Burgundy;19-1619,493338,Fudge;19-1620,5B4349,Huckleberry;19-1621,5D3C43,Catawba Grape;19-1623,58363D,Vineyard Wine;19-1624,54353B,Sassafras;19-1625,513235,Decadent Chocolate;19-1627,502B33,Port Royale;19-1629,77333B,Ruby Wine;19-1650,77212E,Biking Red;19-1652,77202F,Rhubarb;19-1655,953640,Garnet;19-1656,8A2232,Rio Red;19-1662,A2242F,Samba;19-1663,B92636,Ribbon Red;19-1664,BF1932,True Red;19-1716,5B3644,Mauve Wine;19-1718,532D3B,Fig;19-1724,64242E,Cabernet;19-1725,5C2C35,Tawny Port;19-1726,702F3B,Cordovan;19-1757,AA0A27,Barbados Cherry;19-1758,A11729,Haute Red;19-1759,A73340,American Beauty;19-1760,BC2B3D,Scarlet;19-1761,AC0E2E,Tango Red;19-1762,AE0E36,Crimson;19-1763,BD162C,Racing Red;19-1764,B31A38,Lipstick Red;19-1840,973443,Deep Claret;19-1850,962D49,Red Bud;19-1860,A21441,Persian Red;19-1862,9E1030,Jester Red;19-1863,941E32,Scooter;19-1930,6C2831,Pomegranate;19-1934,782A39,Tibetan Red;19-1940,7C2439,Rumba Red;19-1955,A41247,Cerise;19-2009,553B50,Hortensia;19-2014,603749,Prune;19-2024,722B3F,Rhododendron;19-2025,7C2946,Red Plum;19-2030,7A1F3D,Beet Red;19-2033,842C48,Anemone;19-2039,A52350,Granita;19-2041,A22452,Cherries Jubilee;19-2045,A32857,Vivacious;19-2047,982551,Sangria;19-2118,492A34,Winetasting;19-2311,613F4C,Eggplant;19-2312,643A4C,Crushed Violets;19-2315,5A2F43,Grape Wine;19-2410,6F3C56,Amaranth;19-2420,4D233D,Pickled Beet;19-2428,6B264B,Magenta Purple;19-2429,61224A,Plum Caspia;19-2430,692746,Purple Potion;19-2431,85325C,Boysenberry;19-2432,802A50,Raspberry Radiance;19-2434,9E2C6A,Festival Fuchsia;19-2514,533146,Italian Plum;19-2520,462639,Potent Purple;19-2524,582147,Dark Purple;19-2620,47243B,Winter Bloom;19-2630,92316F,Wild Aster;19-2814,5A395B,Wineberry;19-2816,4D3246,Blackberry Wine;19-2820,692D5D,Phlox;19-2924,823270,Hollyhock;19-3022,622E5A,Gloxinia;19-3138,853B7B,Byzantium;19-3215,4C3957,Indigo;19-3217,4E334E,Shadow Purple;19-3218,51304E,Plum Purple;19-3220,5A315D,Plum;19-3223,683D62,Purple Passion;19-3230,682961,Grape Juice;19-3316,473442,Plum Perfect;19-3323,50314C,Deep Purple;19-3325,75406A,Wood Violet;19-3336,773376,Sparkling Grape;19-3424,6F456E,Sunset Purple;19-3425,6D4773,Spiced Plum;19-3438,784384,Bright Violet;19-3514,593761,Majesty;19-3518,4F2D54,Grape Royale;19-3519,432C47,Purple Pennant;19-3520,3F2A47,Blackberry Cordial;19-3526,764F82,Meadow Violet;19-3528,542C5D,Imperial Purple;19-3536,6A397B,Amaranth Purple;19-3540,663271,Purple Magic;19-3542,653D7C,Pansy;19-3617,46394B,Mysterioso;19-3619,4B3B4F,Sweet Grape;19-3620,56456B,Purple Reign;19-3622,5A4769,Loganberry;19-3628,46295A,Acai;19-3632,4F3466,Petunia;19-3638,563474,Tillandsia Purple;19-3640,482D54,Crown Jewel;19-3642,603F83,Royal Purple;19-3712,433748,Nightshade;19-3713,2C2A33,Deep Well;19-3714,503B53,Navy Cosmos;19-3716,473854,Purple Plumeria;19-3720,473951,Gothic Grape;19-3722,493C62,Mulberry Purple;19-3725,41354D,Purple Velvet;19-3728,433455,Grape;19-3730,544275,Gentian Violet;19-3731,392852,Parachute Purple;19-3737,4F3872,Heliotrope;19-3748,53357D,Prism Violet;19-3750,3E285C,Violet Indigo;19-3803,625B5C,Plum Kitten;19-3810,343148,Eclipse;19-3815,2A293E,Evening Blue;19-3830,363151,Astral Aura;19-3831,27293D,Maritime Blue;19-3832,403F6F,Navy Blue;19-3839,3A395F,Blue Ribbon;19-3842,443F6F,Deep Wisteria;19-3847,44377D,Deep Blue;19-3850,4D448A,Liberty;19-3864,273C76,Mazarine Blue;19-3900,524D50,Pavement;19-3901,4D4B4F,Magnet;19-3902,3A363B,Obsidian;19-3903,4A3F41,Shale;19-3905,5F575C,Rabbit;19-3906,4A4B4D,Dark Shadow;19-3907,48464A,Forged Iron;19-3908,46434A,Nine Iron;19-3909,2E272A,Black Bean;19-3910,4E5055,Iron Gate;19-3911,26262A,Black Beauty;19-3915,4D495B,Graystone;19-3917,4D4B50,Blackened Pearl;19-3918,46444C,Periscope;19-3919,4E5368,Nightshadow Blue;19-3920,2B2E43,Peacoat;19-3921,2B3042,Black Iris;19-3922,262934,Sky Captain;19-3923,282D3C,Navy Blazer;19-3924,2A2A35,Night Sky;19-3925,363756,Patriot Blue;19-3926,464B65,Crown Blue;19-3927,3B3B48,Graphite;19-3928,49516D,Blue Indigo;19-3929,4A556B,Vintage Indigo;19-3930,434452,Odyssey Gray;19-3933,29304E,Medieval Blue;19-3935,404466,Deep Cobalt;19-3936,484A72,Skipper Blue;19-3938,313D64,Twilight Blue;19-3939,2D3359,Blueprint;19-3940,263056,Blue Depths;19-3947,47457A,Orient Blue;19-3950,384883,Deep Ultramarine;19-3951,363B7C,Clematis Blue;19-3952,203C7F,Surf The Web;19-3953,253668,Sodalite Blue;19-3955,3D428B,Royal Blue;19-3964,274374,Monaco Blue;19-4003,2B272B,Black Onyx;19-4004,2A2B2D,Tap Shoe;19-4005,2B2C30,Stretch Limo;19-4006,292A2D,Caviar;19-4007,28282D,Anthracite;19-4008,2B2929,Meteorite;19-4009,2F3441,Outer Space;19-4010,2C313D,Total Eclipse;19-4011,282B34,Salute;19-4012,272F38,Carbon;19-4013,232F36,Dark Navy;19-4014,434854,Ombre Blue;19-4015,323137,Blue Graphite;19-4019,3C3F4A,India Ink;19-4020,262B37,Dark Sapphire;19-4021,2C333E,Blueberry;19-4022,323441,Parisian Night;19-4023,363B48,Blue Nights;19-4024,2A3244,Dress Blues;19-4025,353A4C,Mood Indigo;19-4026,384C67,Ensign Blue;19-4027,233658,Estate Blue;19-4028,2F3E55,Insignia Blue;19-4029,223A5E,Navy Peony;19-4030,3F5277,True Navy;19-4031,35435A,Sargasso Sea;19-4033,123955,Poseidon;19-4034,0E3A53,Sailor Blue;19-4035,305679,Dark Blue;19-4037,385D8D,Bright Cobalt;19-4038,123850,Gibraltar Sea;19-4039,3D5E8C,Delft;19-4044,243F6C,Limoges;19-4045,004B8D,Lapis Blue;19-4048,155187,Baleine Blue;19-4049,034F84,Snorkel Blue;19-4050,1A5091,Nautical Blue;19-4052,0F4C81,Classic Blue;19-4053,195190,Turkish Sea;19-4055,2A4B7C,Galaxy Blue;19-4056,1A4C8B,Olympian Blue;19-4057,1E4477,True Blue;19-4104,41424A,Ebony;19-4110,34414E,Midnight Navy;19-4118,35465E,Dark Denim;19-4120,0F3B57,Blue Opal;19-4121,2C4053,Blue Wing Teal;19-4122,293B4D,Moonlit Ocean;19-4125,274357,Majolica Blue;19-4126,29495C,Deep Dive;19-4127,325B74,Midnight;19-4150,00539C,Princess Blue;19-4151,00589B,Skydiver;19-4203,2F2D30,Moonless Night;19-4205,39373B,Phantom;19-4215,4E545B,Turbulence;19-4218,2D3036,Vulcan;19-4220,46515A,Dark Slate;19-4227,3C586B,Indian Teal;19-4229,3E4F5C,Orion Blue;19-4234,0B5369,Ink Blue;19-4241,0F4E67,Moroccan Blue;19-4245,005A92,Imperial Blue;19-4305,363838,Pirate Black;19-4316,39505C,Stargazer;19-4318,3A5C6E,Mallard Blue;19-4324,1F495B,Legion Blue;19-4326,203E4A,Reflecting Pond;19-4329,18576C,Corsair;19-4340,005871,Lyons Blue;19-4342,005E7D,Seaport;19-4517,32575D,Mediterranea;19-4524,00585E,Shaded Spruce;19-4526,1B5366,Blue Coral;19-4535,006175,Ocean Depths;19-4536,00637C,Crystal Teal;19-4540,005265,Deep Lagoon;19-4726,274E55,Atlantic Deep;19-4818,405E5C,Mallard Green;19-4820,33565E,Balsam;19-4826,2A5C6A,Dragonfly;19-4906,324241,Green Gables;19-4914,18454B,Deep Teal;19-4916,1F595C,Pacific;19-4922,006361,Teal Green;19-5004,464E4D,Urban Chic;19-5030,254445,Sea Moss;19-5212,303D3C,Darkest Spruce;19-5217,035453,Storm;19-5220,12403C,Botanical Garden;19-5226,005B5D,Everglade;19-5230,184A45,Forest Biome;19-5232,15463E,Rain Forest;19-5320,203B3D,Ponderosa Pine;19-5350,23312D,Scarab;19-5406,213631,Pine Grove;19-5408,395551,Bistro Green;19-5411,355048,Trekking Green;19-5413,335959,Jasper;19-5414,264A48,June Bug;19-5420,11574A,Evergreen;19-5511,335749,Hunter Green;19-5513,314F40,Dark Green;19-5621,43544B,Cilantro;19-5708,262C2A,Jet Set;19-5914,3C4E47,Jungle Green;19-5917,35463D,Sycamore;19-5918,2E3D30,Mountain View;19-5920,334D41,Pineneedle;19-6026,12674A,Verdant Green;19-6050,264E36,Eden;19-6110,37413A,Deep Forest;19-6311,37503D,Greener Pastures";
+const PANTONE_C = "Yellow C,#FEDD00;Yellow 012 C,#FFD700;Medium Yellow C,#FFD900;Orange 021 C,#FE5000;Bright Orange C,#FF5E00;Warm Red C,#F9423A;Red 032 C,#EF3340;Bright Red C,#F93822;Strong Red C,#CE0056;Rubine Red C,#CE0058;Rhodamine Red C,#E10098;Pink C,#D62598;Purple C,#BB29BB;Medium Purple C,#4E008E;Violet C,#440099;Blue 072 C,#10069F;Reflex Blue C,#001489;Dark Blue C,#00239C;Process Blue C,#0085CA;Medium Blue C,#0084CA;Green C,#00AB84;Bright Green C,#00B08B;Black C,#2D2926;Neutral Black C,#222223;801 C,#009ACE;802 C,#44D62C;803 C,#FFE900;804 C,#FFAA4D;805 C,#FF7276;806 C,#FF3EB5;807 C,#EA27C2;871 C,#84754E;872 C,#85714D;873 C,#866D4B;874 C,#8B6F4E;875 C,#87674F;876 C,#8B634B;877 C,#8A8D8F";
+let PANTONE_TCX = null;
+function pantoneTable() {
+  if (PANTONE_TCX) return PANTONE_TCX;
+  PANTONE_TCX = PANTONE_TCX_RAW.split(';').map(s => {
+    const p = s.split(',');
+    return { code: p[0], hex: p[1], name: p[2] || '' };
+  }).filter(x => x.code && x.hex);
+  return PANTONE_TCX;
+}
+let PANTONE_C_ARR = null;
+function pantoneC() {
+  if (PANTONE_C_ARR) return PANTONE_C_ARR;
+  PANTONE_C_ARR = PANTONE_C.split(';').map(s => { const p = s.split(','); return { code: p[0], hex: p[1] }; });
+  return PANTONE_C_ARR;
+}
+function nearestPantone(hex) {
+  const c = hexToRgb(hex);
+  const lab = srgbToLab(c.r, c.g, c.b);
+  let best = null, bestC = null;
+  pantoneTable().forEach(p => {
+    const pc = hexToRgb(p.hex);
+    const pl = srgbToLab(pc.r, pc.g, pc.b);
+    const d = Math.sqrt((lab.L - pl.L) * (lab.L - pl.L) + (lab.a - pl.a) * (lab.a - pl.a) + (lab.b - pl.b) * (lab.b - pl.b));
+    if (!best || d < best.d) best = { code: p.code, hex: p.hex, name: p.name, d: d };
+  });
+  pantoneC().forEach(p => {
+    const pc = hexToRgb(p.hex);
+    const pl = srgbToLab(pc.r, pc.g, pc.b);
+    const d = Math.sqrt((lab.L - pl.L) * (lab.L - pl.L) + (lab.a - pl.a) * (lab.a - pl.a) + (lab.b - pl.b) * (lab.b - pl.b));
+    if (!bestC || d < bestC.d) bestC = { code: p.code, hex: p.hex, d: d };
+  });
+  return { tcx: best, c: bestC };
+}
+function buildToolColor() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🎨 色值转换 <small style="color:var(--text-light);font-weight:400">（HEX / RGB / RGBA / HSL / HSV / Coloro / PANTONE）</small></h4>
+    <div class="tool-row">
+      <input id="ccIn" value="#C9A85C" style="width:250px" placeholder="#C9A85C / rgb(201,168,92) / hsl(43,49%,57%)">
+      <input type="color" id="ccPick" value="#C9A85C" style="width:44px;padding:2px">
+      <span style="color:var(--text-light);font-size:12px">不透明度</span>
+      <input id="ccAlpha" type="range" min="0" max="100" value="100" style="width:110px">
+      <span id="ccAlphaVal" style="font-size:12px;color:var(--text-light);width:34px">100%</span>
+    </div>
+    <div class="tool-row" id="ccQuick" style="margin-top:8px"></div>
+    <div class="tool-row" style="margin-top:12px;align-items:flex-start;gap:14px;flex-wrap:nowrap">
+      <div id="ccPrev" class="tool-swatch" style="width:104px;height:78px;border-radius:10px;flex-shrink:0"></div>
+      <div id="ccList" class="cc-list"></div>
+    </div>
+    <div class="t-tip">输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)、甚至直接 201,168,92。PANTONE 为基于 Lab 色差的最近色号匹配（TCX 2310 色 + 常用 C 卡），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
+  const inEl = box.querySelector('#ccIn'), pick = box.querySelector('#ccPick'), alpha = box.querySelector('#ccAlpha');
+  const alphaVal = box.querySelector('#ccAlphaVal'), prev = box.querySelector('#ccPrev');
+  const list = box.querySelector('#ccList'), quick = box.querySelector('#ccQuick');
+  let alphaOverride = null;
+  const copy = async (txt) => {
+    let ok = false;
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(txt); ok = true; } } catch (_) {}
+    return ok;
+  };
+  // PANTONE TCX 数据里的色值是裸 6 位（如 C5A253），必须补 #，否则是无效 CSS 会渲染不出色块
+  const cssHex = (h) => {
+    const s = String(h == null ? '' : h).trim();
+    if (!s) return '';
+    if (s.charAt(0) === '#') return s;
+    return /^[0-9a-fA-F]{3,8}$/.test(s) ? '#' + s : s;
+  };
+  const row = (key, val, chipHex) => {
+    const d = document.createElement('div');
+    d.className = 'cc-row';
+    // 无色的行也占一个占位槽，保证所有行的值左边界对齐
+    const c = cssHex(chipHex);
+    const chip = c
+      ? `<span class="cc-chip" style="background:${c}"></span>`
+      : '<span class="cc-chip cc-chip-empty"></span>';
+    d.innerHTML = `<span class="cc-k">${key}</span>` + chip +
+      `<span class="cc-v">${val}</span><button class="cc-copy">复制</button>`;
+    const btn = d.querySelector('.cc-copy');
+    btn.onclick = async () => {
+      const ok = await copy(String(val).replace(/<[^>]+>/g, ''));
+      const old = btn.textContent;
+      btn.textContent = ok ? '已复制' : '手动复制';
+      setTimeout(() => { btn.textContent = old; }, 1200);
+    };
+    return d;
+  };
+  const render = () => {
+    const parsed = parseColorStr(inEl.value);
+    if (!parsed) {
+      list.innerHTML = '<div style="font-size:12.5px;color:#b03a2e">无法识别这个色值，试试 #C9A85C、rgb(201,168,92) 或 hsl(43,49%,57%)</div>';
+      return;
+    }
+    const a = alphaOverride == null ? parsed.a : alphaOverride;
+    const hex = rgbToHex(parsed.r, parsed.g, parsed.b);
+    const hsl = rgbToHsl(parsed.r, parsed.g, parsed.b);
+    const hsv = rgbToHsv(parsed.r, parsed.g, parsed.b);
+    const co = coloroOf(hex);
+    const pt = nearestPantone(hex);
+    pick.value = hex.toLowerCase();
+    prev.style.background = hex;
+    prev.title = hex;
+    alphaVal.textContent = Math.round(a * 100) + '%';
+    list.innerHTML = '';
+    list.appendChild(row('HEX', hex));
+    list.appendChild(row('RGB', `rgb(${parsed.r}, ${parsed.g}, ${parsed.b})`));
+    list.appendChild(row('RGBA', `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${+a.toFixed(2)})`));
+    list.appendChild(row('HSL', `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`));
+    list.appendChild(row('HSLA', `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${+a.toFixed(2)})`));
+    list.appendChild(row('HSV', `hsv(${hsv.h}, ${hsv.s}%, ${hsv.v}%)`));
+    list.appendChild(row('Coloro', `${co.code} · ${co.name}`));
+    const tcx = pt.tcx;
+    if (tcx) {
+      const de = tcx.d.toFixed(1);
+      const near = tcx.d <= 8;
+      list.appendChild(row('PANTONE', `<span style="color:${near ? '#1e8449' : '#b03a2e'}">${tcx.code} TCX</span> · ${tcx.name} · ${cssHex(tcx.hex)} · ΔE ${de}${near ? '' : '（色差偏大）'}`, tcx.hex));
+    }
+    if (pt.c) list.appendChild(row('PANTONE C', `${pt.c.code} · ${cssHex(pt.c.hex)} · ΔE ${pt.c.d.toFixed(1)}`, pt.c.hex));
+    const crWhite = contrastRatio(hex, '#FFFFFF'), crBlack = contrastRatio(hex, '#000000');
+    list.appendChild(row('可读性', `白字 ${crWhite.toFixed(1)}:1 ${crWhite >= 4.5 ? '✓' : '✕'} · 黑字 ${crBlack.toFixed(1)}:1 ${crBlack >= 4.5 ? '✓' : '✕'}`));
+  };
+  inEl.oninput = () => { alphaOverride = null; render(); };
+  pick.oninput = () => { inEl.value = pick.value.toUpperCase(); alphaOverride = null; render(); };
+  alpha.oninput = () => { alphaOverride = parseInt(alpha.value, 10) / 100; alphaVal.textContent = alpha.value + '%'; render(); };
+  [['#C9A85C', '芥黄'], ['#7A5C3E', '栗棕'], ['#2D2926', 'PANTONE黑'], ['#C8102E', '中国红'], ['#009ACE', '801C'], ['#00AB84', 'Green C'], ['#1D1D1B', '深灰'], ['#F3ECE0', '米白']].forEach(([h, n]) => {
+    const chip = document.createElement('span');
+    chip.className = 'tool-mini';
+    chip.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${h};vertical-align:-1px;margin-right:4px"></span>${n}`;
+    chip.onclick = () => { inEl.value = h; alphaOverride = null; render(); };
+    quick.appendChild(chip);
+  });
+  render();
+  return box;
+}
+
 const TOOLS = [
   { id: 'size', name: '尺寸换算', icon: '📏', build: buildToolSize },
   { id: 'resize', name: '图片Resize', icon: '🖼️', build: buildToolResize },
   { id: 'compress', name: '文件压缩', icon: '🗜️', build: buildToolCompress },
   { id: 'palette', name: 'Copy HEX', icon: '🎯', build: buildToolPalette },
+  { id: 'colorconv', name: '色值转换', icon: '🎨', build: buildToolColor },
+  { id: 'qr', name: '二维码', icon: '🔳', build: buildToolQr },
+  { id: 'watermark', name: '图片水印', icon: '💧', build: buildToolWatermark },
   { id: 'date', name: '日期计算', icon: '📅', build: buildToolDate },
   { id: 'container', name: '装柜估算', icon: '🚢', build: buildToolContainer },
   { id: 'tz', name: '全球时差', icon: '🕐', build: buildToolTime },
@@ -3585,6 +4339,10 @@ if (typeof globalThis !== 'undefined') {
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
+    buildToolQr, buildToolWatermark, buildToolColor,
+    qrEncode, qrCanvas, qrCapacity, qrPickVersion, utf8Bytes,
+    parseColorStr, rgbToHsl, hslToRgb, rgbToHsv, nearestPantone, pantoneTable, pantoneC,
+    drawWatermarkOn, wmPos,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
     hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
