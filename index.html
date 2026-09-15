@@ -2520,7 +2520,7 @@ function buildToolCalc() {
   return box;
 }
 
-// ---- 9) Copy HEX + Coloro 配色建议（上传图片 → 5 主色 + 配色建议图） ----
+// ---- 9) ColorReview + Coloro 配色建议（上传图片 → 5 主色 + 配色建议图） ----
 const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
 function hexToRgb(hex) {
   const s = String(hex == null ? '' : hex).replace(/[^0-9a-fA-F]/g, '');
@@ -3000,7 +3000,7 @@ function renderPaletteSheet(opt) {
 
 function buildToolPalette() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🎯 Copy HEX + 配色建议 <small style="color:var(--text-light);font-weight:400">（上传图片 → 配色点评打分 → 5 个主色 → Coloro 配色建议图）</small></h4>
+  box.innerHTML = `<h4>🎯 ColorReview + 配色建议 <small style="color:var(--text-light);font-weight:400">（上传图片 → 配色点评打分 → 5 个主色 → Coloro 配色建议图）</small></h4>
     <div class="tool-row"><input type="file" id="plFile" accept="image/*"><span class="tool-out" id="plOut"></span></div>
     <div class="pal-grid" id="palGrid"></div>
     <div id="plEval" class="eval-box" style="display:none"></div>
@@ -3873,7 +3873,7 @@ const TOOLS = [
   { id: 'size', name: '尺寸换算', icon: '📏', desc: '像素 / 厘米互换', build: buildToolSize },
   { id: 'resize', name: '图片Resize', icon: '🖼️', desc: '批量改尺寸格式', build: buildToolResize },
   { id: 'compress', name: '文件压缩', icon: '🗜️', desc: 'PPT / PDF / 图片瘦身', build: buildToolCompress },
-  { id: 'palette', name: 'Copy HEX', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
+  { id: 'palette', name: 'ColorReview', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
   { id: 'colorconv', name: '色值转换', icon: '🎨', desc: 'HEX / RGB / PANTONE', build: buildToolColor },
   { id: 'qr', name: '二维码', icon: '🔳', desc: '文本一键转码', build: buildToolQr },
   { id: 'watermark', name: '图片水印', icon: '💧', desc: '文字 / Logo 打标', build: buildToolWatermark },
