@@ -404,19 +404,20 @@
     content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
     background: var(--c-sales, #3498db); opacity: 0; transition: opacity .16s;
   }
+  /* 3D 图标：图标自带体积与投影，容器不再垫底色块 */
   .tool-chip .tc-ico {
-    width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center;
-    font-size: 25px; line-height: 1; background: linear-gradient(180deg, rgba(52,152,219,.17), rgba(52,152,219,.08));
-    transition: background .16s, transform .16s;
+    width: 54px; height: 54px; display: flex; align-items: center; justify-content: center;
+    transition: transform .16s;
   }
+  .tool-chip .tc-ico svg { width: 100%; height: 100%; display: block; }
   .tool-chip .tc-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
   .tool-chip .tc-desc { font-size: 11px; color: var(--text-light); line-height: 1.4; }
   .tool-chip:hover { border-color: #b9d5ee; box-shadow: 0 10px 22px -8px rgba(52,152,219,.38); transform: translateY(-4px); }
   .tool-chip:hover::before { opacity: 1; }
-  .tool-chip:hover .tc-ico { background: linear-gradient(180deg, rgba(52,152,219,.27), rgba(52,152,219,.15)); transform: scale(1.08); }
+  .tool-chip:hover .tc-ico { transform: scale(1.09); }
   .tool-chip.on { border-color: var(--c-sales, #3498db); background: linear-gradient(180deg, #f1f8ff 0%, #fff 72%); box-shadow: 0 10px 22px -9px rgba(52,152,219,.5); }
   .tool-chip.on::before { opacity: 1; }
-  .tool-chip.on .tc-ico { background: linear-gradient(180deg, rgba(52,152,219,.32), rgba(52,152,219,.18)); }
+  .tool-chip.on .tc-ico { transform: translateY(-1px) scale(1.05); }
   .tool-chip.on .tc-name { color: var(--c-sales, #3498db); }
   .tool-chip.on::after {
     content: '✓'; position: absolute; top: 7px; right: 8px; width: 15px; height: 15px; border-radius: 50%;
@@ -587,6 +588,310 @@
 <body>
 
 <!-- ======== 登录 / 注册 ======== -->
+<!-- ===== 实用功能中心 · 3D 图标 sprite（内联，零外部依赖） =====
+     统一设计语言：64×64 画布 / 渐变体积 / 顶部高光 / 底部接触阴影
+     每个 symbol 的渐变 id 必须唯一，否则后定义的会覆盖前面的 -->
+<!-- 注意：此 sprite 绝不能用 display:none 隐藏 —— 定义渐变所在的 svg 一旦 display:none，
+     所有 url(#gXxx) 引用都会失效，图标会变成只有描边的空壳（已实测） -->
+<svg id="icSprite" data-sprite="1" width="0" height="0" style="position:absolute;overflow:hidden;pointer-events:none" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gHiSoft" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".30"/>
+      <stop offset=".55" stop-color="#fff" stop-opacity=".05"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ① 尺寸换算：3D 直尺 + 双向箭头 -->
+  <symbol id="ic-size" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gSz" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8FBEFF"/><stop offset="1" stop-color="#3B76D9"/></linearGradient>
+      <linearGradient id="gSzD" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2C5FBF"/><stop offset="1" stop-color="#1B3F80"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="56" rx="15" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <rect x="7" y="28" width="50" height="16" rx="5" fill="url(#gSzD)"/>
+    <rect x="7" y="23" width="50" height="16" rx="5" fill="url(#gSz)"/>
+    <rect x="7" y="23" width="50" height="16" rx="5" fill="url(#gHiSoft)"/>
+    <g stroke="#1E4A8F" stroke-width="1.8" stroke-linecap="round" opacity=".7">
+      <line x1="14" y1="24" x2="14" y2="29.5"/>
+      <line x1="21" y1="24" x2="21" y2="27.5"/>
+      <line x1="28" y1="24" x2="28" y2="29.5"/>
+      <line x1="35" y1="24" x2="35" y2="27.5"/>
+      <line x1="42" y1="24" x2="42" y2="29.5"/>
+      <line x1="49" y1="24" x2="49" y2="27.5"/>
+    </g>
+    <g stroke="#334155" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".72">
+      <path d="M18 14h28"/>
+      <path d="M18 14l5-4.2M18 14l5 4.2"/>
+      <path d="M46 14l-5-4.2M46 14l-5 4.2"/>
+    </g>
+  </symbol>
+
+  <!-- ② 图片 Resize：图卡 + 缩放箭头 -->
+  <symbol id="ic-resize" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gRz" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4FD8C6"/><stop offset="1" stop-color="#0E8C7E"/></linearGradient>
+      <linearGradient id="gRzD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0E8C7E"/><stop offset="1" stop-color="#0A6157"/></linearGradient>
+      <linearGradient id="gRzB" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FA0F5"/><stop offset="1" stop-color="#2C5FBF"/></linearGradient>
+    </defs>
+    <ellipse cx="30" cy="55" rx="14" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <rect x="10" y="17" width="35" height="31" rx="6" fill="url(#gRzD)" transform="translate(2.5,3.5)"/>
+    <rect x="10" y="17" width="35" height="31" rx="6" fill="url(#gRz)"/>
+    <circle cx="19" cy="25" r="3" fill="#fff" opacity=".9"/>
+    <path d="M11 44 L20 30 L26.5 38 L31 32 L44 44 Z" fill="#fff" opacity=".75"/>
+    <rect x="10" y="17" width="35" height="31" rx="6" fill="url(#gHiSoft)"/>
+    <circle cx="46" cy="43" r="11" fill="url(#gRzB)"/>
+    <circle cx="46" cy="43" r="11" fill="url(#gHiSoft)"/>
+    <g stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M42.5 46.5 L49.5 39.5"/>
+      <path d="M42.5 46.5 L45.8 46.5 M42.5 46.5 L42.5 43.2"/>
+      <path d="M49.5 39.5 L46.2 39.5 M49.5 39.5 L49.5 42.8"/>
+    </g>
+  </symbol>
+
+  <!-- ③ 文件压缩：文档 + 上下压板 -->
+  <symbol id="ic-compress" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gCp" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#A99DFF"/><stop offset="1" stop-color="#6A57E8"/></linearGradient>
+      <linearGradient id="gCpD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5540C9"/><stop offset="1" stop-color="#3A2A96"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="56" rx="15" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <rect x="16" y="13" width="32" height="38" rx="5" fill="url(#gCpD)" transform="translate(2,3)"/>
+    <rect x="16" y="13" width="32" height="38" rx="5" fill="url(#gCp)"/>
+    <path d="M40 13h3a5 5 0 0 1 5 5v3z" fill="#fff" opacity=".38"/>
+    <rect x="16" y="13" width="32" height="38" rx="5" fill="url(#gHiSoft)"/>
+    <!-- ↓ ▬ ↑ 三件套 = 压缩语义。
+         注意：箭头不要配中间横块外加双向箭头，三者会糊成一个“六角星/雪花”（已实测），
+         所以这里做成「带杆箭头 + 细中缝 + 带杆箭头」，上下对称、间距一致。 -->
+    <g stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".97">
+      <path d="M32 21v7.8"/>
+      <path d="M28.9 26.4 32 28.8l3.1-2.4"/>
+      <path d="M32 43v-7.8"/>
+      <path d="M28.9 37.6 32 35.2l3.1 2.4"/>
+    </g>
+    <rect x="26" y="30.6" width="12" height="2.8" rx="1.4" fill="#fff" opacity=".97"/>
+  </symbol>
+
+  <!-- ④ ColoroReview：调色盘（颜料块）+ 放大镜 -->
+  <symbol id="ic-palette" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gPal" x1="0" y1="0" x2="0.35" y2="1">
+        <stop offset="0" stop-color="#FFF4E0"/><stop offset=".55" stop-color="#F2DFC0"/><stop offset="1" stop-color="#DCC195"/>
+      </linearGradient>
+      <linearGradient id="gPalD" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#C3A87F"/><stop offset="1" stop-color="#9C8260"/>
+      </linearGradient>
+    </defs>
+    <ellipse cx="28" cy="51" rx="16.5" ry="3" fill="#0d1b2a" opacity=".15"/>
+    <ellipse cx="28" cy="36.4" rx="20" ry="13.2" fill="url(#gPalD)"/>
+    <ellipse cx="28" cy="32" rx="20" ry="13.2" fill="url(#gPal)"/>
+    <ellipse cx="28" cy="32" rx="15.4" ry="9.6" fill="none" stroke="#C9AE85" stroke-width="1.1"/>
+    <!-- 四色颜料：三块沿上弧、一块在左下，像用过的调色盘。
+         原先那块大白高光（rx8/ry4.2 的白色椭圆）在 54px 下读起来像脏斑，已删。 -->
+    <circle cx="15.5" cy="31" r="3.9" fill="#FF5E5E"/>
+    <circle cx="23.5" cy="25.2" r="3.6" fill="#FFB01F"/>
+    <circle cx="32.8" cy="26.2" r="3.5" fill="#17BFC6"/>
+    <circle cx="21" cy="36" r="3.9" fill="#7C6BF0"/>
+    <g fill="url(#gHiSoft)">
+      <circle cx="15.5" cy="31" r="3.9"/><circle cx="23.5" cy="25.2" r="3.6"/>
+      <circle cx="32.8" cy="26.2" r="3.5"/><circle cx="21" cy="36" r="3.9"/>
+    </g>
+    <g fill="#fff" opacity=".8">
+      <circle cx="14.2" cy="29.7" r="1.1"/><circle cx="22.4" cy="24.1" r="1"/>
+      <circle cx="31.7" cy="25.1" r="1"/><circle cx="19.9" cy="34.9" r="1.1"/>
+    </g>
+    <circle cx="46" cy="44" r="8.6" fill="#BEE3F2" opacity=".62"/>
+    <circle cx="46" cy="44" r="8.6" fill="none" stroke="#2F3E52" stroke-width="2.7"/>
+    <path d="M41.4 47.4a6.6 6.6 0 0 0 4.4 2.6" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" opacity=".8"/>
+    <path d="M52.3 50.3 58 56" stroke="#2F3E52" stroke-width="4.4" stroke-linecap="round"/>
+  </symbol>
+
+  <!-- ⑤ 色值转换：立体六边形 + 互换箭头 -->
+  <symbol id="ic-colorconv" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gCc" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8FB6"/><stop offset="1" stop-color="#E23E77"/></linearGradient>
+      <linearGradient id="gCcD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B82E60"/><stop offset="1" stop-color="#8A1F46"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="55" rx="14" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <path d="M32 14 L49 24.5 V45.5 L32 56 L15 45.5 V24.5 Z" fill="url(#gCcD)"/>
+    <path d="M32 11 L49 21.5 V42.5 L32 53 L15 42.5 V21.5 Z" fill="url(#gCc)"/>
+    <path d="M32 11 L49 21.5 V42.5 L32 53 L15 42.5 V21.5 Z" fill="url(#gHiSoft)"/>
+    <g stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity=".96">
+      <line x1="26" y1="25" x2="23" y2="41"/>
+      <line x1="34" y1="25" x2="31" y2="41"/>
+      <line x1="21.5" y1="30" x2="38.5" y2="30"/>
+      <line x1="20.5" y1="36.5" x2="37.5" y2="36.5"/>
+    </g>
+    <g stroke="#94A3B8" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".85">
+      <path d="M9 32h7"/><path d="M9 32l3.6-3.4M9 32l3.6 3.4"/>
+      <path d="M55 32h-7"/><path d="M55 32l-3.6-3.4M55 32l-3.6 3.4"/>
+    </g>
+  </symbol>
+
+  <!-- ⑥ 二维码：3D 码块 -->
+  <symbol id="ic-qr" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gQr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4A5C70"/><stop offset="1" stop-color="#2B3947"/></linearGradient>
+      <linearGradient id="gQrT" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7C8FA5"/><stop offset="1" stop-color="#55697E"/></linearGradient>
+      <linearGradient id="gQrS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#263441"/><stop offset="1" stop-color="#18232D"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="55" rx="16" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <path d="M12 18 L24 10 L52 10 L40 18 Z" fill="url(#gQrT)"/>
+    <path d="M40 18 L52 10 V38 L40 46 Z" fill="url(#gQrS)"/>
+    <rect x="12" y="18" width="28" height="28" rx="3" fill="url(#gQr)"/>
+    <g fill="#fff">
+      <path d="M16 22h6v6h-6z" fill="none" stroke="#fff" stroke-width="1.7"/>
+      <rect x="18.4" y="24.4" width="1.7" height="1.7" rx=".4"/>
+      <path d="M30 22h6v6h-6z" fill="none" stroke="#fff" stroke-width="1.7"/>
+      <rect x="32.4" y="24.4" width="1.7" height="1.7" rx=".4"/>
+      <path d="M16 36h6v6h-6z" fill="none" stroke="#fff" stroke-width="1.7"/>
+      <rect x="18.4" y="38.4" width="1.7" height="1.7" rx=".4"/>
+      <rect x="25" y="22" width="3" height="3" rx=".6"/>
+      <rect x="25" y="30" width="3" height="3" rx=".6"/>
+      <rect x="31" y="30" width="3" height="3" rx=".6"/>
+      <rect x="25" y="37" width="3" height="3" rx=".6"/>
+      <rect x="33" y="37" width="3" height="3" rx=".6"/>
+      <rect x="31.5" y="41.5" width="3" height="3" rx=".6"/>
+    </g>
+  </symbol>
+
+  <!-- ⑦ 图片水印：图卡 + 水印章 -->
+  <symbol id="ic-watermark" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gWm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6FC6FF"/><stop offset="1" stop-color="#2A86D0"/></linearGradient>
+      <linearGradient id="gWmD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1F6FB0"/><stop offset="1" stop-color="#15507F"/></linearGradient>
+    </defs>
+    <ellipse cx="30" cy="55" rx="15" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <rect x="9" y="15" width="36" height="31" rx="6" fill="url(#gWmD)" transform="translate(2.5,3.5)"/>
+    <rect x="9" y="15" width="36" height="31" rx="6" fill="url(#gWm)"/>
+    <circle cx="18" cy="23.5" r="2.8" fill="#fff" opacity=".9"/>
+    <path d="M10 42 L19 29 L25.5 37 L30 31 L44 42 Z" fill="#fff" opacity=".72"/>
+    <rect x="9" y="15" width="36" height="31" rx="6" fill="url(#gHiSoft)"/>
+    <circle cx="42.5" cy="40.5" r="11.5" fill="#fff" opacity=".52"/>
+    <circle cx="42.5" cy="40.5" r="11.5" fill="none" stroke="#fff" stroke-width="1.8" opacity=".9"/>
+    <path d="M36.8 36.2 L39.8 44 L42.5 39.4 L45.2 44 L48.2 36.2" stroke="#1F6FB0" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".95"/>
+  </symbol>
+
+  <!-- ⑧ 日期计算：3D 日历 -->
+  <symbol id="ic-date" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gDt" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8E8E"/><stop offset="1" stop-color="#E0484B"/></linearGradient>
+      <linearGradient id="gDtD" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#B9393C"/><stop offset="1" stop-color="#8E2A2D"/></linearGradient>
+      <linearGradient id="gPg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#EDF1F6"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="55" rx="15" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <rect x="19" y="9" width="3.6" height="9" rx="1.8" fill="#AAB6C4"/>
+    <rect x="41.4" y="9" width="3.6" height="9" rx="1.8" fill="#AAB6C4"/>
+    <rect x="10" y="16" width="44" height="35" rx="5.5" fill="url(#gDtD)" transform="translate(0,3)"/>
+    <rect x="10" y="14" width="44" height="35" rx="5.5" fill="url(#gPg)"/>
+    <path d="M15.5 14 H48.5 A5.5 5.5 0 0 1 54 19.5 V26 H10 V19.5 A5.5 5.5 0 0 1 15.5 14 Z" fill="url(#gDt)"/>
+    <path d="M15.5 14 H48.5 A5.5 5.5 0 0 1 54 19.5 V26 H10 V19.5 A5.5 5.5 0 0 1 15.5 14 Z" fill="url(#gHiSoft)"/>
+    <g fill="#CBD5E1">
+      <rect x="17" y="30" width="6" height="4.6" rx="1.3"/>
+      <rect x="27" y="30" width="6" height="4.6" rx="1.3"/>
+      <rect x="37" y="30" width="6" height="4.6" rx="1.3"/>
+      <rect x="27" y="38.5" width="6" height="4.6" rx="1.3"/>
+      <rect x="37" y="38.5" width="6" height="4.6" rx="1.3"/>
+    </g>
+    <rect x="17" y="38.5" width="6" height="4.6" rx="1.3" fill="url(#gDt)"/>
+  </symbol>
+
+  <!-- ⑨ 装柜估算：3D 集装箱 -->
+  <symbol id="ic-container" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gCt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFB678"/><stop offset="1" stop-color="#E0762A"/></linearGradient>
+      <linearGradient id="gCtT" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD0A6"/><stop offset="1" stop-color="#FFA75E"/></linearGradient>
+      <linearGradient id="gCtS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B85E1C"/><stop offset="1" stop-color="#8E4413"/></linearGradient>
+    </defs>
+    <ellipse cx="30" cy="55" rx="18" ry="3.2" fill="#0d1b2a" opacity=".13"/>
+    <path d="M8 22 L14 13 L54 13 L48 22 Z" fill="url(#gCtT)"/>
+    <path d="M48 22 L54 13 V41 L48 48 Z" fill="url(#gCtS)"/>
+    <rect x="8" y="22" width="40" height="26" rx="2.5" fill="url(#gCt)"/>
+    <rect x="8" y="43.5" width="40" height="4.5" fill="#B85E1C" opacity=".5"/>
+    <g stroke="#C9691F" stroke-width="1.5" opacity=".5">
+      <line x1="13" y1="23.5" x2="13" y2="43.5"/>
+      <line x1="18" y1="23.5" x2="18" y2="43.5"/>
+      <line x1="23" y1="23.5" x2="23" y2="43.5"/>
+      <line x1="28" y1="23.5" x2="28" y2="43.5"/>
+      <line x1="33" y1="23.5" x2="33" y2="43.5"/>
+      <line x1="38" y1="23.5" x2="38" y2="43.5"/>
+      <line x1="43" y1="23.5" x2="43" y2="43.5"/>
+    </g>
+  </symbol>
+
+  <!-- ⑩ 全球时差：地球 + 表盘 -->
+  <symbol id="ic-tz" viewBox="0 0 64 64">
+    <defs>
+      <radialGradient id="gTz" cx=".34" cy=".3" r=".85">
+        <stop offset="0" stop-color="#7FC7EE"/><stop offset=".55" stop-color="#2E9BD6"/><stop offset="1" stop-color="#15628F"/>
+      </radialGradient>
+    </defs>
+    <ellipse cx="30" cy="55" rx="15" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <circle cx="30" cy="31" r="20" fill="url(#gTz)"/>
+    <g stroke="#fff" stroke-width="1.6" fill="none" opacity=".38">
+      <ellipse cx="30" cy="31" rx="7.5" ry="20"/>
+      <path d="M11 27 Q30 33 49 27"/>
+      <path d="M12 37 Q30 43 48 37"/>
+    </g>
+    <ellipse cx="21" cy="21" rx="7.5" ry="4.6" fill="#fff" opacity=".3" transform="rotate(-32 21 21)"/>
+    <circle cx="30" cy="31" r="9" fill="#fff" opacity=".95"/>
+    <circle cx="30" cy="31" r="9" fill="none" stroke="#1A6A94" stroke-width="1.6" opacity=".45"/>
+    <g stroke="#1A6A94" stroke-width="2.1" stroke-linecap="round">
+      <line x1="30" y1="31" x2="30" y2="25"/>
+      <line x1="30" y1="31" x2="35" y2="33.2"/>
+    </g>
+    <circle cx="30" cy="31" r="1.3" fill="#1A6A94"/>
+  </symbol>
+
+  <!-- ⑪ 汇率换算：金币 ¥ + 循环箭头 -->
+  <symbol id="ic-rate" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gRt" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD873"/><stop offset="1" stop-color="#E09A15"/></linearGradient>
+      <linearGradient id="gRtD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C98A0E"/><stop offset="1" stop-color="#96650A"/></linearGradient>
+    </defs>
+    <ellipse cx="26" cy="53" rx="16" ry="3.2" fill="#0d1b2a" opacity=".13"/>
+    <ellipse cx="25" cy="38" rx="17" ry="15.5" fill="url(#gRtD)"/>
+    <ellipse cx="25" cy="33" rx="17" ry="15.5" fill="url(#gRt)"/>
+    <ellipse cx="25" cy="33" rx="12.3" ry="11" fill="none" stroke="#fff" stroke-width="1.5" opacity=".45"/>
+    <g stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".96">
+      <path d="M20 27 L25 33.5 L30 27"/>
+      <path d="M25 33.5 V41"/>
+      <path d="M20.5 31.5 H29.5"/>
+      <path d="M20.5 36.5 H29.5"/>
+    </g>
+    <ellipse cx="18" cy="26" rx="6.5" ry="4" fill="#fff" opacity=".3" transform="rotate(-28 18 26)"/>
+    <g stroke="#16A085" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M40.6 18.6 A10 10 0 0 1 59.4 18.6"/>
+      <path d="M59.4 18.6 l-3.8 -1.4 M59.4 18.6 l1.1 -3.9"/>
+      <path d="M59.4 25.4 A10 10 0 0 1 40.6 25.4"/>
+      <path d="M40.6 25.4 l3.8 1.4 M40.6 25.4 l-1.1 3.9"/>
+    </g>
+  </symbol>
+
+  <!-- ⑫ 计算器：3D 机身 -->
+  <symbol id="ic-calc" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="gCl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8C9BB0"/><stop offset="1" stop-color="#5A6B80"/></linearGradient>
+      <linearGradient id="gClD" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#465465"/><stop offset="1" stop-color="#33404E"/></linearGradient>
+    </defs>
+    <ellipse cx="32" cy="55" rx="15" ry="3" fill="#0d1b2a" opacity=".13"/>
+    <rect x="15" y="13" width="34" height="39" rx="6" fill="url(#gClD)" transform="translate(0,3)"/>
+    <rect x="15" y="12" width="34" height="39" rx="6" fill="url(#gCl)"/>
+    <rect x="15" y="12" width="34" height="39" rx="6" fill="url(#gHiSoft)"/>
+    <rect x="19" y="16" width="26" height="10" rx="3" fill="#DCEBFA"/>
+    <rect x="19" y="16" width="26" height="10" rx="3" fill="url(#gHiSoft)"/>
+    <g fill="#fff" opacity=".9">
+      <rect x="19" y="30" width="6.6" height="5" rx="1.5"/>
+      <rect x="28.7" y="30" width="6.6" height="5" rx="1.5"/>
+      <rect x="38.4" y="30" width="6.6" height="5" rx="1.5"/>
+      <rect x="19" y="37.5" width="6.6" height="5" rx="1.5"/>
+      <rect x="28.7" y="37.5" width="6.6" height="5" rx="1.5"/>
+      <rect x="38.4" y="37.5" width="6.6" height="5" rx="1.5"/>
+    </g>
+    <rect x="19" y="45" width="26" height="4.6" rx="1.5" fill="#fff" opacity=".55"/>
+  </symbol>
+</svg>
+
 <div id="loginView" class="login-wrap">
   <div class="login-card">
     <h1>📋 工作看板</h1>
@@ -3896,7 +4201,10 @@ function renderToolbox() {
     chip.title = t.desc ? (t.name + ' · ' + t.desc) : t.name;
     const ico = document.createElement('span');
     ico.className = 'tc-ico';
-    ico.textContent = t.icon + ' ';
+    // 3D 图标：优先引用内联 SVG sprite，缺 symbol 时回退原 emoji（新增工具时不会空白）
+    ico.innerHTML = document.getElementById('ic-' + t.id)
+      ? '<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#ic-' + t.id + '"/></svg>'
+      : esc(t.icon || '');
     const nm = document.createElement('span');
     nm.className = 'tc-name';
     nm.textContent = t.name;
