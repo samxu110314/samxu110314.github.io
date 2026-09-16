@@ -239,6 +239,13 @@
     padding: 0 8px; border-radius: 9px; margin: 2px 0 3px 2px;
     white-space: nowrap; max-width: 186px; overflow: hidden; text-overflow: ellipsis;
   }
+  /* 近期已完成归档列：超出 10 项后的折叠展开按钮 */
+  .done-col-toggle {
+    display: block; margin: 4px auto 8px; padding: 7px 16px;
+    border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm);
+    font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit;
+  }
+  .done-col-toggle:hover { border-color: #b9d5ee; }
 
   /* ===== 任务卡 ===== */
   .task {
@@ -2318,14 +2325,35 @@ function buildRecentColumn(cols = COLUMNS) {
     empty.textContent = '暂无已完成任务';
     list.appendChild(empty);
   } else {
-    items.forEach(it => {
+    const RECENT_MAX = 10;
+    const visible = items.slice(0, RECENT_MAX);
+    const folded = items.slice(RECENT_MAX);
+    const appendItem = (it, parent) => {
       const tag = document.createElement('div');
       tag.className = 'colchip';
       tag.style.background = (it.col && it.col.color) || '#7f8c8d';
       tag.textContent = it.col ? it.col.title : '已完成';
-      list.appendChild(tag);
-      list.appendChild(buildTaskEl(it.t, it.col, true));
-    });
+      parent.appendChild(tag);
+      parent.appendChild(buildTaskEl(it.t, it.col, true));
+    };
+    visible.forEach(it => appendItem(it, list));
+    if (folded.length) {
+      const more = document.createElement('div');
+      more.id = 'recentMoreCol';
+      more.style.display = 'none';
+      folded.forEach(it => appendItem(it, more));
+      list.appendChild(more);
+      const toggle = document.createElement('button');
+      toggle.className = 'done-col-toggle';
+      toggle.textContent = `展开全部 ${items.length} 项 ▾`;
+      toggle.onclick = () => {
+        const open = more.style.display === 'none';
+        more.style.display = open ? 'block' : 'none';
+        toggle.textContent = open ? '收起 ▴' : `展开全部 ${items.length} 项 ▾`;
+      };
+      list.appendChild(toggle);
+      count.textContent = `${items.length} 项（展示前 ${RECENT_MAX}）`;
+    }
   }
   colEl.appendChild(list);
   return colEl;
