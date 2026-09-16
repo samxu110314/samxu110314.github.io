@@ -680,38 +680,32 @@
     <rect x="26" y="30.6" width="12" height="2.8" rx="1.4" fill="#fff" opacity=".97"/>
   </symbol>
 
-  <!-- ④ ColoroReview：调色盘（颜料块）+ 放大镜 -->
-  <symbol id="ic-palette" viewBox="0 0 64 64">
-    <defs>
-      <linearGradient id="gPal" x1="0" y1="0" x2="0.35" y2="1">
-        <stop offset="0" stop-color="#FFF4E0"/><stop offset=".55" stop-color="#F2DFC0"/><stop offset="1" stop-color="#DCC195"/>
-      </linearGradient>
-      <linearGradient id="gPalD" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#C3A87F"/><stop offset="1" stop-color="#9C8260"/>
-      </linearGradient>
-    </defs>
-    <ellipse cx="28" cy="51" rx="16.5" ry="3" fill="#0d1b2a" opacity=".15"/>
-    <ellipse cx="28" cy="36.4" rx="20" ry="13.2" fill="url(#gPalD)"/>
-    <ellipse cx="28" cy="32" rx="20" ry="13.2" fill="url(#gPal)"/>
-    <ellipse cx="28" cy="32" rx="15.4" ry="9.6" fill="none" stroke="#C9AE85" stroke-width="1.1"/>
-    <!-- 四色颜料：三块沿上弧、一块在左下，像用过的调色盘。
-         原先那块大白高光（rx8/ry4.2 的白色椭圆）在 54px 下读起来像脏斑，已删。 -->
-    <circle cx="15.5" cy="31" r="3.9" fill="#FF5E5E"/>
-    <circle cx="23.5" cy="25.2" r="3.6" fill="#FFB01F"/>
-    <circle cx="32.8" cy="26.2" r="3.5" fill="#17BFC6"/>
-    <circle cx="21" cy="36" r="3.9" fill="#7C6BF0"/>
-    <g fill="url(#gHiSoft)">
-      <circle cx="15.5" cy="31" r="3.9"/><circle cx="23.5" cy="25.2" r="3.6"/>
-      <circle cx="32.8" cy="26.2" r="3.5"/><circle cx="21" cy="36" r="3.9"/>
+  <!-- ④ ColoroReview：12 色相环。色相环是「配色 / 取色」的通用符号，
+       每 30° 一格、共 12 格，格与格之间留白缝（露底色）。
+       色相从正上方 0°（红）顺时针递进：红→朱→橙→黄→黄绿→绿→青绿→青→蓝→蓝紫→紫→品红。
+       注意：色轮上**不可叠加渐变/高光**，那会污染色相、让色环失去意义；
+       它是全组唯一「纯平色」图标，只靠底部接触阴影与其它 3D 图标保持家族感。
+       改几何时：R（外半径）/r（内半径）/GAP（白缝角）是唯一旋钮，路径由 /tmp 生成器算，勿手改坐标。 -->
+    <symbol id="ic-palette" viewBox="0 0 64 64">
+    <ellipse cx="32" cy="57" rx="16.5" ry="2.9" fill="#0d1b2a" opacity=".14"/>
+    <!-- 白底圆环：扇区之间留 7.5° 缝，露出白色形成分隔线。
+         缝宽不能小于 7°——实测 54px（页面真实尺寸）下亚像素缝会被抗锯齿吃掉，
+         12 条缝随角度忽隐忽现。 -->
+    <circle cx="32" cy="31" r="17" fill="none" stroke="#fff" stroke-width="12"/>
+    <g>
+      <path d="M33.50 8.05A23 23 0 0 1 42.17 10.37L36.87 21.13A11 11 0 0 0 32.72 20.02Z" fill="#E54D42"/>
+      <path d="M44.78 11.88A23 23 0 0 1 51.12 18.22L41.15 24.89A11 11 0 0 0 38.11 21.85Z" fill="#E87F07"/>
+      <path d="M52.63 20.83A23 23 0 0 1 54.95 29.50L42.98 30.28A11 11 0 0 0 41.87 26.13Z" fill="#F3BE05"/>
+      <path d="M54.95 32.50A23 23 0 0 1 52.63 41.17L41.87 35.87A11 11 0 0 0 42.98 31.72Z" fill="#B4CC01"/>
+      <path d="M51.12 43.78A23 23 0 0 1 44.78 50.12L38.11 40.15A11 11 0 0 0 41.15 37.11Z" fill="#31C35A"/>
+      <path d="M42.17 51.63A23 23 0 0 1 33.50 53.95L32.72 41.98A11 11 0 0 0 36.87 40.87Z" fill="#06BBA1"/>
+      <path d="M30.50 53.95A23 23 0 0 1 21.83 51.63L27.13 40.87A11 11 0 0 0 31.28 41.98Z" fill="#00B6C9"/>
+      <path d="M19.22 50.12A23 23 0 0 1 12.88 43.78L22.85 37.11A11 11 0 0 0 25.89 40.15Z" fill="#029DE0"/>
+      <path d="M11.37 41.17A23 23 0 0 1 9.05 32.50L21.02 31.72A11 11 0 0 0 22.13 35.87Z" fill="#4E71EC"/>
+      <path d="M9.05 29.50A23 23 0 0 1 11.37 20.83L22.13 26.13A11 11 0 0 0 21.02 30.28Z" fill="#8A59DA"/>
+      <path d="M12.88 18.22A23 23 0 0 1 19.22 11.88L25.89 21.85A11 11 0 0 0 22.85 24.89Z" fill="#C053BF"/>
+      <path d="M21.83 10.37A23 23 0 0 1 30.50 8.05L31.28 20.02A11 11 0 0 0 27.13 21.13Z" fill="#E85492"/>
     </g>
-    <g fill="#fff" opacity=".8">
-      <circle cx="14.2" cy="29.7" r="1.1"/><circle cx="22.4" cy="24.1" r="1"/>
-      <circle cx="31.7" cy="25.1" r="1"/><circle cx="19.9" cy="34.9" r="1.1"/>
-    </g>
-    <circle cx="46" cy="44" r="8.6" fill="#BEE3F2" opacity=".62"/>
-    <circle cx="46" cy="44" r="8.6" fill="none" stroke="#2F3E52" stroke-width="2.7"/>
-    <path d="M41.4 47.4a6.6 6.6 0 0 0 4.4 2.6" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" opacity=".8"/>
-    <path d="M52.3 50.3 58 56" stroke="#2F3E52" stroke-width="4.4" stroke-linecap="round"/>
   </symbol>
 
   <!-- ⑤ 色值转换：立体六边形 + 互换箭头 -->
