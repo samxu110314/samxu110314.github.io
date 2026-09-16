@@ -512,9 +512,17 @@
   .cc-chip-empty { background: transparent; border-color: transparent; }
   .cc-copy { border: 1px solid var(--border); background: #f4f7fa; border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text); }
   .cc-copy:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
-  /* 二维码 / 水印 */
-  .qr-canvas-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
-  .qr-canvas-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
+  /* 二维码 / 条形码 / 水印 */
+  .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
+  .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
+  /* 二维码 / 条形码 分段切换 */
+  .code-tabs { display: inline-flex; gap: 6px; background: #e8ecf0; padding: 3px; border-radius: 9px; }
+  .code-tab {
+    padding: 5px 15px; border: none; background: transparent; border-radius: 7px;
+    font-size: 13px; color: var(--text-light); cursor: pointer; font-family: inherit; transition: all .18s;
+  }
+  .code-tab:hover { color: var(--text); }
+  .code-tab.on { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(16,24,40,.12); }
   .wm-canvas-box { margin-top: 10px; max-width: 100%; overflow: auto; background: #fafbfc; border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
   .wm-canvas-box canvas { display: block; max-width: 100%; height: auto; border-radius: 4px; }
   .wm-t { font-size: 11.5px; color: var(--text-light); }
@@ -739,19 +747,33 @@
     <path d="M12 18 L24 10 L52 10 L40 18 Z" fill="url(#gQrT)"/>
     <path d="M40 18 L52 10 V38 L40 46 Z" fill="url(#gQrS)"/>
     <rect x="12" y="18" width="28" height="28" rx="3" fill="url(#gQr)"/>
+    <!-- 上半＝二维码：两个定位角 + 数据点 -->
     <g fill="#fff">
-      <path d="M16 22h6v6h-6z" fill="none" stroke="#fff" stroke-width="1.7"/>
-      <rect x="18.4" y="24.4" width="1.7" height="1.7" rx=".4"/>
-      <path d="M30 22h6v6h-6z" fill="none" stroke="#fff" stroke-width="1.7"/>
-      <rect x="32.4" y="24.4" width="1.7" height="1.7" rx=".4"/>
-      <path d="M16 36h6v6h-6z" fill="none" stroke="#fff" stroke-width="1.7"/>
-      <rect x="18.4" y="38.4" width="1.7" height="1.7" rx=".4"/>
-      <rect x="25" y="22" width="3" height="3" rx=".6"/>
-      <rect x="25" y="30" width="3" height="3" rx=".6"/>
-      <rect x="31" y="30" width="3" height="3" rx=".6"/>
-      <rect x="25" y="37" width="3" height="3" rx=".6"/>
-      <rect x="33" y="37" width="3" height="3" rx=".6"/>
-      <rect x="31.5" y="41.5" width="3" height="3" rx=".6"/>
+      <path d="M15.6 21h7v7h-7z" fill="none" stroke="#fff" stroke-width="1.7"/>
+      <rect x="18.1" y="23.5" width="2.6" height="2.6" rx=".5"/>
+      <path d="M29.4 21h7v7h-7z" fill="none" stroke="#fff" stroke-width="1.7"/>
+      <rect x="31.9" y="23.5" width="2.6" height="2.6" rx=".5"/>
+      <rect x="15.6" y="30" width="2.6" height="2.6" rx=".5"/>
+      <rect x="20.1" y="30" width="2.6" height="2.6" rx=".5"/>
+      <rect x="24.6" y="30" width="2.6" height="2.6" rx=".5"/>
+      <rect x="32.9" y="30" width="2.6" height="2.6" rx=".5"/>
+      <rect x="15.6" y="33.4" width="2.6" height="2.6" rx=".5"/>
+      <rect x="24.6" y="33.4" width="2.6" height="2.6" rx=".5"/>
+      <rect x="29.2" y="33.4" width="2.6" height="2.6" rx=".5"/>
+      <rect x="33.9" y="33.4" width="2.6" height="2.6" rx=".5"/>
+    </g>
+    <!-- 下半＝条形码：这块功能这次也一并做进了同一个工具 -->
+    <rect x="14" y="36.6" width="24" height="9" rx="1.4" fill="#F4F7FA" opacity=".95"/>
+    <g fill="#263441">
+      <rect x="15.05" y="37.6" width="1.8" height="7" rx=".3"/>
+      <rect x="17.65" y="37.6" width="1" height="7" rx=".3"/>
+      <rect x="19.55" y="37.6" width="2.2" height="7" rx=".3"/>
+      <rect x="22.65" y="37.6" width="1.2" height="7" rx=".3"/>
+      <rect x="24.85" y="37.6" width="1.9" height="7" rx=".3"/>
+      <rect x="27.65" y="37.6" width="1" height="7" rx=".3"/>
+      <rect x="29.55" y="37.6" width="2.4" height="7" rx=".3"/>
+      <rect x="32.85" y="37.6" width="1.3" height="7" rx=".3"/>
+      <rect x="35.05" y="37.6" width="1.9" height="7" rx=".3"/>
     </g>
   </symbol>
 
@@ -797,26 +819,73 @@
   </symbol>
 
   <!-- ⑨ 装柜估算：3D 集装箱 -->
+  <!-- 卡车货柜：斜轴测三点透视。正面为「箱门」（竖直锁杆 + 横闩＝货柜最标志性的结构），
+       右侧为瓦楞长侧壁，顶面有纵向压型；底部拖架大梁 + 双轮胎点明「卡车」。
+       注意所有朝向右后方的线条都遵循同一个消失向量 d=(+19,-7)，不要随手改坐标。 -->
   <symbol id="ic-container" viewBox="0 0 64 64">
     <defs>
-      <linearGradient id="gCt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFB678"/><stop offset="1" stop-color="#E0762A"/></linearGradient>
-      <linearGradient id="gCtT" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD0A6"/><stop offset="1" stop-color="#FFA75E"/></linearGradient>
-      <linearGradient id="gCtS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B85E1C"/><stop offset="1" stop-color="#8E4413"/></linearGradient>
+      <linearGradient id="gCt" x1="0" y1="0" x2="0.15" y2="1"><stop offset="0" stop-color="#FFB469"/><stop offset="1" stop-color="#DB6A16"/></linearGradient>
+      <linearGradient id="gCtT" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#FFDDB6"/><stop offset="1" stop-color="#FFAC5C"/></linearGradient>
+      <linearGradient id="gCtS" x1="0" y1="0" x2="1" y2="0.7"><stop offset="0" stop-color="#CE6214"/><stop offset="1" stop-color="#96420D"/></linearGradient>
+      <linearGradient id="gCtD" x1="0" y1="0" x2="0.2" y2="1"><stop offset="0" stop-color="#CE6719"/><stop offset="1" stop-color="#A34A0F"/></linearGradient>
+      <linearGradient id="gCh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6B7787"/><stop offset="1" stop-color="#3A4453"/></linearGradient>
+      <linearGradient id="gWh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#414B59"/><stop offset="1" stop-color="#1E2733"/></linearGradient>
     </defs>
-    <ellipse cx="30" cy="55" rx="18" ry="3.2" fill="#0d1b2a" opacity=".13"/>
-    <path d="M8 22 L14 13 L54 13 L48 22 Z" fill="url(#gCtT)"/>
-    <path d="M48 22 L54 13 V41 L48 48 Z" fill="url(#gCtS)"/>
-    <rect x="8" y="22" width="40" height="26" rx="2.5" fill="url(#gCt)"/>
-    <rect x="8" y="43.5" width="40" height="4.5" fill="#B85E1C" opacity=".5"/>
-    <g stroke="#C9691F" stroke-width="1.5" opacity=".5">
-      <line x1="13" y1="23.5" x2="13" y2="43.5"/>
-      <line x1="18" y1="23.5" x2="18" y2="43.5"/>
-      <line x1="23" y1="23.5" x2="23" y2="43.5"/>
-      <line x1="28" y1="23.5" x2="28" y2="43.5"/>
-      <line x1="33" y1="23.5" x2="33" y2="43.5"/>
-      <line x1="38" y1="23.5" x2="38" y2="43.5"/>
-      <line x1="43" y1="23.5" x2="43" y2="43.5"/>
+    <ellipse cx="27" cy="51.8" rx="20" ry="2.9" fill="#0d1b2a" opacity=".13"/>
+    <!-- 轮胎（先画，后面的拖架盖住上半部＝正确的遮挡关系） -->
+    <circle cx="15.5" cy="45.8" r="4.2" fill="url(#gWh)"/>
+    <circle cx="26.5" cy="45.8" r="4.2" fill="url(#gWh)"/>
+    <circle cx="15.5" cy="45.8" r="1.7" fill="#9BA6B4"/>
+    <circle cx="26.5" cy="45.8" r="1.7" fill="#9BA6B4"/>
+    <!-- 拖架大梁 -->
+    <rect x="9.4" y="40" width="21.2" height="3.6" rx="1.1" fill="url(#gCh)"/>
+    <rect x="9.4" y="40.1" width="21.2" height="1.1" rx=".5" fill="#fff" opacity=".22"/>
+    <!-- 顶面：近边 (8,18)-(31,18)，沿 d=(+19,-7) 推到远边 (27,11)-(50,11) -->
+    <path d="M8 18 L27 11 L50 11 L31 18 Z" fill="url(#gCtT)"/>
+    <g stroke="#B45B12" stroke-width="1" opacity=".22" fill="none">
+      <path d="M8.2 18l19-7M11.3 18l19-7M14.4 18l19-7M17.5 18l19-7M20.6 18l19-7M23.7 18l19-7M26.8 18l19-7M29.9 18l19-7"/>
     </g>
+    <!-- 右侧长侧壁：竖瓦楞（前沿线各自后退，顶/底同时上移 7/19·Δx） -->
+    <path d="M31 18 L50 11 V33 L31 40 Z" fill="url(#gCtS)"/>
+    <g fill="none">
+      <path d="M33.6 17.4v21.3M36.2 16.5v21.3M38.8 15.5v21.3M41.4 14.6v21.3M44 13.6v21.3M46.6 12.7v21.3M49.2 11.8v21.3" stroke="#7C360A" stroke-width="1.1" opacity=".3"/>
+      <path d="M34.7 17.4v21.3M37.3 16.5v21.3M39.9 15.5v21.3M42.5 14.6v21.3M45.1 13.6v21.3M47.7 12.7v21.3" stroke="#fff" stroke-width=".8" opacity=".16"/>
+    </g>
+    <!-- 箱门正面。门板刻画只用「竖直锁杆 + 杆端铰链座」，不放横闩：
+         一放横闩，两根竖杆加一根横杆在 54px 下会被读成字母 H（已实测），必须避免。 -->
+    <rect x="8" y="18" width="23" height="22" rx="1.6" fill="url(#gCt)"/>
+    <rect x="9.6" y="19.6" width="19.8" height="18.8" rx="1" fill="url(#gCtD)"/>
+    <!-- 门下槛 -->
+    <rect x="9.6" y="35.6" width="19.8" height="2.8" rx="1" fill="#8A3E0C" opacity=".3"/>
+    <!-- 中缝 -->
+    <rect x="19.05" y="20.2" width="1.2" height="17.6" fill="#3B2A1B" opacity=".45"/>
+    <!-- 四根竖直锁杆 -->
+    <g fill="#33261A" opacity=".58">
+      <rect x="10.65" y="21.2" width="1.3" height="15.6" rx=".65"/>
+      <rect x="17.15" y="21.2" width="1.3" height="15.6" rx=".65"/>
+      <rect x="20.55" y="21.2" width="1.3" height="15.6" rx=".65"/>
+      <rect x="27.05" y="21.2" width="1.3" height="15.6" rx=".65"/>
+    </g>
+    <!-- 杆端铰链座 -->
+    <g fill="#2A1E14" opacity=".5">
+      <rect x="10.35" y="21.2" width="1.9" height="1.7" rx=".5"/>
+      <rect x="16.85" y="21.2" width="1.9" height="1.7" rx=".5"/>
+      <rect x="20.25" y="21.2" width="1.9" height="1.7" rx=".5"/>
+      <rect x="26.75" y="21.2" width="1.9" height="1.7" rx=".5"/>
+      <rect x="10.35" y="35.1" width="1.9" height="1.7" rx=".5"/>
+      <rect x="16.85" y="35.1" width="1.9" height="1.7" rx=".5"/>
+      <rect x="20.25" y="35.1" width="1.9" height="1.7" rx=".5"/>
+      <rect x="26.75" y="35.1" width="1.9" height="1.7" rx=".5"/>
+    </g>
+    <!-- 角件 -->
+    <g fill="#4E5766" opacity=".9">
+      <rect x="8.6" y="18.6" width="2.2" height="2.2" rx=".5"/>
+      <rect x="28.4" y="18.6" width="2.2" height="2.2" rx=".5"/>
+      <rect x="8.6" y="37.2" width="2.2" height="2.2" rx=".5"/>
+      <rect x="28.4" y="37.2" width="2.2" height="2.2" rx=".5"/>
+    </g>
+    <rect x="8" y="18" width="1.2" height="22" fill="#fff" opacity=".14"/>
+    <rect x="8" y="18" width="23" height="22" rx="1.6" fill="url(#gHiSoft)"/>
   </symbol>
 
   <!-- ⑩ 全球时差：地球 + 表盘 -->
@@ -3705,36 +3774,230 @@ function qrCanvas(enc, px, fg, bg, marginModules) {
   }
   return cv;
 }
+// ================= 条形码生成（内联实现，无需联网 · Code 128 / EAN-13 / EAN-8） =================
+// Code 128 码字表：下标即码字值，字符串是「条-空-条-空-条-空」六段宽度；
+// 103/104/105 = StartA/B/C，106 = Stop（Stop 是 7 段共 13 模块，与其他码字的 11 模块不同，别改）
+const C128_PAT = (
+  '212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 ' +
+  '221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 ' +
+  '221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 ' +
+  '212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 ' +
+  '231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 ' +
+  '231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 ' +
+  '314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 ' +
+  '112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 ' +
+  '111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 ' +
+  '214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 ' +
+  '114131 311141 411131 211412 211214 211232 2331112'
+).split(' ');
+const C128_BITS = C128_PAT.map(pat => {
+  let s = '', bar = true;
+  for (let i = 0; i < pat.length; i++) { s += (bar ? '1' : '0').repeat(+pat[i]); bar = !bar; }
+  return s;
+});
+const C128_START_B = 104, C128_START_C = 105, C128_STOP = 106;
+
+// Code 128 自动切子集：连续 ≥4 位数字（或刚好结尾剩 2 位）走 Code C，两个数字压成一个码字；
+// 其余走 Code B（ASCII 32~126）。中文/emoji 进不了条码，直接给提示而不是画出一堆乱码。
+function code128Encode(str) {
+  if (!str) return null;
+  if (/[^\x20-\x7E]/.test(str)) return { err: 'Code 128 只支持数字、字母与常见英文符号；中文、emoji 请用二维码' };
+  const n = str.length;
+  const isD = j => j < n && str[j] >= '0' && str[j] <= '9';
+  const worthC = i => isD(i) && isD(i + 1) && (i + 2 === n || (isD(i + 2) && isD(i + 3)));
+  let set = worthC(0) ? 'C' : 'B';
+  const vals = [set === 'C' ? C128_START_C : C128_START_B];
+  for (let i = 0; i < n;) {
+    if (set !== 'C' && worthC(i)) { vals.push(99); set = 'C'; }           // A/B → C
+    else if (set === 'C' && !worthC(i)) { vals.push(100); set = 'B'; }    // C → B
+    if (set === 'C') { vals.push(+str.substr(i, 2)); i += 2; }
+    else { vals.push(str.charCodeAt(i) - 32); i += 1; }
+  }
+  let sum = vals[0];                                                       // 首位权重 1
+  for (let k = 1; k < vals.length; k++) sum += vals[k] * k;                // 之后权重 = 序号
+  vals.push(sum % 103, C128_STOP);
+  let bits = '';
+  for (const v of vals) bits += C128_BITS[v];
+  return { bits, type: 'Code 128', label: { kind: 'one', text: str } };
+}
+
+// EAN-13 / EAN-8：只需存左侧 L 码，G 码 = L 码倒序取反，R 码 = L 码取反（省一张表，少一处出错的地方）
+const EAN_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+const EAN_INV = s => s.replace(/[01]/g, b => (b === '1' ? '0' : '1'));
+const EAN_G = EAN_L.map(s => EAN_INV(s.split('').reverse().join('')));
+const EAN_R = EAN_L.map(EAN_INV);
+// 首位数字决定左侧 6 位的 L/G 奇偶排列
+const EAN_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+
+// 校验位：EAN-13 奇数位 ×1 偶数位 ×3；EAN-8 反过来
+function eanCheck(body, ean8) {
+  let sum = 0;
+  for (let i = 0; i < body.length; i++) {
+    const odd = (i + 1) % 2 === 1;
+    sum += (+body[i]) * ((ean8 ? odd : !odd) ? 3 : 1);
+  }
+  return (10 - sum % 10) % 10;
+}
+function eanEncode(input, digits) {
+  const raw = String(input);
+  if (!/^\d+$/.test(raw)) return { err: 'EAN-' + digits + ' 只能填数字，当前输入里有非数字字符' };
+  if (raw.length !== digits && raw.length !== digits - 1) {
+    return { err: 'EAN-' + digits + ' 需要 ' + (digits - 1) + ' 位（自动补校验位）或 ' + digits + ' 位数字，当前 ' + raw.length + ' 位' };
+  }
+  const body = raw.slice(0, digits - 1);
+  const chk = eanCheck(body, digits === 8);
+  const full = body + chk;
+  let note = '';
+  if (raw.length === digits && +raw[digits - 1] !== chk) {
+    note = '原校验位 ' + raw[digits - 1] + ' 不符，已按标准重算为 ' + chk;
+  }
+  let bits = '101';
+  if (digits === 8) {
+    for (let i = 0; i < 4; i++) bits += EAN_L[+full[i]];
+    bits += '01010';
+    for (let i = 4; i < 8; i++) bits += EAN_R[+full[i]];
+  } else {
+    const par = EAN_PARITY[+full[0]];
+    for (let i = 0; i < 6; i++) bits += (par[i] === 'L' ? EAN_L : EAN_G)[+full[i + 1]];
+    bits += '01010';
+    for (let i = 7; i < 13; i++) bits += EAN_R[+full[i]];
+  }
+  bits += '101';
+  return {
+    bits, note, type: 'EAN-' + digits,
+    label: digits === 8
+      ? { kind: 'ean', head: '', left: full.slice(0, 4), right: full.slice(4), leftRange: [3, 31], rightRange: [36, 64] }
+      : { kind: 'ean', head: full[0], left: full.slice(1, 7), right: full.slice(7), leftRange: [3, 45], rightRange: [50, 92] }
+  };
+}
+
+function bcEncode(text, kind) {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  const isNum = /^\d+$/.test(t);
+  if (kind === 'ean13') return eanEncode(t, 13);
+  if (kind === 'ean8') return eanEncode(t, 8);
+  if (kind === 'c128') return code128Encode(t);
+  // 自动：7/8 位纯数字 → EAN-8；11~13 位纯数字 → EAN-13；其余 → Code 128
+  if (isNum && (t.length === 7 || t.length === 8)) return eanEncode(t, 8);
+  if (isNum && t.length >= 11 && t.length <= 13) return eanEncode(t, 13);
+  return code128Encode(t);
+}
+
+// 条形码画布。scale 用于导出：模块宽度始终取整数倍，放大后每个模块边缘依然是硬的（不会糊边）
+function bcCanvas(enc, opt) {
+  if (!enc || !enc.bits) return null;
+  const s = opt.scale || 1;
+  const mw = Math.max(1, Math.round((opt.moduleW || 2) * s));
+  const barH = Math.round((opt.height || 70) * s);
+  let fs = Math.round((opt.fontSize || 12) * s);
+  const showText = opt.showText !== false;
+  const quiet = Math.round((opt.moduleW || 2) * 10 * s);   // 左右静区各 10 个模块（GS1 规范要求，别省）
+  const W = enc.bits.length * mw + quiet * 2;
+  const H = barH + (showText ? Math.ceil(fs * 1.3) + Math.ceil(2 * s) : 0);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return null;
+  ctx.fillStyle = opt.bg || '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = opt.fg || '#000000';
+  for (let i = 0; i < enc.bits.length; i++) {
+    if (enc.bits[i] === '1') ctx.fillRect(quiet + i * mw, 0, mw, barH);
+  }
+  if (showText) {
+    const y = barH + Math.ceil(2 * s);
+    const lb = enc.label || {};
+    const font = px => '600 ' + px + 'px "Helvetica Neue",Helvetica,Arial,sans-serif';
+    ctx.textBaseline = 'top';
+    if (lb.kind !== 'ean') {
+      ctx.font = font(fs);
+      const txt = lb.text == null ? '' : lb.text;
+      const tw = ctx.measureText(txt).width;
+      if (tw > W - 4 * s && tw > 0) fs = Math.max(7 * s, Math.floor(fs * (W - 4 * s) / tw));  // 内容很长时自动缩字，别让它溢出画布
+      ctx.font = font(fs);
+      ctx.textAlign = 'center';
+      ctx.fillText(txt, W / 2, y);
+    } else {
+      ctx.font = font(fs);
+      ctx.textAlign = 'center';
+      const mid = (range, txt) => ctx.fillText(txt, quiet + (range[0] + range[1]) / 2 * mw, y);
+      mid(lb.leftRange, lb.left);
+      mid(lb.rightRange, lb.right);
+      if (lb.head) { ctx.textAlign = 'right'; ctx.fillText(lb.head, quiet - Math.round(1 * s), y); }
+    }
+  }
+  return cv;
+}
+
 function buildToolQr() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🔳 二维码生成器 <small id="qrInfo" style="color:var(--text-light);font-weight:400"></small></h4>
-    <div class="tool-row">
-      <textarea id="qrText" rows="2" style="flex:1;min-width:260px" placeholder="输入网址或文字，例如 https://www.intco-framing.com"></textarea>
+  box.innerHTML = `<h4>🔳 二维码 / 条形码生成器 <small id="qrInfo" style="color:var(--text-light);font-weight:400"></small></h4>
+    <div class="tool-row" style="margin-bottom:8px">
+      <span class="code-tabs"><button id="codeTabQr" class="code-tab on">二维码</button><button id="codeTabBc" class="code-tab">条形码</button></span>
     </div>
-    <div class="tool-row" style="margin-top:8px">
+    <div class="tool-row">
+      <textarea id="qrText" rows="2" style="flex:1;min-width:260px"></textarea>
+    </div>
+    <div class="tool-row" id="codeQrOpt" style="margin-top:8px">
       <span style="color:var(--text-light);font-size:12px">容错</span>
       <select id="qrEc"><option value="L">L · 7%</option><option value="M" selected>M · 15%</option><option value="Q">Q · 25%</option><option value="H">H · 30%</option></select>
       <span style="color:var(--text-light);font-size:12px">尺寸</span>
       <select id="qrSize"><option value="256">256px</option><option value="512" selected>512px</option><option value="1024">1024px</option><option value="2048">2048px</option></select>
+      <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="qrMargin" checked style="width:auto;vertical-align:-2px"> 留白边</label>
+    </div>
+    <div class="tool-row" id="codeBcOpt" style="margin-top:8px;display:none">
+      <span style="color:var(--text-light);font-size:12px">码制</span>
+      <select id="bcKind"><option value="auto" selected>自动识别</option><option value="c128">Code 128</option><option value="ean13">EAN-13</option><option value="ean8">EAN-8</option></select>
+      <span style="color:var(--text-light);font-size:12px">条宽</span>
+      <select id="bcMw"><option value="1">1px</option><option value="2" selected>2px</option><option value="3">3px</option><option value="4">4px</option></select>
+      <span style="color:var(--text-light);font-size:12px">条高</span>
+      <select id="bcH"><option value="40">40</option><option value="70" selected>70</option><option value="100">100</option><option value="140">140</option></select>
+      <span style="color:var(--text-light);font-size:12px">字号</span>
+      <select id="bcFs"><option value="10">10</option><option value="12" selected>12</option><option value="16">16</option><option value="20">20</option></select>
+      <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="bcText" checked style="width:auto;vertical-align:-2px"> 显示数字</label>
+    </div>
+    <div class="tool-row" style="margin-top:8px">
       <span style="color:var(--text-light);font-size:12px">前景</span><input type="color" id="qrFg" value="#000000" style="width:40px;padding:2px">
       <span style="color:var(--text-light);font-size:12px">背景</span><input type="color" id="qrBg" value="#FFFFFF" style="width:40px;padding:2px">
-      <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="qrMargin" checked style="width:auto;vertical-align:-2px"> 留白边</label>
     </div>
     <div class="tool-row" style="margin-top:10px">
       <button id="qrDl" style="display:none">⬇️ 下载 PNG</button>
       <span class="tool-out" id="qrOut"></span>
     </div>
     <div id="qrWrap" style="margin-top:10px;display:none"></div>
-    <div class="t-tip">纯本地生成、内容不上传；容错级别越高越抗污损，但图案更密。当前支持中文与网址，M 级最多 ${qrCapacity('M')} 字节、L 级最多 ${qrCapacity('L')} 字节。</div>`;
-  const ta = box.querySelector('#qrText'), ecEl = box.querySelector('#qrEc'), sizeEl = box.querySelector('#qrSize');
-  const fgEl = box.querySelector('#qrFg'), bgEl = box.querySelector('#qrBg'), mgEl = box.querySelector('#qrMargin');
-  const info = box.querySelector('#qrInfo'), out = box.querySelector('#qrOut');
-  const wrap = box.querySelector('#qrWrap'), dl = box.querySelector('#qrDl');
-  let timer = null, lastCv = null;
-  const render = () => {
-    const text = ta.value.trim();
-    wrap.innerHTML = ''; dl.style.display = 'none'; lastCv = null;
-    if (!text) { info.textContent = ''; out.textContent = ''; return; }
+    <div class="t-tip" id="qrTip"></div>`;
+  const q = id => box.querySelector('#' + id);
+  const ta = q('qrText'), info = q('qrInfo'), out = q('qrOut'), wrap = q('qrWrap'), dl = q('qrDl');
+  const tip = q('qrTip'), qrOpt = q('codeQrOpt'), bcOpt = q('codeBcOpt');
+  const tabQr = q('codeTabQr'), tabBc = q('codeTabBc');
+  const ecEl = q('qrEc'), sizeEl = q('qrSize'), mgEl = q('qrMargin');
+  const kindEl = q('bcKind'), mwEl = q('bcMw'), hEl = q('bcH'), fsEl = q('bcFs'), txtEl = q('bcText');
+  const fgEl = q('qrFg'), bgEl = q('qrBg');
+  // 两种模式各记一份输入内容，来回切换不会把二维码的网址弄丢
+  const saved = { qr: 'https://samxu110314.github.io/', bc: '6971234567895' };
+  const TIPS = {
+    qr: `纯本地生成、内容不上传；容错级别越高越抗污损，但图案更密。支持中文与网址，M 级最多 ${qrCapacity('M')} 字节、L 级最多 ${qrCapacity('L')} 字节。`,
+    bc: '同样纯本地生成、不上传。条码只认数字、字母与常见英文符号（中文请用二维码）；12 位输入会自动补 EAN 校验位；印刷时按整数倍缩放，模块边缘才不糊。'
+  };
+  let mode = 'qr', timer = null, lastEnc = null, lastCv = null;
+  const clearOut = () => { wrap.innerHTML = ''; wrap.style.display = 'none'; dl.style.display = 'none'; lastEnc = null; lastCv = null; };
+  const showCanvas = cv => {
+    wrap.style.display = '';
+    wrap.innerHTML = '';
+    const holder = document.createElement('div');
+    holder.className = 'code-box';
+    holder.appendChild(cv);
+    wrap.appendChild(holder);
+    dl.style.display = '';
+  };
+  const contrastWarn = sizeTxt => {
+    const cr = contrastRatio(fgEl.value, bgEl.value);
+    return cr < 3
+      ? `<span style="color:#b03a2e">⚠️ 前景/背景对比度过低（${cr.toFixed(1)}:1），可能扫不出来</span>`
+      : `<span style="color:#1e8449">✓ 已生成 ${sizeTxt}</span>`;
+  };
+  const renderQr = text => {
     const enc = qrEncode(text, ecEl.value);
     if (!enc) { info.textContent = ''; out.textContent = ''; return; }
     if (enc.tooLong) {
@@ -3744,34 +4007,71 @@ function buildToolQr() {
     }
     const cv = qrCanvas(enc, parseInt(sizeEl.value, 10) || 512, fgEl.value, bgEl.value, mgEl.checked ? 4 : 0);
     if (!cv) return;
-    lastCv = cv;
-    wrap.style.display = '';
-    wrap.innerHTML = '';
-    const holder = document.createElement('div');
-    holder.className = 'qr-canvas-box';
-    holder.appendChild(cv);
-    wrap.appendChild(holder);
-    dl.style.display = '';
+    lastEnc = null; lastCv = cv;
+    showCanvas(cv);
     const used = enc.byteLen, totalBytes = Math.floor((enc.dataCodewords * 8 - (enc.version < 10 ? 12 : 20)) / 8);
     info.textContent = `（版本 v${enc.version} · ${enc.size}×${enc.size} 模块 · 掩码 ${enc.mask} · 内容 ${used}/${totalBytes} 字节）`;
-    const cr = contrastRatio(fgEl.value, bgEl.value);
-    out.innerHTML = cr < 3
-      ? `<span style="color:#b03a2e">⚠️ 前景/背景对比度过低（${cr.toFixed(1)}:1），可能扫不出来</span>`
-      : `<span style="color:#1e8449">✓ 已生成 ${cv.width}×${cv.height}px</span>`;
+    out.innerHTML = contrastWarn(`${cv.width}×${cv.height}px`);
+  };
+  const renderBc = text => {
+    const enc = bcEncode(text, kindEl.value);
+    if (!enc) { info.textContent = ''; out.textContent = ''; return; }
+    if (enc.err) { info.textContent = ''; out.innerHTML = `<span style="color:#b03a2e">${esc(enc.err)}</span>`; return; }
+    const opt = { moduleW: +mwEl.value, height: +hEl.value, fontSize: +fsEl.value, showText: txtEl.checked, fg: fgEl.value, bg: bgEl.value };
+    const cv = bcCanvas(enc, opt);
+    if (!cv) return;
+    lastEnc = enc; lastCv = cv;
+    showCanvas(cv);
+    info.textContent = `（${enc.type} · ${enc.bits.length} 个模块 · ${cv.width}×${cv.height}px）`;
+    out.innerHTML = contrastWarn(`${cv.width}×${cv.height}px`)
+      + (enc.note ? ` · <span style="color:#b7791f">${esc(enc.note)}</span>` : '');
+  };
+  const render = () => {
+    const text = ta.value.trim();
+    clearOut();
+    if (!text) { info.textContent = ''; out.textContent = ''; return; }
+    if (mode === 'qr') renderQr(text); else renderBc(text);
   };
   const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(render, 180); };
+  [ecEl, sizeEl, mgEl, kindEl, mwEl, hEl, fsEl, txtEl, fgEl, bgEl].forEach(el => { el.oninput = schedule; el.onchange = schedule; });
   ta.oninput = schedule;
-  [ecEl, sizeEl, fgEl, bgEl, mgEl].forEach(el => { el.oninput = schedule; el.onchange = schedule; });
+  const setMode = next => {
+    if (next === mode) return;
+    saved[mode] = ta.value;
+    mode = next;
+    tabQr.classList.toggle('on', next === 'qr');
+    tabBc.classList.toggle('on', next === 'bc');
+    qrOpt.style.display = next === 'qr' ? '' : 'none';
+    bcOpt.style.display = next === 'bc' ? '' : 'none';
+    ta.value = saved[next];
+    ta.placeholder = next === 'qr'
+      ? '输入网址或文字，例如 https://www.intco-framing.com'
+      : '输入数字或字母，例如 6971234567895 或 INTCO-FRAME-001';
+    tip.textContent = TIPS[next];
+    render();
+  };
+  tabQr.onclick = () => setMode('qr');
+  tabBc.onclick = () => setMode('bc');
   dl.onclick = async () => {
-    if (!lastCv) return;
-    const blob = await canvasToBlob(lastCv, 'image/png');
+    const o = { moduleW: +mwEl.value, height: +hEl.value, fontSize: +fsEl.value, showText: txtEl.checked, fg: fgEl.value, bg: bgEl.value };
+    // 条码导出走 4 倍模块宽（模块还是整数倍，边界不糊），过大时退回原图
+    let cv = lastCv;
+    if (mode === 'bc' && lastEnc) {
+      const hi = bcCanvas(lastEnc, Object.assign({}, o, { scale: 4 }));
+      if (hi && hi.width <= 8000) cv = hi;
+    }
+    if (!cv) return;
+    const blob = await canvasToBlob(cv, 'image/png');
     if (!blob) { out.textContent = '导出失败'; return; }
     const d = new Date(), p2 = n => String(n).padStart(2, '0');
-    const name = `qrcode_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.png`;
+    const name = (mode === 'qr' ? 'qrcode_' : 'barcode_')
+      + `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.png`;
     downloadBlob(blob, name);
     out.textContent = '已下载 ' + name;
   };
-  ta.value = 'https://samxu110314.github.io/';
+  ta.value = saved.qr;
+  ta.placeholder = '输入网址或文字，例如 https://www.intco-framing.com';
+  tip.textContent = TIPS.qr;
   render();
   return box;
 }
@@ -4180,7 +4480,7 @@ const TOOLS = [
   { id: 'compress', name: '文件压缩', icon: '🗜️', desc: 'PPT / PDF / 图片瘦身', build: buildToolCompress },
   { id: 'palette', name: 'ColoroReview', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
   { id: 'colorconv', name: '色值转换', icon: '🎨', desc: 'HEX / RGB / PANTONE', build: buildToolColor },
-  { id: 'qr', name: '二维码', icon: '🔳', desc: '文本一键转码', build: buildToolQr },
+  { id: 'qr', name: '二维码/条形码', icon: '🔳', desc: '二维码 + Code128/EAN', build: buildToolQr },
   { id: 'watermark', name: '图片水印', icon: '💧', desc: '文字 / Logo 打标', build: buildToolWatermark },
   { id: 'date', name: '日期计算', icon: '📅', desc: '日期推算与差值', build: buildToolDate },
   { id: 'container', name: '装柜估算', icon: '🚢', desc: '20GP / 40HQ 装柜量', build: buildToolContainer },
@@ -4689,6 +4989,7 @@ if (typeof globalThis !== 'undefined') {
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
     buildToolQr, buildToolWatermark, buildToolColor,
     qrEncode, qrCanvas, qrCapacity, qrPickVersion, utf8Bytes,
+    code128Encode, eanEncode, eanCheck, bcEncode, bcCanvas, C128_BITS,
     parseColorStr, rgbToHsl, hslToRgb, rgbToHsv, nearestPantone, pantoneTable, pantoneC,
     drawWatermarkOn, wmPos,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
