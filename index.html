@@ -818,74 +818,106 @@
     <rect x="17" y="38.5" width="6" height="4.6" rx="1.3" fill="url(#gDt)"/>
   </symbol>
 
-  <!-- ⑨ 装柜估算：3D 集装箱 -->
-  <!-- 卡车货柜：斜轴测三点透视。正面为「箱门」（竖直锁杆 + 横闩＝货柜最标志性的结构），
-       右侧为瓦楞长侧壁，顶面有纵向压型；底部拖架大梁 + 双轮胎点明「卡车」。
-       注意所有朝向右后方的线条都遵循同一个消失向量 d=(+19,-7)，不要随手改坐标。 -->
+  <!-- ⑨ 装柜估算：3D 集装箱堆场（红 / 黄 / 蓝 三色堆叠，对着实拍参考图重绘） -->
+  <!-- 斜轴测三点透视：所有朝向右后方的线统一沿消失向量 d=(+13,-7)（本节坐标已整体平移 (+2,+2)）。
+       遮挡关系靠绘制顺序：先下层（红箱 + 黄箱），再上层（蓝箱）。
+       上层蓝箱的底边比下层红箱顶面前缘高 3px —— 这条缝必须留，否则上下箱会粘成一整块，
+       完全看不出是「堆叠的两台箱」（与上一版卡车货柜同一个坑）。
+       门端面只放竖直锁杆 + 杆端铰链座，绝不放横闩：横闩在 54px 下会被读成字母 H（已实测）。 -->
   <symbol id="ic-container" viewBox="0 0 64 64">
     <defs>
-      <linearGradient id="gCt" x1="0" y1="0" x2="0.15" y2="1"><stop offset="0" stop-color="#FFB469"/><stop offset="1" stop-color="#DB6A16"/></linearGradient>
-      <linearGradient id="gCtT" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stop-color="#FFDDB6"/><stop offset="1" stop-color="#FFAC5C"/></linearGradient>
-      <linearGradient id="gCtS" x1="0" y1="0" x2="1" y2="0.7"><stop offset="0" stop-color="#CE6214"/><stop offset="1" stop-color="#96420D"/></linearGradient>
-      <linearGradient id="gCtD" x1="0" y1="0" x2="0.2" y2="1"><stop offset="0" stop-color="#CE6719"/><stop offset="1" stop-color="#A34A0F"/></linearGradient>
-      <linearGradient id="gCh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6B7787"/><stop offset="1" stop-color="#3A4453"/></linearGradient>
-      <linearGradient id="gWh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#414B59"/><stop offset="1" stop-color="#1E2733"/></linearGradient>
+      <!-- 红箱：正红，顶面提亮、右端压暗 -->
+      <linearGradient id="gCtnA" x1=".1" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="#F2604E"/><stop offset="1" stop-color="#BC2F26"/></linearGradient>
+      <linearGradient id="gCtnAT" x1="0" y1="0" x2=".45" y2="1"><stop offset="0" stop-color="#FFA08E"/><stop offset="1" stop-color="#E85442"/></linearGradient>
+      <linearGradient id="gCtnAR" x1="0" y1="0" x2="1" y2=".6"><stop offset="0" stop-color="#A82A21"/><stop offset="1" stop-color="#831E17"/></linearGradient>
+      <!-- 黄箱：琥珀黄，避免和红箱挤在同一个色相区间 -->
+      <linearGradient id="gCtnB" x1=".1" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="#FFD44F"/><stop offset="1" stop-color="#D89C0E"/></linearGradient>
+      <linearGradient id="gCtnBT" x1="0" y1="0" x2=".45" y2="1"><stop offset="0" stop-color="#FFEEA8"/><stop offset="1" stop-color="#F8C334"/></linearGradient>
+      <linearGradient id="gCtnBR" x1="0" y1="0" x2="1" y2=".6"><stop offset="0" stop-color="#C08A0B"/><stop offset="1" stop-color="#96690A"/></linearGradient>
+      <!-- 蓝箱：天蓝，放在最上层＝视觉最亮、最先被看到 -->
+      <linearGradient id="gCtnC" x1=".1" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="#6FC0E6"/><stop offset="1" stop-color="#2A7CB0"/></linearGradient>
+      <linearGradient id="gCtnCT" x1="0" y1="0" x2=".45" y2="1"><stop offset="0" stop-color="#BBE7F9"/><stop offset="1" stop-color="#6CBDE4"/></linearGradient>
+      <linearGradient id="gCtnCR" x1="0" y1="0" x2="1" y2=".6"><stop offset="0" stop-color="#256C99"/><stop offset="1" stop-color="#19547A"/></linearGradient>
     </defs>
-    <ellipse cx="27" cy="51.8" rx="20" ry="2.9" fill="#0d1b2a" opacity=".13"/>
-    <!-- 轮胎（先画，后面的拖架盖住上半部＝正确的遮挡关系） -->
-    <circle cx="15.5" cy="45.8" r="4.2" fill="url(#gWh)"/>
-    <circle cx="26.5" cy="45.8" r="4.2" fill="url(#gWh)"/>
-    <circle cx="15.5" cy="45.8" r="1.7" fill="#9BA6B4"/>
-    <circle cx="26.5" cy="45.8" r="1.7" fill="#9BA6B4"/>
-    <!-- 拖架大梁 -->
-    <rect x="9.4" y="40" width="21.2" height="3.6" rx="1.1" fill="url(#gCh)"/>
-    <rect x="9.4" y="40.1" width="21.2" height="1.1" rx=".5" fill="#fff" opacity=".22"/>
-    <!-- 顶面：近边 (8,18)-(31,18)，沿 d=(+19,-7) 推到远边 (27,11)-(50,11) -->
-    <path d="M8 18 L27 11 L50 11 L31 18 Z" fill="url(#gCtT)"/>
-    <g stroke="#B45B12" stroke-width="1" opacity=".22" fill="none">
-      <path d="M8.2 18l19-7M11.3 18l19-7M14.4 18l19-7M17.5 18l19-7M20.6 18l19-7M23.7 18l19-7M26.8 18l19-7M29.9 18l19-7"/>
+    <ellipse cx="31" cy="51.4" rx="25.5" ry="3" fill="#0d1b2a" opacity=".13"/>
+
+    <!-- ===== 红箱（下层左）：长侧壁朝前，竖直瓦楞 ===== -->
+    <path d="M8 35 L21 28 H41 L28 35 Z" fill="url(#gCtnAT)"/>
+    <g stroke="#C0332A" stroke-width=".7" opacity=".28" fill="none">
+      <path d="M11.6 35 L24.6 28M15 35 L28 28M18.4 35 L31.4 28M21.8 35 L34.8 28M25.2 35 L38.2 28"/>
     </g>
-    <!-- 右侧长侧壁：竖瓦楞（前沿线各自后退，顶/底同时上移 7/19·Δx） -->
-    <path d="M31 18 L50 11 V33 L31 40 Z" fill="url(#gCtS)"/>
-    <g fill="none">
-      <path d="M33.6 17.4v21.3M36.2 16.5v21.3M38.8 15.5v21.3M41.4 14.6v21.3M44 13.6v21.3M46.6 12.7v21.3M49.2 11.8v21.3" stroke="#7C360A" stroke-width="1.1" opacity=".3"/>
-      <path d="M34.7 17.4v21.3M37.3 16.5v21.3M39.9 15.5v21.3M42.5 14.6v21.3M45.1 13.6v21.3M47.7 12.7v21.3" stroke="#fff" stroke-width=".8" opacity=".16"/>
+    <rect x="8" y="35" width="20" height="14" fill="url(#gCtnA)"/>
+    <g stroke="#8E211A" stroke-width="1" opacity=".24" fill="none">
+      <path d="M10.6 35v14M13.2 35v14M15.8 35v14M18.4 35v14M21 35v14M23.6 35v14M26.2 35v14"/>
     </g>
-    <!-- 箱门正面。门板刻画只用「竖直锁杆 + 杆端铰链座」，不放横闩：
-         一放横闩，两根竖杆加一根横杆在 54px 下会被读成字母 H（已实测），必须避免。 -->
-    <rect x="8" y="18" width="23" height="22" rx="1.6" fill="url(#gCt)"/>
-    <rect x="9.6" y="19.6" width="19.8" height="18.8" rx="1" fill="url(#gCtD)"/>
-    <!-- 门下槛 -->
-    <rect x="9.6" y="35.6" width="19.8" height="2.8" rx="1" fill="#8A3E0C" opacity=".3"/>
-    <!-- 中缝 -->
-    <rect x="19.05" y="20.2" width="1.2" height="17.6" fill="#3B2A1B" opacity=".45"/>
-    <!-- 四根竖直锁杆 -->
-    <g fill="#33261A" opacity=".58">
-      <rect x="10.65" y="21.2" width="1.3" height="15.6" rx=".65"/>
-      <rect x="17.15" y="21.2" width="1.3" height="15.6" rx=".65"/>
-      <rect x="20.55" y="21.2" width="1.3" height="15.6" rx=".65"/>
-      <rect x="27.05" y="21.2" width="1.3" height="15.6" rx=".65"/>
+    <g stroke="#fff" stroke-width=".7" opacity=".15" fill="none">
+      <path d="M11.7 35v14M14.3 35v14M16.9 35v14M19.5 35v14M22.1 35v14M24.7 35v14"/>
     </g>
-    <!-- 杆端铰链座 -->
+    <rect x="8" y="47.6" width="20" height="1.4" fill="#7A1B15" opacity=".48"/>
+    <path d="M8 35H28" stroke="#fff" stroke-width=".9" opacity=".3" fill="none"/>
+    <rect x="8" y="35" width="20" height="14" fill="url(#gHiSoft)"/>
+    <g fill="#4E5766" opacity=".78">
+      <rect x="8.3" y="35.5" width="1.8" height="1.8" rx=".4"/>
+      <rect x="25.9" y="35.5" width="1.8" height="1.8" rx=".4"/>
+      <rect x="8.3" y="46.5" width="1.8" height="1.8" rx=".4"/>
+      <rect x="25.9" y="46.5" width="1.8" height="1.8" rx=".4"/>
+    </g>
+
+    <!-- ===== 黄箱（下层右）：前壁短侧壁，右端面＝箱门（锁杆） ===== -->
+    <path d="M28 35 L41 28 H55 L42 35 Z" fill="url(#gCtnBT)"/>
+    <g stroke="#D89C0E" stroke-width=".7" opacity=".28" fill="none">
+      <path d="M31 35 L44 28M34.4 35 L47.4 28M37.8 35 L50.8 28M41.2 35 L54.2 28"/>
+    </g>
+    <rect x="28" y="35" width="14" height="14" fill="url(#gCtnB)"/>
+    <g stroke="#A6730A" stroke-width="1" opacity=".24" fill="none">
+      <path d="M30.6 35v14M33.2 35v14M35.8 35v14M38.4 35v14M41 35v14"/>
+    </g>
+    <g stroke="#fff" stroke-width=".7" opacity=".15" fill="none">
+      <path d="M31.7 35v14M34.3 35v14M36.9 35v14M39.5 35v14"/>
+    </g>
+    <!-- 右端面。锁杆沿 d 方向排布（t=0.25 / 0.65），杆身竖直 -->
+    <path d="M42 35 L55 28 V42 L42 49 Z" fill="url(#gCtnBR)"/>
     <g fill="#2A1E14" opacity=".5">
-      <rect x="10.35" y="21.2" width="1.9" height="1.7" rx=".5"/>
-      <rect x="16.85" y="21.2" width="1.9" height="1.7" rx=".5"/>
-      <rect x="20.25" y="21.2" width="1.9" height="1.7" rx=".5"/>
-      <rect x="26.75" y="21.2" width="1.9" height="1.7" rx=".5"/>
-      <rect x="10.35" y="35.1" width="1.9" height="1.7" rx=".5"/>
-      <rect x="16.85" y="35.1" width="1.9" height="1.7" rx=".5"/>
-      <rect x="20.25" y="35.1" width="1.9" height="1.7" rx=".5"/>
-      <rect x="26.75" y="35.1" width="1.9" height="1.7" rx=".5"/>
+      <rect x="44.7" y="33.3" width="1.1" height="14" rx=".5"/>
+      <rect x="49.9" y="30.5" width="1.1" height="14" rx=".5"/>
     </g>
-    <!-- 角件 -->
-    <g fill="#4E5766" opacity=".9">
-      <rect x="8.6" y="18.6" width="2.2" height="2.2" rx=".5"/>
-      <rect x="28.4" y="18.6" width="2.2" height="2.2" rx=".5"/>
-      <rect x="8.6" y="37.2" width="2.2" height="2.2" rx=".5"/>
-      <rect x="28.4" y="37.2" width="2.2" height="2.2" rx=".5"/>
+    <g fill="#2A1E14" opacity=".4">
+      <rect x="44.4" y="33.3" width="1.7" height="1.5" rx=".4"/>
+      <rect x="49.6" y="30.5" width="1.7" height="1.5" rx=".4"/>
+      <rect x="44.4" y="45.8" width="1.7" height="1.5" rx=".4"/>
+      <rect x="49.6" y="43" width="1.7" height="1.5" rx=".4"/>
     </g>
-    <rect x="8" y="18" width="1.2" height="22" fill="#fff" opacity=".14"/>
-    <rect x="8" y="18" width="23" height="22" rx="1.6" fill="url(#gHiSoft)"/>
+    <path d="M42 35 L55 28V42 L42 49 Z" fill="url(#gHiSoft)" opacity=".7"/>
+    <rect x="41" y="47.6" width="1" height="1.4" fill="#8A6A07" opacity=".45"/>
+    <path d="M28 35H42" stroke="#fff" stroke-width=".9" opacity=".3" fill="none"/>
+    <g fill="#4E5766" opacity=".78">
+      <rect x="28.3" y="35.5" width="1.8" height="1.8" rx=".4"/>
+      <rect x="40.2" y="46.5" width="1.8" height="1.8" rx=".4"/>
+    </g>
+
+    <!-- ===== 蓝箱（上层，跨在红箱上）：底边留 3px 缝露出红箱顶面前缘 ===== -->
+    <path d="M10 19 L23 12 H41 L28 19 Z" fill="url(#gCtnCT)"/>
+    <g stroke="#2A7CB0" stroke-width=".7" opacity=".28" fill="none">
+      <path d="M13.6 19 L26.6 12M17 19 L30 12M20.4 19 L33.4 12M23.8 19 L36.8 12"/>
+    </g>
+    <rect x="10" y="19" width="18" height="13" fill="url(#gCtnC)"/>
+    <g stroke="#19547A" stroke-width="1" opacity=".24" fill="none">
+      <path d="M12.6 19v13M15.2 19v13M17.8 19v13M20.4 19v13M23 19v13M25.6 19v13"/>
+    </g>
+    <g stroke="#fff" stroke-width=".7" opacity=".15" fill="none">
+      <path d="M13.7 19v13M16.3 19v13M18.9 19v13M21.5 19v13M24.1 19v13"/>
+    </g>
+    <!-- 右端面：下边线恰好落在黄箱顶面的左后边界上，两箱自然咬合 -->
+    <path d="M28 19 L41 12 V25 L28 32 Z" fill="url(#gCtnCR)"/>
+    <rect x="10" y="30.7" width="18" height="1.3" fill="#154B6D" opacity=".48"/>
+    <path d="M10 19H28" stroke="#fff" stroke-width=".9" opacity=".3" fill="none"/>
+    <rect x="10" y="19" width="18" height="13" fill="url(#gHiSoft)"/>
+    <g fill="#4E5766" opacity=".78">
+      <rect x="10.3" y="19.5" width="1.8" height="1.8" rx=".4"/>
+      <rect x="25.9" y="19.5" width="1.8" height="1.8" rx=".4"/>
+      <rect x="10.3" y="29.6" width="1.8" height="1.8" rx=".4"/>
+      <rect x="25.9" y="29.6" width="1.8" height="1.8" rx=".4"/>
+    </g>
   </symbol>
 
   <!-- ⑩ 全球时差：地球 + 表盘 -->
