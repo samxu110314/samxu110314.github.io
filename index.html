@@ -386,6 +386,17 @@
   .done-card .meta { font-size: 11px; color: #88a6a0; margin-top: 4px; }
   .done-col-list { padding: 10px 12px; }
   .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  /* 近期已完成（全局倒序，最多 10 项，其余折叠） */
+  .recent-block { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 22px; margin-bottom: 18px; }
+  .recent-title { font-size: 15px; margin-bottom: 12px; }
+  .recent-sub { font-size: 12px; color: var(--text-light); font-weight: 400; }
+  .recent-list, .recent-more { display: flex; flex-direction: column; gap: 8px; }
+  .recent-item { display: flex; align-items: center; gap: 10px; background: #f3fbf9; border: 1px solid #d5efea; border-radius: var(--radius-sm); padding: 9px 12px; flex-wrap: wrap; }
+  .recent-tag { font-size: 11px; color: #fff; padding: 2px 9px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+  .recent-t { font-weight: 600; font-size: 14px; flex: 1; min-width: 160px; word-break: break-word; }
+  .recent-meta { font-size: 11px; color: #88a6a0; white-space: nowrap; }
+  .recent-toggle { margin-top: 10px; padding: 7px 16px; border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit; }
+  .recent-toggle:hover { border-color: #b9d5ee; }
 
   /* ===== 底部实用功能中心 ===== */
   .toolbox { margin: 22px auto 28px; max-width: 1500px; }
@@ -1055,8 +1066,9 @@
   </div>
 
   <div id="doneView" style="display:none">
-    <div class="done-wrap">
+      <div class="done-wrap">
       <div class="stat-cards" id="doneStatCards"></div>
+      <div class="recent-block" id="recentDone"></div>
       <div class="done-bars" id="doneBars"></div>
       <div class="board" id="doneBoard"></div>
     </div>
@@ -4571,6 +4583,45 @@ function renderDoneView() {
   $('doneStatCards').innerHTML = cards.map(c =>
     `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
   ).join('');
+
+  // 1.5) 近期已完成（全局按完成时间倒序，最多展示 10 项，其余折叠收纳）
+  const recentWrap = $('recentDone');
+  const allDone = [];
+  cols.forEach(col => col.tasks.forEach(t => { if (t.status === 'done') allDone.push({ t, col }); }));
+  allDone.sort((a, b) => (b.t.doneAt || 0) - (a.t.doneAt || 0));
+  const RECENT_MAX = 10;
+  if (allDone.length === 0) {
+    recentWrap.innerHTML = '<div class="empty-hint" style="border:none">暂无已完成任务</div>';
+  } else {
+    let html = `<h3 class="recent-title">🕓 近期已完成 <span class="recent-sub">（最近 ${Math.min(RECENT_MAX, allDone.length)} 项 · 共 ${allDone.length} 项）</span></h3><div class="recent-list" id="recentList"></div>`;
+    if (allDone.length > RECENT_MAX) {
+      html += `<button class="recent-toggle" id="recentToggle">展开全部 ${allDone.length} 项 ▾</button><div class="recent-more" id="recentMore" style="display:none"></div>`;
+    }
+    recentWrap.innerHTML = html;
+    const makeItem = x => {
+      const t = x.t, col = x.col;
+      const pS = fmtPlanMD(t.planStart), pE = fmtPlanMD(t.planEnd);
+      const plan = (pS || pE) ? ' · 计划 ' + (pS ? pS + (pE ? ' ~ ' + pE : '') : '止 ' + pE) : '';
+      const el = document.createElement('div');
+      el.className = 'recent-item';
+      el.innerHTML = `<span class="recent-tag" style="background:${col.color || PALETTE[0]}">${esc(col.title)}</span>`
+        + `<span class="recent-t">${esc(t.title)}</span>`
+        + `<span class="recent-meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${plan}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</span>`;
+      return el;
+    };
+    const list = $('recentList');
+    allDone.slice(0, RECENT_MAX).forEach(x => list.appendChild(makeItem(x)));
+    if (allDone.length > RECENT_MAX) {
+      const more = $('recentMore');
+      allDone.slice(RECENT_MAX).forEach(x => more.appendChild(makeItem(x)));
+      const tg = $('recentToggle');
+      tg.onclick = () => {
+        const open = more.style.display !== 'none';
+        more.style.display = open ? 'none' : 'block';
+        tg.textContent = open ? `展开全部 ${allDone.length} 项 ▾` : '收起 ▴';
+      };
+    }
+  }
 
   // 2) 各分类完成占比（横向条形图）
   let barsHtml = '<h3>各分类完成情况</h3>';
