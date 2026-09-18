@@ -530,6 +530,18 @@
   .cc-chip-empty { background: transparent; border-color: transparent; }
   .cc-copy { border: 1px solid var(--border); background: #f4f7fa; border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text); }
   .cc-copy:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  /* 色值转换 · 传图识色 */
+  .cc-upload { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border); background: #f4f7fa; border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit; }
+  .cc-upload:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  .cc-imgbox { margin-top: 10px; display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+  .cc-imgcanvas { max-width: 220px; height: auto; border-radius: 8px; border: 1px solid var(--border); }
+  .cc-extract-grid { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 220px; }
+  .cc-ex { display: flex; flex-direction: column; gap: 3px; width: 128px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: #fff; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+  .cc-ex:hover { border-color: var(--c-sales, #3498db); }
+  .cc-ex.on { border-color: var(--c-sales, #3498db); box-shadow: 0 0 0 2px rgba(52,152,219,.18); }
+  .cc-ex-chip { height: 34px; border-radius: 6px; border: 1px solid rgba(0,0,0,.08); }
+  .cc-ex-hex { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+  .cc-ex-sub { font-size: 10.5px; color: var(--text-light); line-height: 1.35; word-break: break-all; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
   .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
@@ -4443,7 +4455,7 @@ function nearestPantone(hex) {
 }
 function buildToolColor() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🎨 色值转换 <small style="color:var(--text-light);font-weight:400">（HEX / RGB / RGBA / HSL / HSV / Coloro / PANTONE）</small></h4>
+  box.innerHTML = `<h4>🎨 色值转换 <small style="color:var(--text-light);font-weight:400">（HEX / RGB / RGBA / HSL / HSV / Coloro / PANTONE · 可传图识色）</small></h4>
     <div class="tool-row">
       <input id="ccIn" value="#C9A85C" style="width:250px" placeholder="#C9A85C / rgb(201,168,92) / hsl(43,49%,57%)">
       <input type="color" id="ccPick" value="#C9A85C" style="width:44px;padding:2px">
@@ -4456,7 +4468,12 @@ function buildToolColor() {
       <div id="ccPrev" class="tool-swatch" style="width:104px;height:78px;border-radius:10px;flex-shrink:0"></div>
       <div id="ccList" class="cc-list"></div>
     </div>
-    <div class="t-tip">输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)、甚至直接 201,168,92。PANTONE 为基于 Lab 色差的最近色号匹配（TCX 2310 色 + 常用 C 卡），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
+    <div class="tool-row" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
+      <label class="cc-upload"><span>📷 传图识色</span><input type="file" id="ccImg" accept="image/*" style="display:none"></label>
+      <span class="tool-out" id="ccImgOut"></span>
+    </div>
+    <div id="ccImgBox" class="cc-imgbox" style="display:none"></div>
+    <div class="t-tip">输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)、甚至直接 201,168,92。<b>传图识色</b>：上传图片自动提取主色，每个色块直接给出 HEX / Coloro / PANTONE 色号，点击色块可载入上方查看完整色值（含 ΔE 色差与可读性）。PANTONE 为基于 Lab 色差的最近色号匹配（TCX 2310 色 + 常用 C 卡），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
   const inEl = box.querySelector('#ccIn'), pick = box.querySelector('#ccPick'), alpha = box.querySelector('#ccAlpha');
   const alphaVal = box.querySelector('#ccAlphaVal'), prev = box.querySelector('#ccPrev');
   const list = box.querySelector('#ccList'), quick = box.querySelector('#ccQuick');
@@ -4536,6 +4553,59 @@ function buildToolColor() {
     chip.onclick = () => { inEl.value = h; alphaOverride = null; render(); };
     quick.appendChild(chip);
   });
+
+  // —— 传图识色：上传图片 → 提取主色 → 每个色给出 HEX / Coloro / PANTONE ——
+  const imgIn = box.querySelector('#ccImg'), imgOut = box.querySelector('#ccImgOut'), imgBox = box.querySelector('#ccImgBox');
+  imgIn.onchange = async () => {
+    const f = imgIn.files && imgIn.files[0];
+    imgBox.innerHTML = ''; imgBox.style.display = 'none'; imgOut.textContent = '';
+    if (!f) { imgIn.value = ''; return; }
+    try {
+      const img = await blobToImage(f);
+      const MAX = 360;
+      const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(img.naturalWidth * k));
+      cv.height = Math.max(1, Math.round(img.naturalHeight * k));
+      cv.className = 'cc-imgcanvas';
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      const colors = paletteFromPixels(data, 8);
+      if (!colors.length) { imgOut.textContent = '没提取到颜色（图片可能全透明）'; return; }
+      const grid = document.createElement('div');
+      grid.className = 'cc-extract-grid';
+      colors.forEach(c => {
+        const hex = rgbToHex(c.r, c.g, c.b);
+        const co = coloroOf(hex);
+        const pt = nearestPantone(hex);
+        const tcx = pt.tcx;
+        const el = document.createElement('div');
+        el.className = 'cc-ex';
+        el.title = '点击载入上方转换器，查看完整色值';
+        const pct = (c.pct * 100).toFixed(1);
+        el.innerHTML = `<span class="cc-ex-chip" style="background:${hex}"></span>`
+          + `<span class="cc-ex-hex">${hex}</span>`
+          + `<span class="cc-ex-sub">${pct}% · Coloro ${co.code}</span>`
+          + `<span class="cc-ex-sub">Pantone ${tcx ? tcx.code + ' TCX' : '—'}${pt.c ? ' · ' + pt.c.code + ' C' : ''}</span>`;
+        el.onclick = () => {
+          inEl.value = hex; alphaOverride = null; render();
+          grid.querySelectorAll('.cc-ex').forEach(x => x.classList.remove('on'));
+          el.classList.add('on');
+        };
+        grid.appendChild(el);
+      });
+      imgBox.appendChild(cv);
+      imgBox.appendChild(grid);
+      imgBox.style.display = 'flex';
+      imgOut.textContent = `提取 ${colors.length} 个主色（来自 ${f.name}）· 点击任一色块可载入上方看完整色值`;
+    } catch (e) {
+      imgOut.textContent = '图片读取失败：' + (e && e.message ? e.message : e);
+    } finally {
+      imgIn.value = '';
+    }
+  };
+
   render();
   return box;
 }
@@ -4545,7 +4615,7 @@ const TOOLS = [
   { id: 'resize', name: '图片Resize', icon: '🖼️', desc: '改尺寸/格式', build: buildToolResize },
   { id: 'compress', name: '文件压缩', icon: '🗜️', desc: 'PPT / PDF / 图片瘦身', build: buildToolCompress },
   { id: 'palette', name: 'ColoroReview', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
-  { id: 'colorconv', name: '色值转换', icon: '🎨', desc: 'HEX / RGB / PANTONE', build: buildToolColor },
+  { id: 'colorconv', name: '色值转换', icon: '🎨', desc: '输入色号 / 传图识色', build: buildToolColor },
   { id: 'qr', name: '二维码/条形码', icon: '🔳', desc: '二维码 + Code128/EAN', build: buildToolQr },
   { id: 'watermark', name: '图片水印', icon: '💧', desc: '文字 / Logo 打标', build: buildToolWatermark },
   { id: 'date', name: '日期计算', icon: '📅', desc: '日期推算与差值', build: buildToolDate },
