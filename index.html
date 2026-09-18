@@ -531,6 +531,13 @@
   .cc-copy { border: 1px solid var(--border); background: #f4f7fa; border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text); }
   .cc-copy:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
   /* 色值转换 · 传图识色 */
+  .drop-hot { outline: 2px dashed var(--c-sales, #3498db); outline-offset: 4px; border-radius: 10px; background: rgba(52,152,219,.05); }
+  .drop-tip { color: var(--text-light); font-size: 12px; }
+  .drop-tip i { font-style: normal; }
+  .drop-tip .tip-hot { display: none; }
+  .drop-hot .drop-tip { color: var(--c-sales, #3498db); font-weight: 600; }
+  .drop-hot .drop-tip .tip-idle { display: none; }
+  .drop-hot .drop-tip .tip-hot { display: inline; }
   .cc-upload { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border); background: #f4f7fa; border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit; }
   .cc-upload:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
   .cc-imgbox { margin-top: 10px; display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
@@ -2450,6 +2457,47 @@ async function blobToImage(blob) {
   const url = URL.createObjectURL(blob);
   try { return await loadImgEl(url); } finally { URL.revokeObjectURL(url); }
 }
+// —— 拖拽上传：把图片直接拖到工具面板上即可。只接管「文件拖拽」，不影响看板任务卡片的拖拽排序 ——
+function isFileDrag(e) {
+  const t = e.dataTransfer && e.dataTransfer.types;
+  return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0;
+}
+function bindDropImage(zone, input) {
+  if (!zone || !input) return;
+  let depth = 0;
+  const clear = () => { depth = 0; zone.classList.remove('drop-hot'); };
+  zone.addEventListener('dragenter', e => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); depth++; zone.classList.add('drop-hot');
+  });
+  zone.addEventListener('dragover', e => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    zone.classList.add('drop-hot');
+  });
+  zone.addEventListener('dragleave', e => {
+    if (!isFileDrag(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) clear();
+  });
+  zone.addEventListener('drop', e => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); e.stopPropagation(); clear();
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (!files || !files.length) return;
+    try {
+      const dt = new DataTransfer();
+      Array.prototype.slice.call(files).forEach(f => dt.items.add(f));
+      input.files = dt.files;
+    } catch (_) { return; }
+    input.dispatchEvent(new Event('change'));
+  });
+}
+// 图片拖到页面空白处时，别让浏览器直接打开它
+['dragover', 'drop'].forEach(ev => {
+  document.addEventListener(ev, e => { if (isFileDrag(e)) e.preventDefault(); });
+});
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2461,7 +2509,7 @@ function downloadBlob(blob, filename) {
 function buildToolResize() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🖼️ 图片尺寸调整 Resize <small id="rsInfo" style="color:var(--text-light);font-weight:400"></small></h4>
-    <div class="tool-row"><input type="file" id="rsFile" accept="image/*"></div>
+    <div class="tool-row"><input type="file" id="rsFile" accept="image/*"><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span></div>
     <div class="tool-row" id="rsOpts" style="margin-top:10px;display:none">
       <span style="color:var(--text-light);font-size:12px">宽</span><input id="rsW" type="number" min="1" style="width:82px">
       <span style="color:var(--text-light);font-size:12px">高</span><input id="rsH" type="number" min="1" style="width:82px">
@@ -2538,6 +2586,7 @@ function buildToolResize() {
     } catch (e) { out.textContent = '生成失败：' + (e && e.message ? e.message : e); }
     go.disabled = false;
   };
+bindDropImage(box, fileEl);
   return box;
 }
 
@@ -3459,7 +3508,7 @@ function renderPaletteSheet(opt) {
 function buildToolPalette() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🎯 ColoroReview + 配色建议 <small style="color:var(--text-light);font-weight:400">（上传图片 → 配色点评打分 → 5 个主色 → Coloro 配色建议图）</small></h4>
-    <div class="tool-row"><input type="file" id="plFile" accept="image/*"><span class="tool-out" id="plOut"></span></div>
+    <div class="tool-row"><input type="file" id="plFile" accept="image/*"><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span><span class="tool-out" id="plOut"></span></div>
     <div class="pal-grid" id="palGrid"></div>
     <div id="plEval" class="eval-box" style="display:none"></div>
     <div id="plSchemes" class="scheme-list"></div>
@@ -3589,6 +3638,7 @@ function buildToolPalette() {
     } catch (e) { out.textContent = '图片读取失败'; }
     fileEl.value = '';
   };
+bindDropImage(box, fileEl);
   return box;
 }
 
@@ -4228,7 +4278,7 @@ function wmPos(w, h, iw, ih, pos, pad) {
 function buildToolWatermark() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>💧 图片水印 <small id="wmInfo" style="color:var(--text-light);font-weight:400"></small></h4>
-    <div class="tool-row"><input type="file" id="wmFile" accept="image/*"><span style="color:var(--text-light);font-size:12px">支持 JPG / PNG，水印在本地合成，图片不会上传</span></div>
+    <div class="tool-row"><input type="file" id="wmFile" accept="image/*"><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span><span style="color:var(--text-light);font-size:12px">支持 JPG / PNG，水印在本地合成，图片不会上传</span></div>
     <div id="wmOpts" style="display:none">
       <div class="tool-row" style="margin-top:10px">
         <select id="wmKind"><option value="text">文字水印</option><option value="logo">图片水印（Logo）</option></select>
@@ -4339,6 +4389,7 @@ function buildToolWatermark() {
   };
   btnPng.onclick = () => doDownload('png');
   btnJpg.onclick = () => doDownload('jpg');
+bindDropImage(box, fileEl);
   return box;
 }
 
@@ -4475,7 +4526,7 @@ function buildToolColor() {
       <div id="ccList" class="cc-list"></div>
     </div>
     <div class="tool-row" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
-      <label class="cc-upload"><span>📷 传图识色</span><input type="file" id="ccImg" accept="image/*" style="display:none"></label>
+      <label class="cc-upload"><span>📷 传图识色</span><input type="file" id="ccImg" accept="image/*" style="display:none"></label><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
       <span class="tool-out" id="ccImgOut"></span>
     </div>
     <div id="ccImgBox" class="cc-imgbox" style="display:none"></div>
@@ -4618,6 +4669,7 @@ function buildToolColor() {
   };
 
   render();
+bindDropImage(box, imgIn);
   return box;
 }
 
@@ -5177,7 +5229,7 @@ if (typeof globalThis !== 'undefined') {
     qrEncode, qrCanvas, qrCapacity, qrPickVersion, utf8Bytes,
     code128Encode, eanEncode, eanCheck, bcEncode, bcCanvas, C128_BITS,
     parseColorStr, rgbToHsl, hslToRgb, rgbToHsv, nearestPantone, pantoneTable, pantoneC,
-    drawWatermarkOn, wmPos,
+    drawWatermarkOn, wmPos, bindDropImage, isFileDrag,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
     hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
