@@ -1,0 +1,4 @@
+# 本地预览用的临时文件，不需要进版本库 / GitHub Pages
+server.js
+# index.html 的本地副本（双击打开用），每次同步生成
+工作看板.html
