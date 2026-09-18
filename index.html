@@ -4530,7 +4530,7 @@ function buildToolColor() {
       <span class="tool-out" id="ccImgOut"></span>
     </div>
     <div id="ccImgBox" class="cc-imgbox" style="display:none"></div>
-    <div class="t-tip">输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)、甚至直接 201,168,92。<b>传图识色</b>：上传图片自动提取主色，每个色块直接给出 HEX / Coloro / PANTONE 色号，点击色块可载入上方查看完整色值（含 ΔE 色差与可读性）。PANTONE 为基于 Lab 色差的最近色号匹配（TCX 2310 色 + 常用 C 卡），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
+    <div class="t-tip">输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)、甚至直接 201,168,92。<b>传图识色</b>：上传图片自动提取主色，每个色块直接给出 HEX / Coloro / PANTONE 色号，点击色块可载入上方查看完整色值（含 ΔE 色差与可读性）。PANTONE 为基于 Lab 色差的最近色号匹配（TPG 2310 色 + 常用 C 卡），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
   const inEl = box.querySelector('#ccIn'), pick = box.querySelector('#ccPick'), alpha = box.querySelector('#ccAlpha');
   const alphaVal = box.querySelector('#ccAlphaVal'), prev = box.querySelector('#ccPrev');
   const list = box.querySelector('#ccList'), quick = box.querySelector('#ccQuick');
@@ -4594,7 +4594,7 @@ function buildToolColor() {
     if (tcx) {
       const de = tcx.d.toFixed(1);
       const near = tcx.d <= 8;
-      list.appendChild(row('PANTONE', `<span style="color:${near ? '#1e8449' : '#b03a2e'}">${tcx.code} TCX</span> · ${tcx.name} · ${cssHex(tcx.hex)} · ΔE ${de}${near ? '' : '（色差偏大）'}`, tcx.hex));
+      list.appendChild(row('PANTONE', `<span style="color:${near ? '#1e8449' : '#b03a2e'}">${tcx.code} TPG</span> · ${tcx.name} · ${cssHex(tcx.hex)} · ΔE ${de}${near ? '' : '（色差偏大）'}`, tcx.hex));
     }
     if (pt.c) list.appendChild(row('PANTONE C', `${pt.c.code} · ${cssHex(pt.c.hex)} · ΔE ${pt.c.d.toFixed(1)}`, pt.c.hex));
     const crWhite = contrastRatio(hex, '#FFFFFF'), crBlack = contrastRatio(hex, '#000000');
@@ -4642,7 +4642,8 @@ function buildToolColor() {
         el.title = '点击载入上方转换器，查看完整色值';
         const pct = (c.pct * 100).toFixed(1);
         // PANTONE_TCX / PANTONE_C 数据里部分色号自带后缀（如 "874 C"），补后缀前先判断，避免出现 "874 C C"
-        const tCode = tcx ? (/TCX\s*$/i.test(tcx.code) ? tcx.code : tcx.code + ' TCX') : '';
+        // 纺织/家居色号统一显示为 TPG（与 TCX 同编号、同色值，只是标注介质不同）
+        const tCode = tcx ? (/T(?:CX|PG)\s*$/i.test(tcx.code) ? tcx.code : tcx.code + ' TPG') : '';
         const cCode = pt.c ? (/[\s-]?C\s*$/.test(pt.c.code) ? pt.c.code : pt.c.code + ' C') : '';
         el.innerHTML = `<span class="cc-ex-chip" style="background:${hex}"></span>`
           + `<span class="cc-ex-head"><b class="cc-ex-hex">${hex}</b><i class="cc-ex-pct">${pct}%</i></span>`
