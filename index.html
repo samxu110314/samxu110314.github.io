@@ -558,6 +558,16 @@
   /* 金属 / 荧光等特殊色卡标记（提示该色需专用油墨，已给出印刷替代色号）*/
   .cc-ex-flag { display: block; margin-top: 6px; padding: 2px 6px; border-radius: 5px; background: #fdf3e3; border: 1px solid #f0d9b0; font-size: 10px; line-height: 1.5; color: #9a6d00; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cc-ex-flag.metal { background: #f0f2f5; border-color: #d6dbe2; color: #4a5560; }
+  /* 两种入口：输入色号 / 传图识色 */
+  .cc-tabs { display: inline-flex; gap: 4px; padding: 3px; margin: 0 0 14px; background: #f1f5f9; border: 1px solid var(--border); border-radius: 10px; }
+  .cc-tab { font-family: inherit; font-size: 12.5px; line-height: 1.4; border: none; background: transparent; color: var(--text-light); padding: 6px 16px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  .cc-tab:hover { color: var(--c-sales, #3498db); }
+  .cc-tab.on { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.09); }
+  .cc-idle { font-size: 12.5px; line-height: 1.7; color: var(--text-light); }
+  .cc-idle b { color: var(--text); font-weight: 600; }
+  .cc-prev-idle { background: repeating-linear-gradient(45deg, #f7fafc, #f7fafc 6px, #eef3f7 6px, #eef3f7 12px); border: 1px dashed #c9d2da; }
+  .cc-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 24px 18px; border: 1.5px dashed #c9d2da; border-radius: 12px; background: #fafcfe; text-align: center; }
+  .cc-dz-sub { font-size: 11.5px; line-height: 1.6; color: var(--text-light); max-width: 460px; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
   .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
@@ -4572,28 +4582,48 @@ function lookupPantone(input) {
 }
 function buildToolColor() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🎨 色值转换 <small style="color:var(--text-light);font-weight:400">（HEX / RGB / RGBA / HSL / HSV / Coloro / PANTONE · 可传图识色）</small></h4>
-    <div class="tool-row">
-      <input id="ccIn" value="#C9A85C" style="width:250px" placeholder="#C9A85C / rgb(201,168,92) / hsl(43,49%,57%)">
-      <input type="color" id="ccPick" value="#C9A85C" style="width:44px;padding:2px">
-      <span style="color:var(--text-light);font-size:12px">不透明度</span>
-      <input id="ccAlpha" type="range" min="0" max="100" value="100" style="width:110px">
-      <span id="ccAlphaVal" style="font-size:12px;color:var(--text-light);width:34px">100%</span>
+  box.innerHTML = `<h4>🎨 色值转换 <small style="color:var(--text-light);font-weight:400">（两种用法：输入色号 / 传图识色）</small></h4>
+    <div class="cc-tabs" id="ccTabs">
+      <button type="button" class="cc-tab on" data-m="code">输入 / 粘贴色号</button>
+      <button type="button" class="cc-tab" data-m="img">📷 传图识色</button>
     </div>
-    <div class="tool-row" id="ccQuick" style="margin-top:8px"></div>
-    <div class="tool-row" style="margin-top:12px;align-items:flex-start;gap:14px;flex-wrap:nowrap">
-      <div id="ccPrev" class="tool-swatch" style="width:104px;height:78px;border-radius:10px;flex-shrink:0"></div>
-      <div id="ccList" class="cc-list"></div>
+    <div id="ccCodeSec">
+      <div class="tool-row">
+        <input id="ccIn" value="" style="width:250px" placeholder="粘贴或输入色号：#C9A85C / rgb(201,168,92) / 876 C / 15-0942 TPG">
+        <span style="color:var(--text-light);font-size:12px">取色器</span>
+        <input type="color" id="ccPick" value="#C9A85C" title="打开系统取色器选一个颜色" style="width:44px;padding:2px">
+        <span style="color:var(--text-light);font-size:12px">不透明度</span>
+        <input id="ccAlpha" type="range" min="0" max="100" value="100" style="width:110px">
+        <span id="ccAlphaVal" style="font-size:12px;color:var(--text-light);width:34px">100%</span>
+      </div>
+      <div class="tool-row" id="ccQuick" style="margin-top:8px"></div>
+      <div class="tool-row" style="margin-top:12px;align-items:flex-start;gap:14px;flex-wrap:nowrap">
+        <div id="ccPrev" class="tool-swatch cc-prev-idle" style="width:104px;height:78px;border-radius:10px;flex-shrink:0"></div>
+        <div id="ccList" class="cc-list"></div>
+      </div>
     </div>
-    <div class="tool-row" style="margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
-      <label class="cc-upload"><span>📷 传图识色</span><input type="file" id="ccImg" accept="image/*" style="display:none"></label><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
-      <span class="tool-out" id="ccImgOut"></span>
+    <div id="ccImgSec" style="display:none">
+      <div class="cc-dropzone" id="ccDrop">
+        <label class="cc-upload"><span>📷 选择图片</span><input type="file" id="ccImg" accept="image/*" style="display:none"></label>
+        <span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
+        <span class="cc-dz-sub">上传后自动提取主色，每个色块给出 HEX / Coloro / PANTONE 色号；点击色块可切回「输入色号」查看完整色值。</span>
+      </div>
+      <div class="tool-row" style="margin-top:10px;align-items:center"><span class="tool-out" id="ccImgOut"></span></div>
+      <div id="ccImgBox" class="cc-imgbox" style="display:none"></div>
     </div>
-    <div id="ccImgBox" class="cc-imgbox" style="display:none"></div>
-    <div class="t-tip">输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)，也可以直接输入 <b>PANTONE 色号</b>（876 C / 4715 C / Yellow 012 C / 19-1130 TPG）。<b>传图识色</b>：上传图片自动提取主色，每个色块直接给出 HEX / Coloro / PANTONE 色号，点击色块可载入上方查看完整色值（含 ΔE 色差与可读性）。<b>PANTONE C</b> 用的是印刷配方指南色号（1300+ 色），并且已经排除金属色（871–877 C）和荧光色（801–807 C）——这两类要用专用油墨，四色印刷印不出来，工具会把它们单独标出来，同时给出最接近的、可直接印刷的 C 卡色号。PANTONE 为基于 Lab 色差的最近色号匹配（TPG 2310 色 + C 卡 1300 色），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
+    <div class="t-tip">两种用法：<b>输入 / 粘贴色号</b>——输入框支持 #C9A85C、C9A85C、rgb(201,168,92)、rgba(201,168,92,.5)、hsl(43,49%,57%)，也可以直接输入 <b>PANTONE 色号</b>（876 C / 4715 C / Yellow 012 C / 19-1130 TPG）；<b>传图识色</b>——上传或拖入图片自动提取主色，每个色块直接给出 HEX / Coloro / PANTONE 色号。<b>PANTONE C</b> 用的是印刷配方指南色号（1300+ 色），并且已经排除金属色（871–877 C）和荧光色（801–807 C）——这两类要用专用油墨，四色印刷印不出来，工具会把它们单独标出来，同时给出最接近的、可直接印刷的 C 卡色号。PANTONE 为基于 Lab 色差的最近色号匹配（TPG 2310 色 + C 卡 1300 色），仅供设计参考，实际印刷请以官方色卡为准。</div>`;
   const inEl = box.querySelector('#ccIn'), pick = box.querySelector('#ccPick'), alpha = box.querySelector('#ccAlpha');
   const alphaVal = box.querySelector('#ccAlphaVal'), prev = box.querySelector('#ccPrev');
   const list = box.querySelector('#ccList'), quick = box.querySelector('#ccQuick');
+  const tabs = box.querySelector('#ccTabs'), secCode = box.querySelector('#ccCodeSec'), secImg = box.querySelector('#ccImgSec');
+  const setMode = (m) => {
+    Array.prototype.forEach.call(tabs.querySelectorAll('.cc-tab'), t => {
+      if (t.dataset.m === m) t.classList.add('on'); else t.classList.remove('on');
+    });
+    secCode.style.display = m === 'code' ? '' : 'none';
+    secImg.style.display = m === 'img' ? '' : 'none';
+  };
+  Array.prototype.forEach.call(tabs.querySelectorAll('.cc-tab'), t => { t.onclick = () => setMode(t.dataset.m); });
   let alphaOverride = null;
   const copy = async (txt) => {
     let ok = false;
@@ -4626,9 +4656,21 @@ function buildToolColor() {
     };
     return d;
   };
+  // 空态 / 出错时不留任何预置颜色，避免出现「一个固定默认的色」
+  const setIdle = (msg, isErr) => {
+    prev.className = 'tool-swatch cc-prev-idle';
+    prev.style.background = '';
+    prev.title = '';
+    list.innerHTML = `<div class="cc-idle"${isErr ? ' style="color:#b03a2e"' : ''}>${msg}</div>`;
+  };
   const render = () => {
     // 输入 PANTONE 色号（876 C / 4715 C / 19-1130 TPG）时先换算成色值再走后续流程
     let codeHit = null;
+    const raw = inEl.value.trim();
+    if (!raw) {
+      setIdle('粘贴或输入色号后自动换算 HEX / RGB / HSL / Coloro / PANTONE。<br>也可以点上方 <b>📷 传图识色</b> 上传图片取色，或点下面的常用色试试。');
+      return;
+    }
     let parsed = parseColorStr(inEl.value);
     if (!parsed) {
       codeHit = lookupPantone(inEl.value);
@@ -4638,7 +4680,7 @@ function buildToolColor() {
       }
     }
     if (!parsed) {
-      list.innerHTML = '<div style="font-size:12.5px;color:#b03a2e">无法识别这个色值，试试 #C9A85C、rgb(201,168,92)、hsl(43,49%,57%)，或直接输入 PANTONE 色号（876 C / 4715 C）</div>';
+      setIdle('无法识别这个色值，试试 #C9A85C、rgb(201,168,92)、hsl(43,49%,57%)，或直接输入 PANTONE 色号（876 C / 4715 C）', true);
       return;
     }
     const a = alphaOverride == null ? parsed.a : alphaOverride;
@@ -4648,6 +4690,7 @@ function buildToolColor() {
     const co = coloroOf(hex);
     const pt = nearestPantone(hex);
     pick.value = hex.toLowerCase();
+    prev.className = 'tool-swatch';
     prev.style.background = hex;
     prev.title = hex;
     alphaVal.textContent = Math.round(a * 100) + '%';
@@ -4692,6 +4735,7 @@ function buildToolColor() {
   const imgIn = box.querySelector('#ccImg'), imgOut = box.querySelector('#ccImgOut'), imgBox = box.querySelector('#ccImgBox');
   imgIn.onchange = async () => {
     const f = imgIn.files && imgIn.files[0];
+    if (f) setMode('img'); // 拖到面板任意处也能落进传图识色
     imgBox.innerHTML = ''; imgBox.style.display = 'none'; imgOut.textContent = '';
     if (!f) { imgIn.value = ''; return; }
     try {
@@ -4736,6 +4780,7 @@ function buildToolColor() {
           + `</span>`
           + spFlag;
         el.onclick = () => {
+          setMode('code');
           inEl.value = hex; alphaOverride = null; render();
           grid.querySelectorAll('.cc-ex').forEach(x => x.classList.remove('on'));
           el.classList.add('on');
