@@ -536,12 +536,18 @@
   .cc-imgbox { margin-top: 10px; display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
   .cc-imgcanvas { max-width: 220px; height: auto; border-radius: 8px; border: 1px solid var(--border); }
   .cc-extract-grid { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 220px; }
-  .cc-ex { display: flex; flex-direction: column; gap: 3px; width: 128px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: #fff; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+  .cc-ex { display: flex; flex-direction: column; width: 168px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
   .cc-ex:hover { border-color: var(--c-sales, #3498db); }
   .cc-ex.on { border-color: var(--c-sales, #3498db); box-shadow: 0 0 0 2px rgba(52,152,219,.18); }
-  .cc-ex-chip { height: 34px; border-radius: 6px; border: 1px solid rgba(0,0,0,.08); }
-  .cc-ex-hex { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
-  .cc-ex-sub { font-size: 10.5px; color: var(--text-light); line-height: 1.35; word-break: break-all; }
+  .cc-ex-chip { height: 38px; border-radius: 7px; border: 1px solid rgba(0,0,0,.08); margin-bottom: 8px; }
+  .cc-ex-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+  .cc-ex-hex { font-size: 13px; font-weight: 700; letter-spacing: .2px; font-variant-numeric: tabular-nums; color: var(--text); }
+  .cc-ex-pct { font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; color: var(--text-light); white-space: nowrap; }
+  .cc-ex-rows { display: block; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border); }
+  .cc-ex-line { display: grid; grid-template-columns: 44px 1fr; column-gap: 6px; align-items: baseline; }
+  .cc-ex-line + .cc-ex-line { margin-top: 5px; }
+  .cc-ex-k { font-size: 10px; color: var(--text-light); }
+  .cc-ex-v { font-size: 11px; line-height: 1.45; font-variant-numeric: tabular-nums; color: var(--text); }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
   .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
@@ -4584,10 +4590,15 @@ function buildToolColor() {
         el.className = 'cc-ex';
         el.title = '点击载入上方转换器，查看完整色值';
         const pct = (c.pct * 100).toFixed(1);
+        // PANTONE_TCX / PANTONE_C 数据里部分色号自带后缀（如 "874 C"），补后缀前先判断，避免出现 "874 C C"
+        const tCode = tcx ? (/TCX\s*$/i.test(tcx.code) ? tcx.code : tcx.code + ' TCX') : '';
+        const cCode = pt.c ? (/[\s-]?C\s*$/.test(pt.c.code) ? pt.c.code : pt.c.code + ' C') : '';
         el.innerHTML = `<span class="cc-ex-chip" style="background:${hex}"></span>`
-          + `<span class="cc-ex-hex">${hex}</span>`
-          + `<span class="cc-ex-sub">${pct}% · Coloro ${co.code}</span>`
-          + `<span class="cc-ex-sub">Pantone ${tcx ? tcx.code + ' TCX' : '—'}${pt.c ? ' · ' + pt.c.code + ' C' : ''}</span>`;
+          + `<span class="cc-ex-head"><b class="cc-ex-hex">${hex}</b><i class="cc-ex-pct">${pct}%</i></span>`
+          + `<span class="cc-ex-rows">`
+          + `<span class="cc-ex-line"><span class="cc-ex-k">Coloro</span><span class="cc-ex-v">${co.code}</span></span>`
+          + `<span class="cc-ex-line"><span class="cc-ex-k">Pantone</span><span class="cc-ex-v">${tCode || '—'}${cCode ? '<br>' + cCode : ''}</span></span>`
+          + `</span>`;
         el.onclick = () => {
           inEl.value = hex; alphaOverride = null; render();
           grid.querySelectorAll('.cc-ex').forEach(x => x.classList.remove('on'));
