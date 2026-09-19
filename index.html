@@ -568,6 +568,38 @@
   .cc-prev-idle { background: repeating-linear-gradient(45deg, #f7fafc, #f7fafc 6px, #eef3f7 6px, #eef3f7 12px); border: 1px dashed #c9d2da; }
   .cc-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 24px 18px; border: 1.5px dashed #c9d2da; border-radius: 12px; background: #fafcfe; text-align: center; }
   .cc-dz-sub { font-size: 11.5px; line-height: 1.6; color: var(--text-light); max-width: 460px; }
+  /* ===== 抠图工具（框条抠图 / 产品抠图） ===== */
+  .cu-sec { margin-top: 16px; }
+  .cu-sec-t { font-size: 12.5px; font-weight: 700; color: var(--text); margin: 0 0 9px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cu-sec-t small { font-weight: 400; color: var(--text-light); font-size: 11.5px; }
+  .cu-drop { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 20px 16px; border: 1.5px dashed #c9d2da; border-radius: 12px; background: #fafcfe; flex-wrap: wrap; text-align: center; }
+  .cu-drop .cu-dz-sub { font-size: 11.5px; line-height: 1.6; color: var(--text-light); }
+  .cu-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .cu-table th { text-align: left; font-weight: 600; color: var(--text-light); font-size: 11.5px; padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .cu-table td { padding: 3px 6px; border-bottom: 1px dashed #e9edf1; vertical-align: middle; }
+  .cu-table tr.on td { background: #f2f8ff; }
+  .cu-fn { display: inline-block; max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  .cu-model { width: 156px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; font-family: inherit; font-size: 12.5px; color: var(--text); }
+  .cu-mini { border: 1px solid var(--border); background: #f4f7fa; border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text); }
+  .cu-mini:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  .cu-badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #eef3f7; color: var(--text-light); white-space: nowrap; }
+  .cu-badge.ok { background: #e8f6ee; color: #1e8449; }
+  .cu-badge.warn { background: #fdf3e3; color: #9a6d00; }
+  .cu-badge.err { background: #fdecea; color: #b03a2e; }
+  .cu-stage { background: #eef1f4; border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; justify-content: center; align-items: center; min-height: 130px; overflow: hidden; }
+  .cu-stage canvas { max-width: 100%; max-height: 330px; display: block; box-shadow: 0 1px 5px rgba(0,0,0,.14); }
+  .cu-empty { font-size: 12.5px; color: var(--text-light); }
+  .cu-sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 7px 20px; margin-top: 10px; }
+  .cu-sl { display: grid; grid-template-columns: 52px 1fr 48px; align-items: center; gap: 8px; font-size: 12px; color: var(--text-light); }
+  .cu-sl input[type=range] { width: 100%; margin: 0; }
+  .cu-sl b { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
+  .cu-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cu-bar { height: 8px; border-radius: 5px; background: #e7edf3; overflow: hidden; margin-top: 8px; }
+  .cu-bar i { display: block; height: 100%; width: 0; background: var(--c-sales, #3498db); transition: width .18s; }
+  .cu-log { font-size: 11.5px; line-height: 1.65; color: var(--text-light); max-height: 132px; overflow: auto; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
+  .cu-checker { background-image: linear-gradient(45deg, #e6eaee 25%, transparent 25%), linear-gradient(-45deg, #e6eaee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6eaee 75%), linear-gradient(-45deg, transparent 75%, #e6eaee 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+  .cu-num { width: 62px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; font-family: inherit; font-size: 12px; text-align: right; color: var(--text); }
+  .cu-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; align-items: start; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
   .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
@@ -1100,6 +1132,15 @@
   </div>
 
   <div class="board" id="board"></div>
+
+  <div class="toolbox" id="cutbox" style="display:none">
+    <div class="tool-head">
+      <span class="tool-label">✂️ 一键抠图</span>
+      <span class="tool-note">批量读文件夹 · 自动去背景 · 原像素导出 PNG · 全部在本地运行</span>
+    </div>
+    <div class="tool-grid" id="cutChips"></div>
+    <div class="tool-panel" id="cutPanel" style="display:none"></div>
+  </div>
 
   <div class="toolbox" id="toolbox" style="display:none">
     <div class="tool-head">
@@ -4818,6 +4859,1261 @@ const TOOLS = [
   { id: 'calc', name: '计算器', icon: '🧮', desc: '随手算一算', build: buildToolCalc },
 ];
 
+// ================= 抠图工具：公用图像算法 =================
+// 设计要点：全部在浏览器本地跑，不上传任何图片；导出 PNG 保持原像素、不重采样、不二次压缩。
+
+function naturalCompare(a, b) {
+  const re = /(\d+)|(\D+)/g;
+  const sa = String(a).match(re) || [], sb = String(b).match(re) || [];
+  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+    const x = sa[i], y = sb[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = /^\d/.test(x), ny = /^\d/.test(y);
+    if (nx && ny) { const d = parseInt(x, 10) - parseInt(y, 10); if (d) return d; }
+    else if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+function medianOf(arr) {
+  if (!arr.length) return 0;
+  const a = Array.prototype.slice.call(arr).sort((x, y) => x - y);
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+// 在 vals 中找最长的「≥ thr」连续段，容忍 gap 个断点（桥接噪点）
+function longestRun(vals, thr, gap) {
+  gap = gap == null ? 2 : gap;
+  let s = -1, last = -1, best = null;
+  const close = () => { if (s >= 0 && (!best || last - s > best[1] - best[0])) best = [s, last]; s = -1; };
+  for (let i = 0; i < vals.length; i++) {
+    if (vals[i] >= thr) { if (s < 0) s = i; last = i; }
+    else if (s >= 0 && i - last > gap) close();
+  }
+  close();
+  return best;
+}
+function imgToCanvas(img) {
+  const cv = document.createElement('canvas');
+  cv.width = img.naturalWidth || img.width;
+  cv.height = img.naturalHeight || img.height;
+  cv.getContext('2d').drawImage(img, 0, 0);
+  return cv;
+}
+// 缩样并取出像素（分析尺度上用，避免在大图上算）
+function sampleOf(cv, aw, ah) {
+  const c = document.createElement('canvas');
+  c.width = aw; c.height = ah;
+  const cx = c.getContext('2d');
+  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'medium';
+  cx.drawImage(cv, 0, 0, aw, ah);
+  return cx.getImageData(0, 0, aw, ah).data;
+}
+function concatU8(list) {
+  let n = 0;
+  list.forEach(u => { n += u.length; });
+  const out = new Uint8Array(n);
+  let o = 0;
+  list.forEach(u => { out.set(u, o); o += u.length; });
+  return out;
+}
+
+// —— 目标检测：在原图上找出「框条」的紧致包围盒 ——
+// 思路：逐列用上下边带估计背景（亮度 + 饱和度），框条 = 与同列背景明显不同的横向长条。
+// 金框靠饱和度区分、黑背靠亮度区分，两种都能覆盖；再迭代两轮收紧边界。
+function detectStripBox(cv, opt) {
+  const o = Object.assign({ maxw: 700, tL: 0.10, tS: 0.13, rowCov: 0.4, rowCov2: 0.8, colCov: 0.8 }, opt || {});
+  const W = cv.width, H = cv.height;
+  if (W < 8 || H < 8) return null;
+  const k = Math.min(1, o.maxw / W);
+  const aw = Math.max(16, Math.round(W * k)), ah = Math.max(16, Math.round(H * k));
+  const d = sampleOf(cv, aw, ah);
+  const n = aw * ah, L = new Float32Array(n), S = new Float32Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    L[p] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    S[p] = mx > 0 ? (mx - mn) / mx : 0;
+  }
+  const cb = Math.max(2, Math.round(ah * 0.12));
+  const bgL = new Float32Array(aw), bgS = new Float32Array(aw);
+  const tmpL = [], tmpS = [];
+  for (let x = 0; x < aw; x++) {
+    tmpL.length = 0; tmpS.length = 0;
+    for (let y = 0; y < cb; y++) { tmpL.push(L[y * aw + x]); tmpS.push(S[y * aw + x]); }
+    for (let y = ah - cb; y < ah; y++) { tmpL.push(L[y * aw + x]); tmpS.push(S[y * aw + x]); }
+    bgL[x] = medianOf(tmpL); bgS[x] = medianOf(tmpS);
+  }
+  const x0c = Math.round(aw * 0.15), x1c = Math.max(x0c + 1, Math.round(aw * 0.85));
+  const hit = (x, y) => Math.abs(L[y * aw + x] - bgL[x]) > o.tL || (S[y * aw + x] - bgS[x]) > o.tS;
+  let run = null;
+  for (let it = 0; it < 3; it++) {
+    const rowfrac = new Float32Array(ah), thr = it === 0 ? o.rowCov : o.rowCov2;
+    for (let y = 0; y < ah; y++) {
+      let c = 0;
+      for (let x = x0c; x < x1c; x++) if (hit(x, y)) c++;
+      rowfrac[y] = c / (x1c - x0c);
+    }
+    const rr = longestRun(rowfrac, thr);
+    if (!rr) break;
+    run = rr;
+    // 用紧贴条带外侧的行重估背景，去掉「贴着产品的盒子边 / 阴影」这类干扰
+    const m = Math.max(2, Math.round(ah * 0.10));
+    const ya = Math.max(0, rr[0] - m), yb = Math.max(0, rr[0]);
+    const yc = Math.min(ah - 1, rr[1] + 1), yd = Math.min(ah, rr[1] + m + 1);
+    for (let x = 0; x < aw; x++) {
+      tmpL.length = 0; tmpS.length = 0;
+      for (let y = ya; y < yb; y++) { tmpL.push(L[y * aw + x]); tmpS.push(S[y * aw + x]); }
+      for (let y = yc; y < yd; y++) { tmpL.push(L[y * aw + x]); tmpS.push(S[y * aw + x]); }
+      if (tmpL.length) { bgL[x] = medianOf(tmpL); bgS[x] = medianOf(tmpS); }
+    }
+  }
+  if (!run) return null;
+  const colfrac = new Float32Array(aw);
+  for (let x = 0; x < aw; x++) {
+    let c = 0;
+    for (let y = run[0]; y <= run[1]; y++) if (hit(x, y)) c++;
+    colfrac[x] = c / (run[1] - run[0] + 1);
+  }
+  const cr = longestRun(colfrac, o.colCov) || longestRun(colfrac, 0.5);
+  if (!cr) return null;
+  const sx = W / aw, sy = H / ah;
+  const box = {
+    x0: Math.max(0, Math.floor(cr[0] * sx)), y0: Math.max(0, Math.floor(run[0] * sy)),
+    x1: Math.min(W - 1, Math.ceil(cr[1] * sx)), y1: Math.min(H - 1, Math.ceil(run[1] * sy)),
+  };
+  // 供透明背景用：分析尺度上的前景掩码 + 全图尺寸
+  const mU8 = new Uint8Array(aw * ah);
+  for (let p = 0; p < n; p++) if (Math.abs(L[p] - bgL[p % aw]) > o.tL || (S[p] - bgS[p % aw]) > o.tS) mU8[p] = 255;
+  box.mask = { u8: mU8, aw: aw, ah: ah, fullW: W, fullH: H };
+  return box;
+}
+// 用分析尺度掩码生成裁剪区的 alpha（上采样 + 行内填充 + 1px 羽化）
+function maskToAlpha(mask, box, w, h) {
+  const mc = document.createElement('canvas');
+  mc.width = mask.aw; mc.height = mask.ah;
+  const mctx = mc.getContext('2d');
+  const mid = mctx.createImageData(mask.aw, mask.ah);
+  for (let p = 0; p < mask.aw * mask.ah; p++) {
+    const i = p * 4;
+    mid.data[i] = mid.data[i + 1] = mid.data[i + 2] = 255;
+    mid.data[i + 3] = mask.u8[p];
+  }
+  mctx.putImageData(mid, 0, 0);
+  const sx = mask.aw / mask.fullW, sy = mask.ah / mask.fullH;
+  const ac = document.createElement('canvas');
+  ac.width = w; ac.height = h;
+  const actx = ac.getContext('2d');
+  actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = 'high';
+  actx.drawImage(mc, box.x0 * sx, box.y0 * sy, Math.max(0.5, w * sx), Math.max(0.5, h * sy), 0, 0, w, h);
+  const ad = actx.getImageData(0, 0, w, h).data;
+  const a = new Uint8Array(w * h);
+  for (let p = 0; p < w * h; p++) a[p] = ad[p * 4 + 3] > 128 ? 255 : 0;
+  fillAlphaRuns(a, w, h);
+  return featherAlpha(a, w, h, 1);
+}
+// 行内填充：框条是横向长条，同一行首尾之间的小空隙（高光与背景同色被漏判）要补上
+function fillAlphaRuns(a, w, h, rowGapPct) {
+  const rowGap = Math.max(3, Math.round(w * (rowGapPct == null ? 0.06 : rowGapPct)));
+  for (let y = 0; y < h; y++) {
+    const runs = [];
+    let s = -1;
+    for (let x = 0; x <= w; x++) {
+      const on = x < w && a[y * w + x] > 0;
+      if (on) { if (s < 0) s = x; }
+      else if (s >= 0) { if (x - s >= 4) runs.push([s, x - 1]); s = -1; }
+    }
+    if (!runs.length) continue;
+    let rs = runs[0][0], re = runs[0][1];
+    for (let i = 1; i < runs.length; i++) {
+      if (runs[i][0] - re - 1 <= rowGap) re = runs[i][1];
+      else { for (let x = rs; x <= re; x++) a[y * w + x] = 255; rs = runs[i][0]; re = runs[i][1]; }
+    }
+    for (let x = rs; x <= re; x++) a[y * w + x] = 255;
+  }
+  return a;
+}
+// 均值羽化，避免硬锯齿边缘
+function featherAlpha(a, w, h, r) {
+  const f = Math.max(1, Math.min(4, Math.round(r || 1)));
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0, c = 0;
+      for (let dy = -f; dy <= f; dy++) {
+        const yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (let dx = -f; dx <= f; dx++) {
+          const xx = x + dx; if (xx < 0 || xx >= w) continue;
+          s += a[yy * w + xx]; c++;
+        }
+      }
+      out[y * w + x] = Math.round(s / c);
+    }
+  }
+  return out;
+}
+
+// —— 背面文字定位 + 型号识别（tesseract.js，按需从 CDN 加载） ——
+function findTextBlocks(backCv, box) {
+  const bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1;
+  if (bw < 8 || bh < 8) return null;
+  // ⚠️ 分析图必须按原分辨率：喷码/丝印笔画很细，2x 降采样会把它们的对比度抹平
+  //    （实测型号行峰值亮度从 ~54 掉到 ~50、细笔画直接糊掉），只对超宽条带设上限
+  const k = Math.min(1, 2400 / bw);
+  const aw = Math.max(8, Math.round(bw * k)), ah = Math.max(8, Math.round(bh * k));
+  const d = sampleOfSub(backCv, box.x0, box.y0, bw, bh, aw, ah);
+  const L = new Float32Array(aw * ah);
+  for (let p = 0, i = 0; p < aw * ah; p++, i += 4) L[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  // 统计只用条带内部（去掉上下各 15%）：条带上下边缘的金属高光比印刷文字还亮，会整体抬高阈值
+  const yS = Math.round(ah * 0.15), yE = Math.max(yS + 1, Math.round(ah * 0.85));
+  const inl = [];
+  for (let y = yS; y < yE; y++) for (let x = 0; x < aw; x++) inl.push(L[y * aw + x]);
+  if (!inl.length) return null;
+  const bg = medianOf(inl);
+  const sorted = inl.slice().sort((a, b) => a - b);
+  // ⚠️ 文字峰值用高分位（p99.9）估：深底浅字时文字只占内区 1~2% 像素，用 p98 会落在背景虚线的顶端
+  const p999 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.999))];
+  // 检测阈值要比“文字峰值”低不少 —— 同一块条带上，型号行常比下面的英文/中文行淡得多，
+  // 阈值贴着峰值会把淡的那行整行漏掉；hi 仅供整块兜底裁剪用，逐行裁剪会各自重估（见 cropStats）
+  const thr = bg + Math.max(8, (p999 - bg) * 0.35);
+  const hi = bg + Math.max(20, (p999 - bg) * 1.25);
+  const rowfrac = new Float32Array(ah);
+  for (let y = 0; y < ah; y++) {
+    let c = 0;
+    for (let x = 0; x < aw; x++) if (L[y * aw + x] > thr) c++;
+    rowfrac[y] = c / aw;
+  }
+  const lines = [];
+  let s = -1, last = -1;
+  const minRows = Math.max(4, Math.round(ah * 0.04));   // 低于此高度的是边缘高光细条
+  const minSpan = Math.max(6, Math.round(aw * 0.03));   // 横向太短的当噪点
+  const flush = () => {
+    if (s < 0) return;
+    let cx0 = aw, cx1 = 0, cov = 0;
+    for (let y = s; y <= last; y++) {
+      cov += rowfrac[y];
+      for (let x = 0; x < aw; x++) {
+        if (L[y * aw + x] > thr) { if (x < cx0) cx0 = x; if (x > cx1) cx1 = x; }
+      }
+    }
+    cov /= (last - s + 1);
+    // 太矮（高光细条）、横向太短（噪点）、或整行几乎全亮（条带边缘反光带）都不算文字行
+    if (cx1 > cx0 && (last - s + 1) >= minRows && (cx1 - cx0 + 1) >= minSpan && cov <= 0.5) {
+      const inv = 1 / k;
+      lines.push({
+        x0: box.x0 + Math.floor(cx0 * inv), x1: box.x0 + Math.ceil(cx1 * inv),
+        y0: box.y0 + Math.floor(s * inv), y1: box.y0 + Math.ceil(last * inv),
+      });
+    }
+    s = -1;
+  };
+  // 行扫描避开条带上下各 10% 的边缘反光区
+  const yR0 = Math.round(ah * 0.10), yR1 = Math.round(ah * 0.90);
+  for (let y = yR0; y < yR1; y++) {
+    if (rowfrac[y] > 0.006) { if (s < 0) s = y; last = y; }
+    else if (s >= 0 && y - last > 3) flush();
+  }
+  flush();
+  if (!lines.length) return null;
+  const all = {
+    x0: Math.min.apply(null, lines.map(l => l.x0)), y0: Math.min.apply(null, lines.map(l => l.y0)),
+    x1: Math.max.apply(null, lines.map(l => l.x1)), y1: Math.max.apply(null, lines.map(l => l.y1)),
+  };
+  return { bg: bg, hi: hi, thr: thr, lines: lines, all: all };
+}
+function sampleOfSub(cv, sx, sy, sw, sh, aw, ah) {
+  const c = document.createElement('canvas');
+  c.width = aw; c.height = ah;
+  const cx = c.getContext('2d');
+  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'medium';
+  cx.drawImage(cv, sx, sy, sw, sh, 0, 0, aw, ah);
+  return cx.getImageData(0, 0, aw, ah).data;
+}
+// OCR 常见字母/数字混淆：按所在位置纠正（数字段里的字母当数字，字母段的保持）
+const OCR_DIGIT_FIX = { O: '0', Q: '0', D: '0', U: '0', I: '1', L: '1', J: '1', Z: '2', S: '5', B: '8', G: '6', T: '7', A: '4', E: '8', C: '6', Y: '7' };
+function fixDigitSeg(x) { return String(x).split('').map(c => /\d/.test(c) ? c : (OCR_DIGIT_FIX[c] || c)).join(''); }
+// 从 OCR 原文里抽型号：形如 9701-A-170（数字段-单字母-数字段）
+// 容忍：OCR 吃掉连字符、前导混入杂字（J9701 → 9701）、数字段里字母被认错（970I / Q701 / 17O）
+function extractModelNumber(raw) {
+  const s = String(raw == null ? '' : raw).toUpperCase().replace(/[–—_~]/g, '-').replace(/[^0-9A-Z\-]/g, ' ').replace(/\s+/g, ' ').trim();
+  const re = /([0-9A-Z]{3,5})\s*-?\s*([A-Z])\s*-?\s*([0-9A-Z]{2,4})(?![0-9A-Z])/g;
+  const toDigit = (x) => x.split('').map(c => /\d/.test(c) ? c : (OCR_DIGIT_FIX[c] || '')).join('');
+  let m, fallback = '';
+  while ((m = re.exec(s))) {
+    let A = toDigit(m[1]), C = toDigit(m[3]);
+    if (A.length > 4) A = A.slice(-4);                  // 前导多认了一位（29701）时取后四位
+    if (/^\d{3,4}$/.test(A) && /^\d{2,4}$/.test(C)) return A + '-' + m[2] + '-' + C;
+    if (!fallback) fallback = m[1] + '-' + m[2] + '-' + m[3];
+  }
+  return fallback;
+}
+let _ttPromise = null, _ttWorker = null;
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (_ttPromise) return _ttPromise;
+  _ttPromise = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = () => window.Tesseract ? res(window.Tesseract) : rej(new Error('OCR 引擎加载异常'));
+    s.onerror = () => { _ttPromise = null; rej(new Error('OCR 引擎加载失败（首次使用需要联网下载识别模型，约 3MB）')); };
+    document.head.appendChild(s);
+  });
+  return _ttPromise;
+}
+async function getOcrWorker(onLog) {
+  if (_ttWorker) return _ttWorker;
+  const T = await loadTesseract();
+  _ttWorker = await T.createWorker('eng', 1, {
+    langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int',
+    logger: m => { if (onLog && m && m.status) onLog(m); },
+  });
+  return _ttWorker;
+}
+// 把指定区域处理成「黑字白底 + 放大」，tesseract 对这种输入最稳
+function ocrCrop(cv, box, scale, lo, hi) {
+  const w = Math.max(1, box.x1 - box.x0 + 1), h = Math.max(1, box.y1 - box.y0 + 1);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  cx.drawImage(cv, box.x0, box.y0, w, h, 0, 0, w, h);
+  const id = cx.getImageData(0, 0, w, h), d = id.data;
+  const k = 255 / Math.max(1, hi - lo);
+  for (let i = 0; i < d.length; i += 4) {
+    let g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    let v = (g - lo) * k;
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    v = 255 - v;                       // 反相 → 黑字白底
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  cx.putImageData(id, 0, 0);
+  const up = document.createElement('canvas');
+  up.width = w * scale; up.height = h * scale;
+  const ux = up.getContext('2d');
+  ux.imageSmoothingEnabled = true; ux.imageSmoothingQuality = 'high';
+  ux.drawImage(c, 0, 0, up.width, up.height);
+  return up;
+}
+// 逐块重估灰度范围：同一块条带上不同行的印刷浓淡差别很大（型号行常比下面的英文/中文行淡得多），
+// 用整块的 hi 去拉伸会把淡行压成背景色、字形断掉。这里按每个裁剪框自己的像素重算。
+function cropStats(cv, box) {
+  const w = Math.max(1, box.x1 - box.x0 + 1), h = Math.max(1, box.y1 - box.y0 + 1);
+  const kk = Math.min(1, 1200 / w);
+  const sw = Math.max(4, Math.round(w * kk)), sh = Math.max(4, Math.round(h * kk));
+  const d = sampleOfSub(cv, box.x0, box.y0, w, h, sw, sh);
+  const g = [];
+  for (let p = 0, i = 0; p < sw * sh; p++, i += 4) g.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+  if (!g.length) return null;
+  const lo = medianOf(g);
+  const sorted = g.slice().sort((a, b) => a - b);
+  const p995 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.995))];
+  return { lo: lo, hi: Math.max(lo + 10, p995) };
+}
+// 由文字行生成多个 OCR 候选裁剪：每一行单独（psm 7）、前两行合并、所有行合并（psm 6）。
+// 单次裁剪容易被字形断裂/粘连带偏，多个独立裁剪投票才稳。
+function buildOcrCands(blk) {
+  const out = [];
+  const clip = (b) => ({
+    x0: Math.max(0, Math.round(b.x0)), y0: Math.max(0, Math.round(b.y0)),
+    x1: Math.round(b.x1), y1: Math.round(b.y1),
+  });
+  // 放大倍数受画布像素上限约束，避免整行文字被放成 1 亿像素
+  const capScale = (b, want) => {
+    const w = Math.max(1, b.x1 - b.x0 + 1), h = Math.max(1, b.y1 - b.y0 + 1);
+    let s = want;
+    while (s > 1 && w * s * h * s > 6e6) s--;
+    return s;
+  };
+  const push = (tag, box, psm, want) => { out.push({ tag: tag, box: clip(box), psm: psm, scale: capScale(box, want) }); };
+  blk.lines.slice(0, 3).forEach((l, i) => {
+    const h = Math.max(1, l.y1 - l.y0 + 1);
+    const px = Math.max(6, Math.round(h * 0.5)), py = Math.max(4, Math.round(h * 0.35));
+    push('line' + i, { x0: l.x0 - px, y0: l.y0 - py, x1: l.x1 + px, y1: l.y1 + py }, '7',
+      Math.min(8, Math.max(3, Math.round(220 / h))));
+  });
+  if (blk.lines.length > 1) {
+    const a = blk.lines[0], c = blk.lines[1];
+    const h = Math.max(a.y1 - a.y0 + 1, c.y1 - c.y0 + 1);
+    const px = Math.max(6, Math.round(h * 0.5)), py = Math.max(4, Math.round(h * 0.35));
+    push('top2', {
+      x0: Math.min(a.x0, c.x0) - px, y0: Math.min(a.y0, c.y0) - py,
+      x1: Math.max(a.x1, c.x1) + px, y1: Math.max(a.y1, c.y1) + py,
+    }, '6', Math.min(6, Math.max(3, Math.round(180 / h))));
+  }
+  const all = blk.all, ah = Math.max(1, all.y1 - all.y0 + 1);
+  push('all', { x0: all.x0 - 8, y0: all.y0 - 4, x1: all.x1 + 8, y1: all.y1 + 4 }, '6',
+    Math.min(5, Math.max(3, Math.round(160 / ah))));
+  return out;
+}
+// 识别背面型号：多个候选裁剪各跑一次 OCR，按「同一型号被几个独立裁剪读到」投票
+async function ocrBackModel(backCv, box, onLog) {
+  const blk = findTextBlocks(backCv, box);
+  if (!blk) return { code: '', raw: '', note: '没在条带上找到打印文字' };
+  const worker = await getOcrWorker(onLog);
+  const cands = buildOcrCands(blk);
+  const votes = new Map();
+  let lastRaw = '';
+  for (const t of cands) {
+    const st = cropStats(backCv, t.box) || { lo: blk.bg, hi: blk.hi };
+    const cv = ocrCrop(backCv, t.box, t.scale, st.lo, st.hi);
+    await worker.setParameters({ tessedit_pageseg_mode: t.psm, tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ- ' });
+    const res = await worker.recognize(cv);
+    const raw = ((res && res.data && res.data.text) || '').replace(/\s+/g, ' ').trim();
+    const conf = res && res.data && isFinite(res.data.confidence) ? Number(res.data.confidence) : 0;
+    cv.width = 0; cv.height = 0;
+    if (raw) lastRaw = raw;
+    const code = extractModelNumber(raw);
+    if (!code) continue;
+    const v = votes.get(code) || { n: 0, conf: 0, raw: '', first: 0 };
+    v.n++; v.conf = Math.max(v.conf, conf);
+    if (!v.raw && raw) v.raw = raw;
+    if (t.tag === 'line0') v.first = 1;            // 型号一般就在第一行，作同票时的优先项
+    votes.set(code, v);
+    if (v.n >= 2 && v.conf >= 60) break;           // 两个独立裁剪读到同一个型号，可信了
+  }
+  if (!votes.size) return { code: '', raw: lastRaw, note: '识别到文字但没匹配上型号格式' };
+  const leadLen = (c) => String(c).split('-')[0].length;
+  const list = Array.from(votes.entries()).map(kv => ({ code: kv[0], n: kv[1].n, conf: kv[1].conf, raw: kv[1].raw, first: kv[1].first }));
+  list.sort((a, b) => (b.n - a.n) || (b.first - a.first) || (leadLen(b.code) - leadLen(a.code)) || (b.conf - a.conf) || (b.code.length - a.code.length));
+  const best = list[0];
+  return { code: best.code, raw: best.raw || lastRaw, line: blk.lines.length, alt: list.slice(1).map(x => x.code) };
+}
+
+// —— 调色 / 锐化（预览与导出走同一套像素运算，保证所见即所得） ——
+function clamp255(v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+function applyPixelAdjust(data, w, h, o) {
+  const sh = o.sharpen || 0, br = o.brightness || 0, ct = o.contrast || 0, sa = o.saturation || 0, hu = o.hue || 0;
+  if (sh) {
+    const amt = sh / 50;                       // -2 ~ +2
+    const src = new Uint8ClampedArray(data);
+    const tmp = new Float32Array(src.length);
+    for (let y = 0; y < h; y++) {
+      const row = y * w * 4;
+      for (let x = 0; x < w; x++) {
+        const i = row + x * 4;
+        const il = x > 0 ? i - 4 : i, ir = x < w - 1 ? i + 4 : i;
+        for (let c = 0; c < 3; c++) tmp[i + c] = (src[il + c] + 2 * src[i + c] + src[ir + c]) / 4;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const row = y * w * 4;
+      const ru = y > 0 ? row - w * 4 : row, rd = y < h - 1 ? row + w * 4 : row;
+      for (let x = 0; x < w; x++) {
+        const i = row + x * 4;
+        for (let c = 0; c < 3; c++) {
+          const blur = (tmp[ru + x * 4 + c] + 2 * tmp[i + c] + tmp[rd + x * 4 + c]) / 4;
+          data[i + c] = clamp255(src[i + c] + amt * (src[i + c] - blur));
+        }
+      }
+    }
+  }
+  if (!br && !ct && !sa && !hu) return data;
+  const cf = 1 + ct / 100, sf = 1 + sa / 100, ba = br * 2.55;
+  const hr = hu * Math.PI / 180, cs = Math.cos(hr), sn = Math.sin(hr);
+  const m00 = 0.213 + cs * 0.787 - sn * 0.213, m01 = 0.715 - cs * 0.715 - sn * 0.715, m02 = 0.072 - cs * 0.072 + sn * 0.928;
+  const m10 = 0.213 - cs * 0.213 + sn * 0.143, m11 = 0.715 + cs * 0.285 + sn * 0.140, m12 = 0.072 - cs * 0.072 - sn * 0.283;
+  const m20 = 0.213 - cs * 0.213 - sn * 0.787, m21 = 0.715 - cs * 0.715 + sn * 0.715, m22 = 0.072 + cs * 0.928 + sn * 0.072;
+  for (let i = 0; i < data.length; i += 4) {
+    let r = data[i], g = data[i + 1], b = data[i + 2];
+    if (ba) { r += ba; g += ba; b += ba; }
+    if (ct) { r = (r - 128) * cf + 128; g = (g - 128) * cf + 128; b = (b - 128) * cf + 128; }
+    if (sa) {
+      const lum = 0.213 * r + 0.715 * g + 0.072 * b;
+      r = lum + (r - lum) * sf; g = lum + (g - lum) * sf; b = lum + (b - lum) * sf;
+    }
+    if (hu) {
+      const r2 = r * m00 + g * m01 + b * m02, g2 = r * m10 + g * m11 + b * m12, b2 = r * m20 + g * m21 + b * m22;
+      r = r2; g = g2; b = b2;
+    }
+    data[i] = clamp255(r); data[i + 1] = clamp255(g); data[i + 2] = clamp255(b);
+  }
+  return data;
+}
+// 按裁剪框 + 参数 + 透明背景，生成最终成品 canvas（原像素尺寸，不缩放）
+function renderCut(frontCv, box, o) {
+  const w = Math.max(1, box.x1 - box.x0 + 1), h = Math.max(1, box.y1 - box.y0 + 1);
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const cx = out.getContext('2d');
+  cx.drawImage(frontCv, box.x0, box.y0, w, h, 0, 0, w, h);
+  const id = cx.getImageData(0, 0, w, h);
+  applyPixelAdjust(id.data, w, h, o);
+  if (o.transparent && box.mask) {
+    const a = maskToAlpha(box.mask, box, w, h);
+    for (let p = 0, i = 3; p < w * h; p++, i += 4) id.data[i] = a[p];
+  }
+  cx.putImageData(id, 0, 0);
+  return out;
+}
+
+// —— 产品抠图：从四边泛洪去纯色背景 + 紧致裁切 ——
+function cutPlainBackground(cv, o) {
+  const opt = Object.assign({ tol: 14, feather: 1, pad: 0 }, o || {});
+  const W = cv.width, H = cv.height;
+  const d = cv.getContext('2d').getImageData(0, 0, W, H).data;
+  // 背景色 = 四边像素中位数
+  const rs = [], gs = [], bs = [];
+  const push = (x, y) => { const i = (y * W + x) * 4; rs.push(d[i]); gs.push(d[i + 1]); bs.push(d[i + 2]); };
+  for (let x = 0; x < W; x += Math.max(1, Math.round(W / 200))) { push(x, 0); push(x, H - 1); }
+  for (let y = 0; y < H; y += Math.max(1, Math.round(H / 200))) { push(0, y); push(W - 1, y); }
+  const bg = [medianOf(rs), medianOf(gs), medianOf(bs)];
+  const tol = Math.max(1, opt.tol) * 3;       // 单通道容差 → 距离阈值
+  const isBg = (i) => (Math.abs(d[i] - bg[0]) + Math.abs(d[i + 1] - bg[1]) + Math.abs(d[i + 2] - bg[2])) <= tol;
+  const bgMask = new Uint8Array(W * H);
+  // ⚠️ 必须真的向外扩散：只标记种子像素的话背景一个也去不掉（早期版本就踩了这个坑）。
+  //    用 Int32Array 当队列（每像素最多入队一次），避免大图上用普通数组爆内存。
+  const q = new Int32Array(W * H);
+  let qh = 0, qt = 0;
+  const seed = (p) => { if (!bgMask[p] && isBg(p * 4)) { bgMask[p] = 1; q[qt++] = p; } };
+  for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+  while (qh < qt) {
+    const p = q[qh++];
+    const x = p % W, y = (p - x) / W;
+    if (x > 0) seed(p - 1);
+    if (x < W - 1) seed(p + 1);
+    if (y > 0) seed(p - W);
+    if (y < H - 1) seed(p + W);
+  }
+  // 前景包围盒
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!bgMask[y * W + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return null;
+  const p = Math.round(opt.pad || 0);
+  x0 = Math.max(0, x0 - p); y0 = Math.max(0, y0 - p);
+  x1 = Math.min(W - 1, x1 + p); y1 = Math.min(H - 1, y1 + p);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const out = document.createElement('canvas'); out.width = w; out.height = h;
+  const cx = out.getContext('2d');
+  cx.drawImage(cv, x0, y0, w, h, 0, 0, w, h);
+  const id = cx.getImageData(0, 0, w, h), od = id.data;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const sp = (y + y0) * W + (x + x0), dp = y * w + x;
+    od[dp * 4 + 3] = bgMask[sp] ? 0 : 255;
+  }
+  if (opt.feather) {
+    const a = new Uint8Array(w * h);
+    for (let p2 = 0; p2 < w * h; p2++) a[p2] = od[p2 * 4 + 3];
+    const f = Math.max(1, Math.min(6, Math.round(opt.feather)));
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let s = 0, c = 0;
+      for (let dy = -f; dy <= f; dy++) for (let dx = -f; dx <= f; dx++) {
+        const yy = y + dy, xx = x + dx;
+        if (yy < 0 || yy >= h || xx < 0 || xx >= w) { s += 255; c++; continue; }
+        s += a[yy * w + xx]; c++;
+      }
+      od[(y * w + x) * 4 + 3] = Math.round(s / c);
+    }
+  }
+  cx.putImageData(id, 0, 0);
+  return { canvas: out, box: { x0: x0, y0: y0, x1: x1, y1: y1 }, bg: bg };
+}
+
+// —— ZIP 打包（store 模式：PNG 已是压缩格式，直接原样装进去，不做二次压缩） ——
+let _crcTable = null;
+function crc32(u8) {
+  if (!_crcTable) {
+    _crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      _crcTable[n] = c >>> 0;
+    }
+  }
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = _crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function u32le(n, bytes) { const a = new Uint8Array(bytes); for (let i = 0; i < bytes; i++) a[i] = (n >>> (i * 8)) & 0xFF; return a; }
+function zipStore(entries, when) {
+  const enc = new TextEncoder();
+  const dt = when || new Date();
+  const dosTime = ((dt.getHours() & 31) << 11) | ((dt.getMinutes() & 63) << 5) | ((dt.getSeconds() / 2) & 31);
+  const dosDate = (((dt.getFullYear() - 1980) & 127) << 9) | (((dt.getMonth() + 1) & 15) << 5) | (dt.getDate() & 31);
+  const parts = [], central = [];
+  let offset = 0;
+  entries.forEach(e => {
+    const name = enc.encode(e.name);
+    const crc = crc32(e.data);
+    const local = concatU8([
+      u32le(0x04034b50, 4), u32le(20, 2), u32le(0x0800, 2), u32le(0, 2),
+      u32le(dosTime, 2), u32le(dosDate, 2), u32le(crc, 4),
+      u32le(e.data.length, 4), u32le(e.data.length, 4), u32le(name.length, 2), u32le(0, 2), name,
+    ]);
+    parts.push(local, e.data);
+    central.push(concatU8([
+      u32le(0x02014b50, 4), u32le(20, 2), u32le(20, 2), u32le(0x0800, 2), u32le(0, 2),
+      u32le(dosTime, 2), u32le(dosDate, 2), u32le(crc, 4),
+      u32le(e.data.length, 4), u32le(e.data.length, 4), u32le(name.length, 2),
+      u32le(0, 2), u32le(0, 2), u32le(0, 2), u32le(0, 2), u32le(0, 4), u32le(offset, 4), name,
+    ]));
+    offset += local.length + e.data.length;
+  });
+  const cd = concatU8(central);
+  const end = concatU8([
+    u32le(0x06054b50, 4), u32le(0, 2), u32le(0, 2),
+    u32le(entries.length, 2), u32le(entries.length, 2),
+    u32le(cd.length, 4), u32le(offset, 4), u32le(0, 2),
+  ]);
+  return concatU8(parts.concat([cd, end]));
+}
+
+// ================= 抠图工具：文件 / 配对 / 命名 逻辑 =================
+const IMG_EXT_RE = /\.(jpe?g|png|webp|bmp|tiff?)$/i;
+function imgFilesOnly(list) {
+  return Array.prototype.slice.call(list).filter(f => (f.type && /^image\//.test(f.type)) || IMG_EXT_RE.test(f.name || ''));
+}
+function fileRelName(f) { return (f && (f.__rel || f.webkitRelativePath)) || (f && f.name) || ''; }
+function sortImgFiles(list) {
+  return list.slice().sort((a, b) => naturalCompare(fileRelName(a), fileRelName(b)));
+}
+// 相邻两张一组；mode 'fb' = 前一张正面，'bf' = 前一张背面。返回下标对
+function pairFrameFiles(names, mode) {
+  const out = [];
+  for (let i = 0; i + 1 < names.length; i += 2) {
+    out.push(mode === 'bf' ? { fi: i + 1, bi: i } : { fi: i, bi: i + 1 });
+  }
+  if (names.length % 2 === 1) out.push({ fi: names.length - 1, bi: -1 });
+  return out;
+}
+function sanitizeName(s) { return String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim(); }
+function frameOutName(model, frontName, used) {
+  let base = sanitizeName(model);
+  if (!base) base = sanitizeName(String(frontName || '').replace(IMG_EXT_RE, ''));
+  if (!base) base = 'image';
+  let name = base + '.png';
+  let n = 2;
+  const has = (x) => used && Object.prototype.hasOwnProperty.call(used, x.toLowerCase());
+  while (has(name)) { name = base + '-' + n + '.png'; n++; }
+  if (used) used[name.toLowerCase()] = 1;
+  return name;
+}
+// 拖文件夹（或散图）进来：用 webkitGetAsEntry 递归展开
+function walkFsEntry(entry, out, prefix) {
+  return new Promise(resolve => {
+    if (!entry) return resolve();
+    if (entry.isFile) {
+      entry.file(f => { try { f.__rel = (prefix || '') + entry.name; } catch (_) {} out.push(f); resolve(); }, () => resolve());
+    } else if (entry.isDirectory) {
+      const rd = entry.createReader(), kids = [];
+      const read = () => rd.readEntries(async ents => {
+        if (!ents.length) {
+          for (const e of kids) await walkFsEntry(e, out, (prefix || '') + entry.name + '/');
+          resolve();
+          return;
+        }
+        for (const e of ents) kids.push(e);
+        read();
+      }, () => resolve());
+      read();
+    } else resolve();
+  });
+}
+async function filesFromDataTransfer(dt) {
+  const items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
+  const entries = items.map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length) {
+    const out = [];
+    for (const e of entries) await walkFsEntry(e, out, '');
+    if (out.length) return out;
+  }
+  return dt && dt.files ? Array.prototype.slice.call(dt.files) : [];
+}
+function bindDropFiles(zone, onFiles) {
+  if (!zone) return;
+  const clear = () => zone.classList.remove('drop-hot');
+  zone.addEventListener('dragover', e => { if (isFileDrag(e)) { e.preventDefault(); zone.classList.add('drop-hot'); } });
+  zone.addEventListener('dragleave', () => clear());
+  zone.addEventListener('drop', async e => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); e.stopPropagation(); clear();
+    const files = await filesFromDataTransfer(e.dataTransfer);
+    if (files.length) onFiles(files);
+  });
+}
+function saveBytes(bytes, filename, mime) {
+  const blob = new Blob([bytes], { type: mime || 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function canvasToPngBytes(cv) {
+  return new Promise((res, rej) => {
+    cv.toBlob(async blob => {
+      if (!blob) return rej(new Error('PNG 导出失败'));
+      res(new Uint8Array(await blob.arrayBuffer()));
+    }, 'image/png');
+  });
+}
+const sleep0 = () => new Promise(r => setTimeout(r, 0));
+
+// ================= 工具：框条抠图 =================
+function buildToolFrameCut() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>✂️ 框条抠图 <small style="color:var(--text-light);font-weight:400">（正面抠图 → 背面识别型号命名 → 原像素 PNG）</small></h4>
+    <div class="cu-drop" id="fcDrop">
+      <label class="cc-upload"><span>📁 选择文件夹</span><input type="file" id="fcFolder" webkitdirectory directory multiple style="display:none"></label>
+      <span class="drop-tip"><i class="tip-idle">或把文件夹拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
+      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">文件夹里按「正面 + 背面」成对拍摄（如 _DSC5653 正面 / _DSC5654 背面）</span>
+    </div>
+    <div class="cu-row" style="margin-top:10px">
+      <select class="cu-model" id="fcPairMode" style="width:200px">
+        <option value="fb">相邻两张：前=正面，后=背面</option>
+        <option value="bf">相邻两张：前=背面，后=正面</option>
+      </select>
+      <span class="cu-empty" id="fcInfo">还没有选择文件</span>
+    </div>
+
+    <div class="cu-sec" id="fcPairSec" style="display:none">
+      <div class="cu-sec-t">① 配对与型号
+        <small>型号从背面照片自动识别，可直接改；留空就用正面原文件名</small>
+        <button class="cu-mini" id="fcOcrAll">识别全部型号</button>
+      </div>
+      <div style="max-height:250px;overflow:auto">
+        <table class="cu-table">
+          <thead><tr><th>#</th><th>正面（抠图）</th><th>背面（识别型号）</th><th>型号 / 输出文件名</th><th>状态</th><th></th></tr></thead>
+          <tbody id="fcRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="cu-sec" id="fcEditSec" style="display:none">
+      <div class="cu-sec-t">② 调参数 <small>以当前选中的这组为样张，调好后批量套用到其余照片</small></div>
+      <div class="cu-2col">
+        <div>
+          <div class="cu-stage cu-checker" id="fcStage"><span class="cu-empty">选择文件夹后这里显示样张</span></div>
+          <div class="cu-row" style="margin-top:8px">
+            <span class="cu-badge" id="fcBoxInfo">裁剪区 —</span>
+            <label style="font-size:12px;color:var(--text-light)"><input type="checkbox" id="fcShowFull"> 显示裁剪位置</label>
+            <button class="cu-mini" id="fcRedetect">重新自动识别</button>
+          </div>
+          <div class="cu-row" style="margin-top:7px;font-size:12px;color:var(--text-light)">
+            裁剪微调（px）：
+            上<input class="cu-num" id="fcT" value="0"> 下<input class="cu-num" id="fcB" value="0">
+            左<input class="cu-num" id="fcL" value="0"> 右<input class="cu-num" id="fcR" value="0">
+            留白<input class="cu-num" id="fcPad" value="0">
+            <label><input type="checkbox" id="fcTrans" checked> 透明背景</label>
+          </div>
+        </div>
+        <div>
+          <div class="cu-sliders">
+            <label class="cu-sl">锐化<input type="range" id="fcSharpen" min="-100" max="100" value="0"><b id="fcSharpenV">0</b></label>
+            <label class="cu-sl">亮度<input type="range" id="fcBright" min="-100" max="100" value="0"><b id="fcBrightV">0</b></label>
+            <label class="cu-sl">对比度<input type="range" id="fcContrast" min="-100" max="100" value="0"><b id="fcContrastV">0</b></label>
+            <label class="cu-sl">饱和度<input type="range" id="fcSat" min="-100" max="100" value="0"><b id="fcSatV">0</b></label>
+            <label class="cu-sl">色相<input type="range" id="fcHue" min="-180" max="180" value="0"><b id="fcHueV">0</b></label>
+          </div>
+          <div class="cu-row" style="margin-top:10px">
+            <button class="cu-mini" id="fcReset">重置参数</button>
+            <span class="cu-empty">调好后点下面「开始批量」，其余照片会自动套用同样的参数</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cu-sec" id="fcRunSec" style="display:none">
+      <div class="cu-row">
+        <button class="cu-mini" id="fcRun" style="padding:7px 16px;font-size:13px;font-weight:600">开始批量抠图 → 下载 ZIP</button>
+        <button class="cu-mini" id="fcRunOne">只导出当前样张</button>
+        <button class="cu-mini" id="fcSaveDir" style="display:none">保存到文件夹…</button>
+        <span class="cu-empty" id="fcProgText"></span>
+      </div>
+      <div class="cu-bar"><i id="fcBar"></i></div>
+      <div class="cu-log" id="fcLog" style="margin-top:8px"></div>
+    </div>
+    <div class="t-tip">用法：把「正面 + 背面」成对拍的照片放进一个文件夹 → 选文件夹 → 参数在第一组上调好 → 批量导出。
+      正面自动识别框条范围并去背景（输出透明底 PNG，<b>原像素尺寸、不做任何压缩</b>），文件名用背面照片上打印的型号（如 <b>9701-A-170.png</b>）。
+      型号识别在本地用 OCR 完成，首次使用需要联网下载一次识别模型（约 3MB），图片本身不会上传。识别错的型号可以直接在表格里改。</div>`;
+
+  const $ = (id) => box.querySelector('#' + id);
+  const st = {
+    files: [], pairs: [], sel: 0, cur: null,
+    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, nudge: { t: 0, b: 0, l: 0, r: 0 } },
+    showFull: false, busy: false,
+  };
+  const log = (s) => { const el = $('fcLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
+  const setProg = (i, n) => { $('fcBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
+
+  // —— 读图（用于预览与处理；用完释放像素） ——
+  async function loadCv(file) {
+    if (!file) return null;
+    const img = await blobToImage(file);
+    const cv = imgToCanvas(img);
+    return cv;
+  }
+  function releaseCv(cv) { if (cv) { cv.width = 0; cv.height = 0; } }
+
+  // —— 配对表 ——
+  function renderRows() {
+    const tb = $('fcRows');
+    tb.innerHTML = '';
+    st.pairs.forEach((p, i) => {
+      const tr = document.createElement('tr');
+      if (i === st.sel) tr.className = 'on';
+      tr.innerHTML = `<td>${i + 1}</td>
+        <td><span class="cu-fn" title="${esc(fileRelName(p.front))}">${esc(fileRelName(p.front))}</span></td>
+        <td>${p.back ? `<span class="cu-fn" title="${esc(fileRelName(p.back))}">${esc(fileRelName(p.back))}</span>` : '<span class="cu-badge warn">缺背面</span>'}</td>
+        <td><input class="cu-model" data-i="${i}" placeholder="未识别（用原文件名）" value="${esc(p.model || '')}"></td>
+        <td><span class="cu-badge ${p.cls || ''}">${esc(p.status || '待处理')}</span></td>
+        <td><button class="cu-mini" data-act="swap" data-i="${i}" title="交换这两张的正面/背面">⇄</button>
+            <button class="cu-mini" data-act="ocr" data-i="${i}" title="用背面重新识别型号">识别</button></td>`;
+      tb.appendChild(tr);
+    });
+    Array.prototype.forEach.call(tb.querySelectorAll('input.cu-model'), inp => {
+      inp.oninput = () => { st.pairs[+inp.dataset.i].model = inp.value.trim(); };
+    });
+    Array.prototype.forEach.call(tb.querySelectorAll('button[data-act]'), btn => {
+      btn.onclick = () => {
+        const i = +btn.dataset.i, p = st.pairs[i];
+        if (btn.dataset.act === 'swap') {
+          if (!p.back) return;
+          const t = p.front; p.front = p.back; p.back = t; p.model = ''; p.status = '待处理'; p.cls = '';
+          renderRows();
+          if (i === st.sel) selectPair(i, true);
+        } else {
+          ocrPair(i).then(() => renderRows());
+        }
+      };
+    });
+    $('fcPairSec').style.display = st.pairs.length ? '' : 'none';
+    $('fcEditSec').style.display = st.pairs.length ? '' : 'none';
+    $('fcRunSec').style.display = st.pairs.length ? '' : 'none';
+  }
+  function setStatus(i, text, cls) {
+    st.pairs[i].status = text; st.pairs[i].cls = cls || '';
+    const tb = $('fcRows');
+    const tr = tb.children[i];
+    if (tr) { tr.children[4].innerHTML = `<span class="cu-badge ${cls || ''}">${esc(text)}</span>`; }
+  }
+
+  // —— 选中一组：载入像素、自动识别裁剪范围、出预览 ——
+  async function selectPair(i, force) {
+    if (st.busy || (!force && st.sel === i && st.cur)) { st.sel = i; renderRows(); return; }
+    st.sel = i;
+    renderRows();
+    const p = st.pairs[i];
+    if (!p) return;
+    $('fcStage').innerHTML = '<span class="cu-empty">正在读图…</span>';
+    try {
+      if (st.cur) { releaseCv(st.cur.frontCv); releaseCv(st.cur.backCv); }
+      const frontCv = await loadCv(p.front);
+      const backCv = p.back ? await loadCv(p.back) : null;
+      let box = detectStripBox(frontCv);
+      const cur = { frontCv: frontCv, backCv: backCv, box: box, autoBox: box ? Object.assign({}, box) : null };
+      st.cur = cur;
+      $('fcBoxInfo').textContent = box
+        ? `裁剪区 ${box.x0},${box.y0} → ${box.x1},${box.y1}（${box.x1 - box.x0 + 1}×${box.y1 - box.y0 + 1} px）`
+        : '没识别到框条，请手动微调';
+      drawPreview();
+    } catch (e) {
+      $('fcStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(e && e.message || e) + '</span>';
+    }
+  }
+  // 应用微调后的实际裁剪框
+  function curBox() {
+    const cur = st.cur;
+    if (!cur || !cur.box) return null;
+    const b = cur.box, n = st.opt.nudge, pad = Math.round(st.opt.pad || 0);
+    const x0 = Math.max(0, b.x0 + (n.l | 0) - pad), y0 = Math.max(0, b.y0 + (n.t | 0) - pad);
+    const x1 = Math.min(cur.frontCv.width - 1, b.x1 + (n.r | 0) + pad), y1 = Math.min(cur.frontCv.height - 1, b.y1 + (n.b | 0) + pad);
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x0: x0, y0: y0, x1: x1, y1: y1, mask: b.mask };
+  }
+  function drawPreview() {
+    const cur = st.cur;
+    if (!cur || !cur.box) return;
+    const stage = $('fcStage');
+    stage.innerHTML = '';
+    const b = curBox();
+    if (!b) { stage.innerHTML = '<span class="cu-empty">裁剪范围无效，请调小微调值</span>'; return; }
+    if (st.showFull) {
+      // 全图 + 红框，用于看裁剪位置
+      const k = Math.min(1, 760 / cur.frontCv.width);
+      const c = document.createElement('canvas');
+      c.width = Math.round(cur.frontCv.width * k);
+      c.height = Math.round(cur.frontCv.height * k);
+      const cx = c.getContext('2d');
+      cx.drawImage(cur.frontCv, 0, 0, c.width, c.height);
+      cx.strokeStyle = '#e74c3c'; cx.lineWidth = 2;
+      cx.strokeRect(b.x0 * k, b.y0 * k, (b.x1 - b.x0 + 1) * k, (b.y1 - b.y0 + 1) * k);
+      stage.appendChild(c);
+      return;
+    }
+    const out = renderCut(cur.frontCv, b, st.opt);
+    stage.appendChild(out);
+    $('fcBoxInfo').textContent = `输出 ${out.width}×${out.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`;
+  }
+  function bindSlider(id, key) {
+    const el = $(id), lab = $(id + 'V');
+    el.oninput = () => { st.opt[key] = +el.value; lab.textContent = el.value; drawPreview(); };
+  }
+  ['fcSharpen|sharpen', 'fcBright|brightness', 'fcContrast|contrast', 'fcSat|saturation', 'fcHue|hue'].forEach(s => {
+    const [id, key] = s.split('|');
+    bindSlider(id, key);
+  });
+  ['fcT|t', 'fcB|b', 'fcL|l', 'fcR|r'].forEach(s => {
+    const [id, key] = s.split('|');
+    $(id).oninput = () => { st.opt.nudge[key] = parseInt($(id).value, 10) || 0; drawPreview(); };
+  });
+  $('fcPad').oninput = () => { st.opt.pad = parseInt($('fcPad').value, 10) || 0; drawPreview(); };
+  $('fcTrans').onchange = () => { st.opt.transparent = $('fcTrans').checked; drawPreview(); };
+  $('fcShowFull').onchange = () => { st.showFull = $('fcShowFull').checked; drawPreview(); };
+  $('fcRedetect').onclick = () => {
+    if (!st.cur) return;
+    const b = detectStripBox(st.cur.frontCv);
+    st.cur.box = b; st.cur.autoBox = b ? Object.assign({}, b) : null;
+    ['fcT', 'fcB', 'fcL', 'fcR'].forEach(id => { $(id).value = '0'; });
+    st.opt.nudge = { t: 0, b: 0, l: 0, r: 0 };
+    drawPreview();
+  };
+  $('fcReset').onclick = () => {
+    st.opt.sharpen = st.opt.brightness = st.opt.contrast = st.opt.saturation = st.opt.hue = 0;
+    ['fcSharpen', 'fcBright', 'fcContrast', 'fcSat', 'fcHue'].forEach(id => { $(id).value = '0'; $(id + 'V').textContent = '0'; });
+    drawPreview();
+  };
+
+  // —— 文件导入 ——
+  function setFiles(list) {
+    st.files = sortImgFiles(imgFilesOnly(list));
+    if (st.cur) { releaseCv(st.cur.frontCv); releaseCv(st.cur.backCv); st.cur = null; }
+    st.sel = 0;
+    if (!st.files.length) { $('fcInfo').textContent = '没找到图片文件（支持 jpg / png / webp / bmp / tif）'; renderRows(); return; }
+    const names = st.files.map(fileRelName);
+    const idx = pairFrameFiles(names, $('fcPairMode').value);
+    st.pairs = idx.map(x => ({ front: st.files[x.fi], back: x.bi >= 0 ? st.files[x.bi] : null, model: '', status: x.bi >= 0 ? '待处理' : '缺背面', cls: x.bi >= 0 ? '' : 'warn' }));
+    $('fcInfo').textContent = `${st.files.length} 张图 · 配成 ${st.pairs.length} 组`;
+    log(`已读取 ${st.files.length} 张图片，配对 ${st.pairs.length} 组`);
+    renderRows();
+    selectPair(0, true);
+  }
+  $('fcFolder').onchange = () => setFiles($('fcFolder').files);
+  $('fcPairMode').onchange = () => { if (st.files.length) setFiles(st.files); };
+  bindDropFiles($('fcDrop'), (files) => setFiles(files));
+
+  // —— OCR 型号 ——
+  async function ocrPair(i) {
+    const p = st.pairs[i];
+    if (!p || !p.back || !p.front) return;
+    setStatus(i, '识别中…', 'warn');
+    try {
+      let backCv = (st.cur && i === st.sel && st.cur.backCv) ? st.cur.backCv : null;
+      let tmp = null;
+      if (!backCv) { tmp = await loadCv(p.back); backCv = tmp; }
+      let box = null;
+      if (i === st.sel && st.cur && st.cur.frontCv) box = st.cur.box;
+      else {
+        const fcv = await loadCv(p.front);
+        box = detectStripBox(fcv);
+        releaseCv(fcv);
+      }
+      if (!box) { setStatus(i, '识别失败：' + '背面未定位到条带', 'err'); if (tmp) releaseCv(tmp); return; }
+      const r = await ocrBackModel(backCv, box, (m) => {
+        if (m.status === 'recognizing text') setProg(m.progress || 0, 1);
+      });
+      if (r.note) log(`第 ${i + 1} 组：${r.note}${r.raw ? '（原文：' + r.raw + '）' : ''}`);
+      if (r.code) {
+        p.model = r.code;
+        setStatus(i, '型号 OK', 'ok');
+        log(`第 ${i + 1} 组：识别到型号 ${r.code}`);
+      } else {
+        setStatus(i, '未识别到型号', 'err');
+        if (r.raw) log(`第 ${i + 1} 组：OCR 原文「${r.raw}」→ 没匹配上型号格式，可手动填`);
+      }
+      if (tmp) releaseCv(tmp);
+      renderRows();
+    } catch (e) {
+      setStatus(i, '识别出错', 'err');
+      log(`第 ${i + 1} 组：${e && e.message || e}`);
+    } finally { setProg(0, 1); }
+  }
+  $('fcOcrAll').onclick = async () => {
+    if (st.busy) return;
+    st.busy = true;
+    log('开始识别型号（首次会下载识别模型，请稍候）…');
+    for (let i = 0; i < st.pairs.length; i++) {
+      if (st.pairs[i].model) continue;
+      if (!st.pairs[i].back) continue;
+      $('fcProgText').textContent = `识别型号 ${i + 1}/${st.pairs.length}`;
+      await ocrPair(i);
+      await sleep0();
+    }
+    st.busy = false;
+    $('fcProgText').textContent = '型号识别完成';
+  };
+
+  // —— 批量处理 ——
+  async function processPair(i, ctx) {
+    const p = st.pairs[i];
+    const frontCv = ctx.reuseFront || await loadCv(p.front);
+    try {
+      if (!p.model && p.back) {
+        setStatus(i, '识别型号…', 'warn');
+        const backCv = await loadCv(p.back);
+        const bx = detectStripBox(frontCv);
+        const r = bx ? await ocrBackModel(backCv, bx, null) : { code: '' };
+        releaseCv(backCv);
+        if (r.code) { p.model = r.code; renderRows(); }
+      }
+      const box = detectStripBox(frontCv);
+      if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 组：没识别到框条，已跳过`); return null; }
+      const out = renderCut(frontCv, box, st.opt);
+      const bytes = await canvasToPngBytes(out);
+      const name = frameOutName(p.model, fileRelName(p.front), ctx.used);
+      const dims = out.width + '×' + out.height;
+      out.width = 0; out.height = 0;
+      setStatus(i, `${dims}`, 'ok');
+      log(`第 ${i + 1} 组 → ${name}（${dims}px，${(bytes.length / 1024).toFixed(0)} KB）`);
+      return { name: name, data: bytes };
+    } catch (e) {
+      setStatus(i, '失败', 'err');
+      log(`第 ${i + 1} 组：${e && e.message || e}`);
+      return null;
+    } finally {
+      if (!ctx.reuseFront) releaseCv(frontCv);
+    }
+  }
+  async function runBatch(onlyCurrent) {
+    if (st.busy || !st.pairs.length) return;
+    st.busy = true;
+    const list = onlyCurrent ? [st.sel] : st.pairs.map((_, i) => i);
+    const entries = [], used = {};
+    log(`开始处理 ${list.length} 组…`);
+    for (let k = 0; k < list.length; k++) {
+      const i = list[k];
+      setStatus(i, '处理中…', 'warn');
+      $('fcProgText').textContent = `${k + 1}/${list.length} 处理中`;
+      setProg(k, list.length);
+      const reuse = (i === st.sel && st.cur && st.cur.frontCv) ? st.cur.frontCv : null;
+      const r = await processPair(i, { used: used, reuseFront: reuse });
+      if (r) entries.push(r);
+      setProg(k + 1, list.length);
+      await sleep0();
+    }
+    st.busy = false;
+    if (!entries.length) { log('没有可导出的图片'); $('fcProgText').textContent = '没有可导出的图片'; return; }
+    if (entries.length === 1) {
+      saveBytes(entries[0].data, entries[0].name, 'image/png');
+      log('已导出 1 张：' + entries[0].name);
+    } else {
+      log('正在打包 ZIP…');
+      const zip = zipStore(entries);
+      const stamp = new Date().toISOString().slice(0, 10);
+      saveBytes(zip, `框条抠图_${stamp}_${entries.length}张.zip`, 'application/zip');
+      log(`已导出 ${entries.length} 张 PNG（打包 ${(zip.length / 1048576).toFixed(1)} MB）`);
+    }
+    $('fcProgText').textContent = `完成：导出 ${entries.length} 张`;
+  }
+  $('fcRun').onclick = () => runBatch(false);
+  $('fcRunOne').onclick = () => runBatch(true);
+  if (window.showDirectoryPicker) {
+    const btn = $('fcSaveDir');
+    btn.style.display = '';
+    btn.onclick = () => runBatchToDir();
+  }
+  async function runBatchToDir() {
+    if (st.busy) return;
+    let dir;
+    try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }); } catch (_) { return; }
+    st.busy = true;
+    const used = {};
+    log('保存到所选文件夹…');
+    for (let i = 0; i < st.pairs.length; i++) {
+      setStatus(i, '处理中…', 'warn');
+      $('fcProgText').textContent = `${i + 1}/${st.pairs.length} 处理中`;
+      setProg(i, st.pairs.length);
+      const reuse = (i === st.sel && st.cur && st.cur.frontCv) ? st.cur.frontCv : null;
+      const r = await processPair(i, { used: used, reuseFront: reuse });
+      if (r) {
+        try {
+          const fh = await dir.getFileHandle(r.name, { create: true });
+          const ws = await fh.createWritable();
+          await ws.write(new Blob([r.data], { type: 'image/png' }));
+          await ws.close();
+        } catch (e) { log(`写入 ${r.name} 失败：${e && e.message || e}`); }
+      }
+      setProg(i + 1, st.pairs.length);
+      await sleep0();
+    }
+    st.busy = false;
+    $('fcProgText').textContent = '已保存到文件夹';
+    log('完成');
+  }
+
+  return box;
+}
+
+// ================= 工具：产品抠图（通用去纯色背景） =================
+function buildToolProdCut() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🖼️ 产品抠图 <small style="color:var(--text-light);font-weight:400">（去纯色背景 → 透明底 PNG，批量）</small></h4>
+    <div class="cu-drop" id="pdDrop">
+      <label class="cc-upload"><span>📁 选择文件夹</span><input type="file" id="pdFolder" webkitdirectory directory multiple style="display:none"></label>
+      <label class="cc-upload"><span>🖼️ 选择图片</span><input type="file" id="pdFiles" accept="image/*" multiple style="display:none"></label>
+      <span class="drop-tip"><i class="tip-idle">或把图片 / 文件夹拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
+    </div>
+    <div class="cu-row" style="margin-top:10px"><span class="cu-empty" id="pdInfo">还没有选择图片</span></div>
+
+    <div class="cu-sec" id="pdSec" style="display:none">
+      <div class="cu-2col">
+        <div>
+          <div class="cu-stage cu-checker" id="pdStage"></div>
+          <div class="cu-row" style="margin-top:8px"><span class="cu-badge" id="pdBoxInfo">—</span>
+            <span style="font-size:12px;color:var(--text-light)">背景色 <i id="pdBg" style="display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--border);vertical-align:-2px"></i></span>
+          </div>
+        </div>
+        <div>
+          <div class="cu-sliders">
+            <label class="cu-sl">容差<input type="range" id="pdTol" min="2" max="60" value="14"><b id="pdTolV">14</b></label>
+            <label class="cu-sl">边缘羽化<input type="range" id="pdFeather" min="0" max="5" value="1"><b id="pdFeatherV">1</b></label>
+            <label class="cu-sl">留白<input type="range" id="pdPad" min="0" max="60" value="0"><b id="pdPadV">0</b></label>
+          </div>
+          <div class="cu-row" style="margin-top:10px">
+            <button class="cu-mini" id="pdRun" style="padding:7px 16px;font-size:13px;font-weight:600">开始批量抠图 → 下载 ZIP</button>
+            <button class="cu-mini" id="pdPrevBtn">预览下一张</button>
+          </div>
+          <div class="cu-bar" style="margin-top:8px"><i id="pdBar"></i></div>
+          <div class="cu-log" id="pdLog"></div>
+        </div>
+      </div>
+      <div class="cu-sec">
+        <div class="cu-sec-t">文件清单 <small>文件名沿用原文件名，导出为 PNG（原像素）</small></div>
+        <div style="max-height:230px;overflow:auto"><table class="cu-table">
+          <thead><tr><th>#</th><th>文件</th><th>尺寸</th><th>状态</th></tr></thead><tbody id="pdRows"></tbody></table></div>
+      </div>
+    </div>
+    <div class="t-tip">适合<b>背景干净（纯色 / 渐变浅底）</b>的产品图：从四边泛洪识别背景色并去掉，自动裁到产品边缘，导出透明底 PNG（原像素、不压缩）。
+      如果背景复杂或产品与背景颜色接近，把<b>容差</b>调小、或告诉我具体需求（比如按主体自动分割、抠出多个产品分别导出），我再按你的场景改。</div>`;
+
+  const $ = (id) => box.querySelector('#' + id);
+  const st = { files: [], sel: 0, opt: { tol: 14, feather: 1, pad: 0 }, busy: false };
+  const log = (s) => { const el = $('pdLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
+  const setProg = (i, n) => { $('pdBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
+
+  function renderRows() {
+    const tb = $('pdRows');
+    tb.innerHTML = '';
+    st.files.forEach((f, i) => {
+      const tr = document.createElement('tr');
+      if (i === st.sel) tr.className = 'on';
+      const info = st.files[i];
+      tr.innerHTML = `<td>${i + 1}</td><td><span class="cu-fn" title="${esc(fileRelName(f))}">${esc(fileRelName(f))}</span></td>
+        <td>${info.dim || '—'}</td><td><span class="cu-badge ${info.cls || ''}">${esc(info.status || '待处理')}</span></td>`;
+      tb.appendChild(tr);
+    });
+    $('pdSec').style.display = st.files.length ? '' : 'none';
+  }
+  async function preview(i) {
+    st.sel = i; renderRows();
+    const f = st.files[i];
+    if (!f) return;
+    try {
+      const cv = await loadImgCanvas(f);
+      const r = cutPlainBackground(cv, st.opt);
+      const stage = $('pdStage'); stage.innerHTML = '';
+      if (!r) { stage.innerHTML = '<span class="cu-empty">整张图都被判成背景了，把容差调小试试</span>'; return; }
+      stage.appendChild(r.canvas);
+      $('pdBoxInfo').textContent = `${f.name} · 输出 ${r.canvas.width}×${r.canvas.height} px`;
+      $('pdBg').style.background = 'rgb(' + r.bg.map(Math.round).join(',') + ')';
+      cv.width = 0; cv.height = 0;
+    } catch (e) { $('pdStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(e && e.message || e) + '</span>'; }
+  }
+  async function loadImgCanvas(file) { return imgToCanvas(await blobToImage(file)); }
+  ['pdTol|tol', 'pdFeather|feather', 'pdPad|pad'].forEach(s => {
+    const [id, key] = s.split('|');
+    const el = $(id);
+    el.oninput = () => { st.opt[key] = +el.value; $(id + 'V').textContent = el.value; preview(st.sel); };
+  });
+  $('pdPrevBtn').onclick = () => { if (st.files.length) preview((st.sel + 1) % st.files.length); };
+  function setFiles(list) {
+    const imgs = sortImgFiles(imgFilesOnly(list));
+    st.files = imgs.map(f => ({ file: f, status: '待处理', cls: '' }));
+    if (!imgs.length) { $('pdInfo').textContent = '没找到图片文件'; renderRows(); return; }
+    $('pdInfo').textContent = `${imgs.length} 张图片`;
+    log(`已读取 ${imgs.length} 张图片`);
+    renderRows();
+    preview(0);
+  }
+  $('pdFolder').onchange = () => setFiles($('pdFolder').files);
+  $('pdFiles').onchange = () => setFiles($('pdFiles').files);
+  bindDropFiles($('pdDrop'), (files) => setFiles(files));
+  $('pdRun').onclick = async () => {
+    if (st.busy || !st.files.length) return;
+    st.busy = true;
+    const entries = [], used = {};
+    log('开始处理…');
+    for (let i = 0; i < st.files.length; i++) {
+      const item = st.files[i];
+      item.status = '处理中'; item.cls = 'warn'; renderRows();
+      $('pdInfo').textContent = `${i + 1}/${st.files.length} 处理中`;
+      setProg(i, st.files.length);
+      try {
+        const cv = await loadImgCanvas(item.file);
+        item.dim = cv.width + '×' + cv.height;
+        const r = cutPlainBackground(cv, st.opt);
+        cv.width = 0; cv.height = 0;
+        if (!r) throw new Error('整张图都被判成背景（容差过大）');
+        const bytes = await canvasToPngBytes(r.canvas);
+        const name = frameOutName('', fileRelName(item.file), used);
+        r.canvas.width = 0; r.canvas.height = 0;
+        entries.push({ name: name, data: bytes });
+        item.status = r.box.x1 - r.box.x0 + 1 + '×' + (r.box.y1 - r.box.y0 + 1); item.cls = 'ok';
+        log(`→ ${name}（${(bytes.length / 1024).toFixed(0)} KB）`);
+      } catch (e) {
+        item.status = '失败'; item.cls = 'err';
+        log(`${fileRelName(item.file)}：${e && e.message || e}`);
+      }
+      setProg(i + 1, st.files.length);
+      renderRows();
+      await sleep0();
+    }
+    st.busy = false;
+    if (!entries.length) { $('pdInfo').textContent = '没有可导出的图片'; return; }
+    if (entries.length === 1) saveBytes(entries[0].data, entries[0].name, 'image/png');
+    else {
+      const zip = zipStore(entries);
+      saveBytes(zip, `产品抠图_${new Date().toISOString().slice(0, 10)}_${entries.length}张.zip`, 'application/zip');
+    }
+    $('pdInfo').textContent = `完成：导出 ${entries.length} 张`;
+    log(`完成，导出 ${entries.length} 张 PNG`);
+  };
+  $('pdTol').oninput = () => { st.opt.tol = +$('pdTol').value; $('pdTolV').textContent = $('pdTol').value; preview(st.sel); };
+  return box;
+}
+
+// ================= 抠图区块（在「实用功能中心」上方，同级） =================
+const CUTS = [
+  { id: 'framecut', name: '框条抠图', icon: '✂️', desc: '读文件夹 · 型号命名', build: buildToolFrameCut },
+  { id: 'prodcut', name: '产品抠图', icon: '🖼️', desc: '去背景 · 批量透明 PNG', build: buildToolProdCut },
+];
+let activeCut = null;
+function renderCutbox() {
+  const chips = $('cutChips'), panel = $('cutPanel');
+  if (!chips || !panel) return;
+  chips.innerHTML = '';
+  CUTS.forEach(t => {
+    const chip = document.createElement('button');
+    chip.className = 'tool-chip' + (activeCut === t.id ? ' on' : '');
+    chip.title = t.name + ' · ' + t.desc;
+    const ico = document.createElement('span');
+    ico.className = 'tc-ico';
+    ico.innerHTML = document.getElementById('ic-' + t.id)
+      ? '<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#ic-' + t.id + '"/></svg>'
+      : esc(t.icon || '');
+    const nm = document.createElement('span'); nm.className = 'tc-name'; nm.textContent = t.name;
+    const de = document.createElement('span'); de.className = 'tc-desc'; de.textContent = t.desc || '';
+    chip.appendChild(ico); chip.appendChild(nm); chip.appendChild(de);
+    chip.onclick = () => { activeCut = activeCut === t.id ? null : t.id; renderCutbox(); };
+    chips.appendChild(chip);
+  });
+  if (!activeCut) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
+  const t = CUTS.find(x => x.id === activeCut);
+  panel.style.display = '';
+  panel.innerHTML = '';
+  if (t) panel.appendChild(t.build());
+}
+
 function renderToolbox() {
   const chips = $('toolChips');
   const panel = $('toolPanel');
@@ -5196,6 +6492,7 @@ function renderAdminView() {
 function previewUser(id) {
   previewUid = id;
   $('board').style.display = 'flex';
+  $('cutbox').style.display = '';
   $('toolbox').style.display = '';
   $('doneView').style.display = 'none';
   $('adminView').style.display = 'none';
@@ -5221,6 +6518,7 @@ function switchView(v) {
   previewUid = null;
   $('previewBanner').style.display = 'none';
   $('board').style.display = v === 'board' ? 'flex' : 'none';
+  $('cutbox').style.display = v === 'board' ? '' : 'none';
   $('toolbox').style.display = v === 'board' ? '' : 'none';
   $('doneView').style.display = v === 'done' ? 'block' : 'none';
   $('adminView').style.display = v === 'admin' ? 'block' : 'none';
@@ -5337,7 +6635,8 @@ async function init() {
   const demoToggle = $('adminDemoToggle');
   if (demoToggle) demoToggle.onchange = () => syncAdminDemoToggle();
 
-  // 底部实用功能中心
+  // 顶部抠图区块 + 底部实用功能中心
+  renderCutbox();
   renderToolbox();
 
   // 自动登录（会话仍有效时）
@@ -5354,6 +6653,11 @@ if (typeof globalThis !== 'undefined') {
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
+    renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut,
+    detectStripBox, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha,
+    fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
+    cutPlainBackground, crc32, zipStore, concatU8, u32le,
+    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, imgFilesOnly, fileRelName,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
     buildToolQr, buildToolWatermark, buildToolColor,
     qrEncode, qrCanvas, qrCapacity, qrPickVersion, utf8Bytes,
