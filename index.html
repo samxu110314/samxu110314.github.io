@@ -4894,11 +4894,102 @@ function longestRun(vals, thr, gap) {
   return best;
 }
 function imgToCanvas(img) {
-  const cv = document.createElement('canvas');
-  cv.width = img.naturalWidth || img.width;
-  cv.height = img.naturalHeight || img.height;
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const cv = canvasOfSize(w, h);
   cv.getContext('2d').drawImage(img, 0, 0);
   return cv;
+}
+// 建画布并**检查上下文**：图一大，浏览器可能分配不出画布，getContext 返回 null，
+// 紧接着 `null.drawImage` 会抛一句完全看不懂的 TypeError（用户看到的就是
+// 「读图失败：Cannot read properties of null」）。这里直接给出人话，调用方也能据此降采样重试。
+function canvasOfSize(w, h) {
+  if (!w || !h) throw new Error('图片尺寸为 0，文件可能已损坏');
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  if (!cv.getContext('2d')) throw new Error(`图太大（${w}×${h}），浏览器分配不出画布内存`);
+  return cv;
+}
+// —— 读文件头判断真实格式 ——
+// ⚠️ 浏览器「能解谁、不能解谁」绝不能凭扩展名猜。实测 Chrome：TIFF（无压缩 / LZW / PackBits /
+//    Adobe-Deflate / JPEG-in-TIFF **全都不行**）、PSD、HEIC 一律解不了，而它们的 MIME 都长得像图片
+//    （image/tiff、image/vnd.adobe.photoshop、image/heic）。早前按「MIME 以 image/ 开头」收文件，
+//    这些文件会被当成图片列进清单，用户一点就报「读图失败」。
+//    所以两头都做：① 收文件按**真能解码的扩展名**白名单过滤；② 解码真失败时读文件头，
+//    把「它其实是什么格式」说出来 —— 扩展名写错（拿 HEIC 改名成 .jpg）太常见了。
+function sniffImageKind(b) {
+  if (!b || b.length < 12) return null;
+  const eq = (i, s) => { for (let k = 0; k < s.length; k++) if (b[i + k] !== s.charCodeAt(k)) return false; return true; };
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return { kind: 'jpeg', label: 'JPEG', ok: true };
+  if (eq(0, '\x89PNG')) return { kind: 'png', label: 'PNG', ok: true };
+  if (eq(0, 'GIF8')) return { kind: 'gif', label: 'GIF', ok: true };
+  if (b[0] === 0x42 && b[1] === 0x4D) return { kind: 'bmp', label: 'BMP', ok: true };
+  if (eq(0, 'RIFF') && eq(8, 'WEBP')) return { kind: 'webp', label: 'WebP', ok: true };
+  if ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2A) || (b[0] === 0x4D && b[1] === 0x4D && b[2] === 0x00 && b[3] === 0x2A))
+    return { kind: 'tiff', label: 'TIFF', ok: false };
+  if (eq(0, '8BPS')) return { kind: 'psd', label: 'Photoshop PSD', ok: false };
+  if (eq(0, '\xFF\x0AJFIF') || eq(0, '\xFF\x0AEXIF')) return { kind: 'jpeg', label: 'JPEG', ok: true };
+  if (eq(4, 'ftyp')) {
+    const brand = String.fromCharCode(b[8], b[9], b[10], b[11]);
+    if (/^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(brand)) return { kind: 'heic', label: 'HEIC', ok: false };
+    if (/^(avif|avis)$/.test(brand)) return { kind: 'avif', label: 'AVIF', ok: true };
+    return { kind: 'bmff', label: brand || '未知封装', ok: false };
+  }
+  return null;
+}
+async function readHead(blob, n) {
+  try { return new Uint8Array(await blob.slice(0, n || 32).arrayBuffer()); } catch (_) { return null; }
+}
+// 把文件/Blob 变成画布。两张路都试：createImageBitmap 内存更省、报错更明确；
+// 退路是 <img>+objectURL（个别相机直出的 JPEG 只有这条路能解）。两条都失败才认输，
+// 并且把「文件头显示它其实是 XX 格式」一并带出来。
+// 返回 { cv, note }：note 非空表示走的是降采样兜底（图大到超画布上限），UI 要提示。
+async function decodeToCanvas(blob, name) {
+  const head = sniffImageKind(await readHead(blob, 32));
+  const who = name ? name + '：' : '';
+  if (head && !head.ok) {
+    throw new Error(who + `实际是 ${head.label} 格式，浏览器无法解码，请先另存为 JPG 或 PNG`);
+  }
+  // ① createImageBitmap（imageOrientation:'from-image' 让 EXIF 旋转被应用，与 <img> 行为一致）
+  let bm = null;
+  try {
+    bm = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+    const cv = canvasOfSize(bm.width, bm.height);
+    cv.getContext('2d').drawImage(bm, 0, 0);
+    if (bm.close) bm.close();
+    return { cv: cv, note: '' };
+  } catch (e) { /* 画布分配失败或解码失败 → 落到 ② */ }
+  finally { if (bm && bm.close) { try { bm.close(); } catch (_) {} } }
+  // ② <img> + objectURL（拿得到 naturalWidth，才能在超大图时降采样兜底）
+  const url = URL.createObjectURL(blob);
+  let img = null;
+  try { img = await loadImgEl(url); }
+  catch (e) {
+    URL.revokeObjectURL(url);
+    throw new Error(who + (head ? `文件头是 ${head.label}，但内容解不开（文件可能损坏或被截断）` : '浏览器无法解码这个文件'));
+  }
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  let cv = null;
+  try {
+    try { cv = canvasOfSize(w, h); cv.getContext('2d').drawImage(img, 0, 0); }
+    catch (e) {
+      // 画布分配不出来（超大图）：等比缩到能放下为止 —— 宁可尺寸缩水也别整张失败
+      let k = Math.min(1, Math.sqrt(64 * 1024 * 1024 / Math.max(1, w * h)));
+      for (let guard = 0; guard < 4 && !cv; guard++) {
+        const w2 = Math.max(1, Math.round(w * k)), h2 = Math.max(1, Math.round(h * k));
+        try {
+          const c2 = canvasOfSize(w2, h2), cx2 = c2.getContext('2d');
+          cx2.imageSmoothingEnabled = true; cx2.imageSmoothingQuality = 'high';
+          cx2.drawImage(img, 0, 0, w2, h2);
+          cv = c2;
+        } catch (_) { k *= 0.5; }
+      }
+      if (!cv) throw new Error(who + `图太大（${w}×${h}），浏览器分配不出画布内存`);
+    }
+  } finally {
+    img.src = '';                       // 立刻放掉已解码的位图（大图这里也是几百 MB）
+    URL.revokeObjectURL(url);
+  }
+  return { cv: cv, note: cv.width < w ? `图太大，已等比缩到 ${cv.width}×${cv.height} 处理（原图 ${w}×${h}）` : '' };
 }
 // 缩样并取出像素（分析尺度上用，避免在大图上算）
 function sampleOf(cv, aw, ah) {
@@ -4944,7 +5035,138 @@ function lumSatOf(d, n) {
 //     全局模型有个致命弱点：两个锚点只要有一个被别的东西污染（样张左边缘有一块黄色料头
 //     落在边带里），整列的背景就被插值带歪 → 掩码被挖出大片空洞（实测竖向样张只剩 32% 覆盖，
 //     抠出来是一条条横纹）。用紧邻条带的桌面当锚点既准又躲得开远处的杂物。
-function bandMaskCol(L, S, aw, ah, o, band) {
+// 一维**分位**滤波：窗口内的 p 分位（p=0 即最大值滤波、p=1 即最小值滤波）。
+// 用来把边缘「往外挪到真实的轮廓上」：
+//   · 上沿取 p=0.2 → 窗口里 80% 的列都比它靠内，于是**向下凹进去的缺口**被两侧的真实
+//     上沿填平 —— 这正是用户要的「边缘必须是直线裁切」。
+//   · 下沿取 p=0.8，同理。
+// 为什么不用中值：中值只能吃掉窗口一半以内的缺口。实测那条 1563px 长的条带，
+// 上沿被咬掉一块 **100px 宽、45% 深**的缺口，中值窗口要 300px 以上才管得住，
+// 而分位滤波在 2.5 倍窗口下就填平了。也不能用极值（p=0）：一颗离群噪点会把整条边拉出去。
+// 窗口按条长比例给，并且**封顶 401**（长条带上再宽的缺口也不该由一次滤波吞掉，
+// 而且 6000px 的图上按比例给窗口会让排序开销失控）。
+function extSmooth1D(a, frac, minWin, cap, p) {
+  const n = a.length;
+  if (n < 3) return a;
+  let k = Math.max(minWin == null ? 9 : minWin, Math.round(n * (frac == null ? 0.14 : frac)));
+  if (k % 2 === 0) k++;
+  if (k > (cap || 401)) k = (cap || 401) % 2 ? (cap || 401) : (cap || 401) - 1;
+  if (k >= n) k = n % 2 ? n : n - 1;
+  if (k < 3) return a;
+  const h = k >> 1, src = Float32Array.from(a), buf = new Float32Array(k);
+  const q = Math.min(1, Math.max(0, p == null ? 0.5 : p));
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let j = -h; j <= h; j++) {
+      const w = i + j;
+      buf[m++] = src[w < 0 ? 0 : (w >= n ? n - 1 : w)];
+    }
+    const v = buf.subarray(0, m);
+    Array.prototype.sort.call(v, (x, y) => x - y);
+    a[i] = v[Math.min(m - 1, Math.round((m - 1) * q))];
+  }
+  return a;
+}
+// 一维中值滤波（窗口 ≈ frac 长度、奇数、至少 minWin）：抹掉锚点序列里的**局部**离群，
+// 保留缓慢的光照渐变（单调的渐变序列取对称窗口的中值恰等于中心值，所以不会把渐变压平）。
+// 能治的污染宽度约为窗口的一半，所以 frac 不能太小：默认 0.12 能吃掉约 6% 宽度以内的污染。
+// 更宽的污染（边缘上摆着一整排样品）交给 robustBgRef + cleanAnchors 兜底。
+function medianSmooth1D(a, frac, minWin) {
+  const n = a.length;
+  if (n < 3) return a;
+  let k = Math.max(minWin == null ? 9 : minWin, Math.round(n * (frac == null ? 0.12 : frac)));
+  if (k % 2 === 0) k++;
+  if (k >= n) k = n % 2 ? n : n - 1;
+  if (k < 3) return a;
+  const h = k >> 1, src = Float32Array.from(a), buf = new Float32Array(k);
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let j = -h; j <= h; j++) {
+      const q = i + j;
+      buf[m++] = src[q < 0 ? 0 : (q >= n ? n - 1 : q)];
+    }
+    a[i] = medianOf(buf.subarray(0, m));
+  }
+  return a;
+}
+// —— 稳健的「背景主色」——
+// 从一堆候选背景值里挑出**真正的**背景。依据：背景在同一张照片里几乎是**一个颜色**
+// （白桌面、灰底、黑绒布），而压在边带上的杂物是好几件不同颜色的样品（黑框条 + 浅木料 +
+// 灰影…），颜色是散的。所以取直方图里最密的一簇，而不是中位数。
+// ⚠️ 为什么中位数不行：实测样张的上边带被三件样品盖住了 **86% 的宽度**，
+//    上锚点的中位数直接落在「浅木料」那一簇上（0.658），而真背景是 0.93。
+//    把这个污染值当基准去钳位，整幅白底就被判成前景 —— 用户看到的正是
+//    「图像不连贯、没有只取主产品」。中位数只扛得住 50% 的污染，最密簇扛得住更多。
+function robustBgRef(a) {
+  const n = a.length;
+  if (n < 8) return medianOf(a);
+  const B = 64, hist = new Int32Array(B);
+  for (let i = 0; i < n; i++) {
+    let b = (a[i] * B) | 0;
+    hist[b < 0 ? 0 : (b > B - 1 ? B - 1 : b)]++;
+  }
+  // ±2 格的滑动求和：真实的簇正好跨在格子边界上时不会被切成两半、两边都当不成峰值
+  let bi = 0, bc = -1;
+  for (let i = 0; i < B; i++) {
+    let c = 0;
+    for (let j = -2; j <= 2; j++) { const q = i + j; if (q >= 0 && q < B) c += hist[q]; }
+    if (c > bc) { bc = c; bi = i; }
+  }
+  const lo = (bi - 2.5) / B, hi = (bi + 2.5) / B, inl = [];
+  for (let i = 0; i < n; i++) if (a[i] >= lo && a[i] <= hi) inl.push(a[i]);
+  return inl.length >= 4 ? medianOf(inl) : medianOf(a);
+}
+// 把一列锚点里「被别的东西占住」的整列换掉。背景是低频的（横向缓慢渐变），
+// 被污染的列既不属于背景、也无法从它自身判断，只能拿**左右最近的可信列**插值补上 ——
+// 既丢掉污染，又保住真实的光照渐变。可信列太少（背景本身就花）时退回
+// 「相对背景主色钳位 ±lim」，也就是老办法，至少不会更差。
+function cleanAnchors(a, ref, lim) {
+  const n = a.length;
+  const good = new Uint8Array(n);
+  let ng = 0;
+  for (let i = 0; i < n; i++) if (a[i] >= ref - lim && a[i] <= ref + lim) { good[i] = 1; ng++; }
+  if (ng < Math.max(8, Math.round(n * 0.25))) {
+    for (let i = 0; i < n; i++) a[i] = a[i] < ref - lim ? ref - lim : (a[i] > ref + lim ? ref + lim : a[i]);
+    return a;
+  }
+  const src = Float32Array.from(a), nxt = new Int32Array(n);
+  let nx = -1;
+  for (let i = n - 1; i >= 0; i--) { nxt[i] = nx; if (good[i]) nx = i; }   // 右边最近的可信列
+  let prev = -1;
+  for (let i = 0; i < n; i++) {
+    if (good[i]) { prev = i; continue; }
+    const c1 = nxt[i];
+    if (prev < 0 && c1 < 0) a[i] = ref;
+    else if (prev < 0) a[i] = src[c1];
+    else if (c1 < 0) a[i] = src[prev];
+    else a[i] = src[prev] + (src[c1] - src[prev]) * (i - prev) / (c1 - prev);
+  }
+  return a;
+}
+// 背景主色的**第二候选**：直方图里第二大的一簇（与第一簇隔开至少 4 格，否则算同一簇）。
+// 实拍里有一种照片是「上边带被一大块灰色背景/布幕占满、下边带是白桌面」——
+// 两簇一样大，谁当背景纯属抛硬币（实测这张：主假设押中了灰布幕，整幅白桌面被当成前景，
+// 用户看到的就是「大片灰背景 + 零散碎条带」）。所以主假设只要不可信，就拿第二候选重跑，
+// 取更好的那个。第二簇太小时返回 null（那说明不是真的双峰，没必要试）。
+function secondBgRef(a) {
+  const n = a.length;
+  if (n < 16) return null;
+  const B = 64, hist = new Int32Array(B), win = new Int32Array(B);
+  for (let i = 0; i < n; i++) { let b = (a[i] * B) | 0; hist[b < 0 ? 0 : (b > B - 1 ? B - 1 : b)]++; }
+  for (let i = 0; i < B; i++) { let c = 0; for (let j = -2; j <= 2; j++) { const q = i + j; if (q >= 0 && q < B) c += hist[q]; } win[i] = c; }
+  let b1 = 0, b2 = -1;
+  for (let i = 1; i < B; i++) if (win[i] > win[b1]) b1 = i;
+  for (let i = 0; i < B; i++) {
+    if (Math.abs(i - b1) <= 4) continue;
+    if (b2 < 0 || win[i] > win[b2]) b2 = i;
+  }
+  if (b2 < 0) return null;
+  const inl = [];
+  for (let i = 0; i < n; i++) if (a[i] >= (b2 - 2.5) / B && a[i] <= (b2 + 2.5) / B) inl.push(a[i]);
+  if (inl.length < Math.max(8, n * 0.15)) return null;
+  return medianOf(inl);
+}
+function bandMaskCol(L, S, aw, ah, o, band, hint) {
   const u8 = new Uint8Array(aw * ah);
   const tl = [], ts = [];
   if (band && band.y1 - band.y0 >= 2) {
@@ -4994,8 +5216,29 @@ function bandMaskCol(L, S, aw, ah, o, band) {
     for (let y = ah - cb; y < ah; y++) { tl.push(L[y * aw + x]); ts.push(S[y * aw + x]); }
     tbL[x] = medianOf(tl); tbS[x] = medianOf(ts);
   }
-  // ⚠️ 两个锚点差得离谱时（有一侧边带被杂物占了）不许把斜率照单全收，钳到 ±0.16，
-  //    否则插值出来的背景会整列带歪、条带被挖空。
+  // ⚠️⚠️ 逐列锚点必须先「横向中值 + 相对全局的偏移钳位」，否则照片上沿只要摆着别的东西
+  //   （别的样品、画面外的料头、桌面边缘），那一列的**上锚点**就会被那个东西的颜色占据，
+  //   插值出来的背景整列跟着偏 → 该列的白背景被判成前景 → 结果里混进大片白底和别的样品。
+  //   实测样张：上沿压着深色样品时，白桌面在整片列上都被判成前景，导出图里连边上的样品
+  //   都一起留下（用户看到的就是"图像不连贯、没有只取主产品"）。
+  //   背景是低频的：横向中值抹掉局部污染，再把每列锚点相对**全局中位数**的偏移钳到 ±0.08，
+  //   这样被污染列的背景值最多偏 0.08（低于 tL=0.10），白背景就不会被误判成前景；
+  //   真实的光照渐变远小于这个量级，照旧保留。
+  medianSmooth1D(tlL); medianSmooth1D(tbL); medianSmooth1D(tlS); medianSmooth1D(tbS);
+  // ⚠️ 基准必须从**上下两个边带合起来**取。单看一边的话，实拍里上沿压着一排样品、
+  //    污染超过一半宽度时，连「最密的一簇」都会落在样品颜色上（实测黑框条占 31% 就是最大簇）。
+  //    两边合起来，干净的桌面仍是绝对多数（实测 57%），基准才落得对。
+  //    上限取 0.06 而不是 0.10：钳位后的最大残差必须明显小于判定阈值 tL=0.10，
+  //    否则「勉强不超」的白底会在噪点上翻车。真实渐变交给上面的插值路径保留。
+  const AL = 0.06, AS = 0.08;
+  const uniL = Array.prototype.slice.call(tlL).concat(Array.prototype.slice.call(tbL));
+  const uniS = Array.prototype.slice.call(tlS).concat(Array.prototype.slice.call(tbS));
+  const refL = (hint && hint.L != null) ? hint.L : robustBgRef(uniL);
+  const refS = (hint && hint.S != null) ? hint.S : robustBgRef(uniS);
+  cleanAnchors(tlL, refL, AL); cleanAnchors(tbL, refL, AL);
+  cleanAnchors(tlS, refS, AS); cleanAnchors(tbS, refS, AS);
+  // 两个锚点差得离谱时（有一侧边带被杂物占了）不许把斜率照单全收，钳到 ±0.16，
+  // 否则插值出来的背景会整列带歪、条带被挖空。
   const CL = 0.16;
   for (let x = 0; x < aw; x++) {
     let dL = tbL[x] - tlL[x], dS = tbS[x] - tlS[x];
@@ -5266,6 +5509,29 @@ function refineBody(rawComps, bb, mw, mh) {
     score: score, asp: asp, longFrac: longFrac, fill: fill, norm: norm,
   };
 }
+// 把候选块扩成它所在的「簇」：只并**列方向**上被断开的兄弟块（同一根框条被磨掉一截），
+// 行段要基本重叠、列间距要过 joinRuns 的同一条判据。迭代到不再长大为止
+// （一次并进来的块可能又够得着下一个更远的兄弟块）。
+function clusterComp(bb, comps, mw) {
+  let cur = { x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1 };
+  for (let pass = 0; pass < 4; pass++) {
+    let grew = false;
+    const bw = cur.x1 - cur.x0 + 1, bh = cur.y1 - cur.y0 + 1;
+    for (let i = 0; i < comps.length; i++) {
+      const c = comps[i], cw = c.x1 - c.x0 + 1, ch = c.y1 - c.y0 + 1;
+      const ov = Math.min(cur.y1, c.y1) - Math.max(cur.y0, c.y0) + 1;
+      if (ov < Math.min(bh, ch) * 0.6) continue;                    // 行段不重叠 → 不是同一根
+      if (c.x0 <= cur.x1 && c.x1 >= cur.x0) continue;               // 已经相交，无需并
+      const gap = c.x0 > cur.x1 ? c.x0 - cur.x1 - 1 : cur.x0 - c.x1 - 1;
+      if (gap > Math.min(JOIN_FRAC * Math.min(bw, cw), JOIN_CAP * mw)) continue;
+      cur = { x0: Math.min(cur.x0, c.x0), y0: Math.min(cur.y0, c.y0),
+              x1: Math.max(cur.x1, c.x1), y1: Math.max(cur.y1, c.y1) };
+      grew = true;
+    }
+    if (!grew) break;
+  }
+  return cur;
+}
 // 候选 A：连通域 —— 全图连通块里「最大且最像长条」的那一块。
 // 比一维投影强的地方：不会被某一维上凑巧更长的零星小段带偏（那正是
 // 「把旁边一小片木料当成框条、真正的框条整条落选」的原因）。
@@ -5278,9 +5544,14 @@ function pickBody(raw, rawComps, mw, mh, o) {
     if (s.fill < o.minFill) continue;                              // 太散 → 不是一块实体
     if (s.longFrac < o.minLong && s.norm < o.minArea) continue;     // 太小 → 不是主体
     if (s.fill > 0.9 && s.norm > 0.85) continue;                    // 整幅都算前景 → 没有可裁的东西
-    if (!best || s.score > best.score) best = { c: c, score: s.score };
+    // ⚠️ 贴边重罚必须在这里就参与**选块**，不能只在最后比候选时算：
+    //    实测样张里上方那一排样品面积更大、长宽比一样好，不罚的话它在选块阶段就把真框条挤掉了，
+    //    真框条压根进不了候选名单，后面再怎么罚都没有它。
+    const sc = s.score * ownEdgeFactor(c, raw, mw, mh);
+    if (!best || sc > best.score) best = { c: c, score: sc };
   }
-  return best ? refineBody(rawComps, best.c, mw, mh) : null;
+  // 最佳块还要把「同一根被磨断的兄弟块」认回来，否则条带只有一截被裁出来
+  return best ? refineBody(rawComps, clusterComp(best.c, closed, mw), mw, mh) : null;
 }
 // 候选 B：一维投影 —— 先找「大部分列都命中」的行段（框条所在的行），再在行段内找
 // 「大部分行都命中」的列段。画面里的杂物 / 旁边的木板摊到整行覆盖率很低，进不了行段。
@@ -5288,6 +5559,28 @@ function pickBody(raw, rawComps, mw, mh, o) {
 // ⚠️ 试过直接去掉迟滞（想着「倾角已经由边的直线拟合给出、不再怕削角」），结果行段比
 //    条带本身还紧，倾斜条带被水平行段切掉两个大斜楔（1.9° 的样张切掉 ~60 行 ×
 //    整条长度），摆正后左下/右上整块缺失。所以迟滞要留着。
+// —— 把「被断开的同一根框条」的列段并起来 ——
+// 条带中段被磨掉/过曝掉、与背景同色时，掩码会断成两截（实测：条带中段发白，
+// 投影出来的列段断成 862 + 382 两段，检测框只剩左边那截 859px，
+// 用户看到的就是「条带被切短、中间一片空」）。
+// 但合并必须有边界，否则会把**并排的两根料**并成一根（那会把中间的背景也框进来）。
+// 判据（两个方向都要满足）：
+//   · 间距 ≤ 0.5 × 较短那段的长度 —— 中间被磨掉的缺口总是明显比它两侧的实体短；
+//     两根并排的料中间那道缝则与它们自身同量级，并不过关。
+//   · 间距 ≤ 8% 画面宽 —— 再宽就不像「同一根断了一截」，更像另一根料。
+const JOIN_FRAC = 0.5, JOIN_CAP = 0.08;
+function joinRuns(runs, total) {
+  if (!runs.length) return [];
+  const out = [runs[0].slice()];
+  for (let i = 1; i < runs.length; i++) {
+    const p = out[out.length - 1], c = runs[i];
+    const gap = c[0] - p[1] - 1;
+    const lim = Math.min(JOIN_FRAC * Math.min(p[1] - p[0] + 1, c[1] - c[0] + 1), JOIN_CAP * total);
+    if (gap >= 0 && gap <= lim) p[1] = c[1];
+    else out.push(c.slice());
+  }
+  return out;
+}
 function projBody(raw, rawComps, mw, mh, o) {
   const x0c = Math.round(mw * 0.15), x1c = Math.max(x0c + 1, Math.round(mw * 0.85));
   const rowfrac = new Float32Array(mh);
@@ -5307,8 +5600,20 @@ function projBody(raw, rawComps, mw, mh, o) {
     for (let y = ry0; y <= ry1; y++) if (raw[y * mw + x]) c++;
     colfrac[x] = c / (ry1 - ry0 + 1);
   }
-  const cr = longestRun(colfrac, 0.7, 1);
-  if (!cr || cr[1] - cr[0] + 1 < mw * 0.2) return null;
+  const cruns = [];
+  {
+    let s = -1;
+    for (let x = 0; x <= mw; x++) {
+      const on = x < mw && colfrac[x] >= 0.7;
+      if (on) { if (s < 0) s = x; }
+      else if (s >= 0) { if (x - s >= 4) cruns.push([s, x - 1]); s = -1; }
+    }
+  }
+  const merged = joinRuns(cruns, mw);
+  if (!merged.length) return null;
+  let cr = merged[0];
+  for (let i = 1; i < merged.length; i++) if (merged[i][1] - merged[i][0] > cr[1] - cr[0]) cr = merged[i];
+  if (cr[1] - cr[0] + 1 < mw * 0.2) return null;
   let cx0 = cr[0], cx1 = cr[1];
   while (cx0 > 0 && colfrac[cx0 - 1] >= 0.35) cx0--;
   while (cx1 < mw - 1 && colfrac[cx1 + 1] >= 0.35) cx1++;
@@ -5319,13 +5624,40 @@ function projBody(raw, rawComps, mw, mh, o) {
   return body;
 }
 // 一个方向上「连通域候选」与「投影候选」打一架，取更可信的
+// 打分前先按「是否被画面上下边缘切掉」重罚一次：
+// 拍产品时框条一定是**整根落在画面里**的 —— 它的上下都还看得到桌面。
+// 而被画面上下边缘切掉的候选几乎总是背景里的东西。实测样张里上方那一排样品贴着上边缘，
+// 它的长宽比（6.0）、实心度（0.95）、长度占比（0.85）全都跟真框条一样好、面积还更大，
+// 只按形状打分**一定**选错（实测就是这样：整幅照片被框进去，用户看到「没只取主产品」）。
+// 所以「上下还留着背景」比形状更硬。不直接丢弃：万一是用户把框条拍出画了，还得靠它兜底。
+function ownEdgeFactor(body, raw, mw, mh) {
+  const k = Math.max(2, Math.round(mh * 0.03));
+  let bad = 0;
+  for (let side = 0; side < 2; side++) {
+    let den = 0, fg = 0, out = false;
+    for (let j = 1; j <= k; j++) {
+      const y = side ? body.y1 + j : body.y0 - j;
+      if (y < 0 || y >= mh) { out = true; break; }
+      for (let x = body.x0; x <= body.x1; x++) { den++; if (raw[y * mw + x]) fg++; }
+    }
+    if (out || (den && fg / den > 0.25)) bad++;
+  }
+  return bad >= 2 ? 0.08 : (bad === 1 ? 0.3 : 1);
+}
 function bestBody(raw, mw, mh, o) {
   const rawComps = findComponents(raw, mw, mh, Math.max(24, Math.round(mw * mh * 0.0008)), true);
   if (!rawComps.length) return null;
   const a = pickBody(raw, rawComps, mw, mh, o), b = projBody(raw, rawComps, mw, mh, o);
+  if (a) { a.edge = ownEdgeFactor(a, raw, mw, mh); a.score *= a.edge; }
+  if (b) { b.edge = ownEdgeFactor(b, raw, mw, mh); b.score *= b.edge; }
   if (!a) return b;
   if (!b) return a;
   return b.score >= a.score ? b : a;
+}
+// 候选是否「可信到不用再试第二个背景假设」：没被上下边缘切掉、不是又扁又散的东西。
+// 不达标才值得花第二遍（第二遍要重算掩码 + 两轮连通域，批量时是实打实的开销）。
+function trustBody(b) {
+  return !!b && b.edge >= 1 && b.asp >= 2.5 && b.fill >= 0.35;
 }
 // 检测主入口：按正常方向跑一遍「逐列」模型；竖着拍的照片把采样图转置后再跑同一套模型，
 // 两个方向的候选一起比（打分用的占比 / 实心度 / 长宽比都与方向无关，可比）。
@@ -5337,30 +5669,50 @@ function detectStripBox(cv, opt) {
   const aw = Math.max(16, Math.round(W * k)), ah = Math.max(16, Math.round(H * k));
   const N = aw * ah;
   const ls = lumSatOf(sampleOf(cv, aw, ah), N);
-  const c0 = bestBody(bandMaskCol(ls.L, ls.S, aw, ah, o), aw, ah, o);
-  // 已经明显是一条长条时就不必再试竖向了（省一次连通域分析，批量时差近一倍时间）
-  const sure = c0 && c0.asp >= 3.5 && c0.longFrac >= 0.5;
-  const c1 = sure ? null : bestBody(
-    bandMaskCol(transposeArr(ls.L, aw, ah), transposeArr(ls.S, aw, ah), ah, aw, o), ah, aw, o);
-  const s1 = c1 ? c1.score * 0.97 : -1;    // 横着拍才是默认，分数接近时优先正常方向
-  if (!c0 && !c1) return null;
-  let u8, angle, x0, y0, x1, y1;
-  if (!c1 || c0.score >= s1) {
-    u8 = c0.u8; angle = c0.angle;
-    x0 = c0.x0; y0 = c0.y0; x1 = c0.x1; y1 = c0.y1;
-  } else {
+  // 两个方向各跑一遍，取更可信的那一个。抽成函数是为了能用**第二个背景假设**整体重跑。
+  const scanBoth = (hint) => {
+    const c0 = bestBody(bandMaskCol(ls.L, ls.S, aw, ah, o, null, hint), aw, ah, o);
+    // 已经明显是一条长条时就不必再试竖向了（省一次连通域分析，批量时差近一倍时间）
+    const sure = c0 && c0.asp >= 3.5 && c0.longFrac >= 0.5;
+    const c1 = sure ? null : bestBody(
+      bandMaskCol(transposeArr(ls.L, aw, ah), transposeArr(ls.S, aw, ah), ah, aw, o, null, hint), ah, aw, o);
+    const s1 = c1 ? c1.score * 0.97 : -1;    // 横着拍才是默认，分数接近时优先正常方向
+    if (!c0 && !c1) return null;
+    if (!c1 || c0.score >= s1) return { c: c0, u8: c0.u8, angle: c0.angle, x: c0.x0, y: c0.y0, X: c0.x1, Y: c0.y1 };
     // 转置坐标 (列 X, 行 Y) 对应原分析坐标 (x, y) = (Y, X)；倾角按 θ → 90°-θ 映射回来
     // ⚠️ 转置掩码的 stride 是 ah（transposeArr 里 b[xa*ah + ya]，行 = 原 x、列 = 原 y），
     //    所以「原 (x,y) 的值」在 c1.u8[x*ah + y]，写回原朝向要按 u8[y*aw + x]。
     //    早前写成 u8[X*aw + Y] = c1.u8[Y*ah + X]（两边都转置、且 Y 越界到 ah）——
     //    竖拍的照片会拿到一张乱掉的掩码，摆正后画布尺寸算错（实测 1283×245，应为 ~1816×261）。
-    u8 = new Uint8Array(N);
+    const u8 = new Uint8Array(N);
     for (let x = 0; x < aw; x++) {
       for (let y = 0; y < ah; y++) u8[y * aw + x] = c1.u8[x * ah + y];
     }
-    x0 = c1.y0; y0 = c1.x0; x1 = c1.y1; y1 = c1.x1;
-    angle = normAngleDeg(90 - c1.angle);
+    return { c: c1, u8: u8, angle: normAngleDeg(90 - c1.angle), x: c1.y0, y: c1.x0, X: c1.y1, Y: c1.x1 };
+  };
+  let pick = scanBoth(null);
+  // 主假设不可信（比如上边带被一大块灰色背景占满、与下边带的白桌面各占一半，
+  // 谁当背景纯属抛硬币）→ 用第二候选背景色整体重跑，取更好的那个。
+  if (!trustBody(pick && pick.c)) {
+    const uniL = [], uniS = [];
+    {
+      const cb = Math.max(2, Math.round(ah * 0.12));
+      for (let x = 0; x < aw; x++) {
+        for (let y = 0; y < cb; y++) { uniL.push(ls.L[y * aw + x]); uniS.push(ls.S[y * aw + x]); }
+        for (let y = ah - cb; y < ah; y++) { uniL.push(ls.L[y * aw + x]); uniS.push(ls.S[y * aw + x]); }
+      }
+    }
+    const hL = secondBgRef(uniL), hS = secondBgRef(uniS);
+    if (hL != null || hS != null) {
+      const p2 = scanBoth({ L: hL, S: hS });
+      if (p2) {
+        const okA = trustBody(pick && pick.c), okB = trustBody(p2.c);
+        if (!pick || (okB && !okA) || (okB === okA && p2.c.score > pick.c.score)) pick = p2;
+      }
+    }
   }
+  if (!pick) return null;
+  const u8 = pick.u8, angle = pick.angle, x0 = pick.x, y0 = pick.y, x1 = pick.X, y1 = pick.Y;
   const fx = W / aw, fy = H / ah;
   return {
     x0: Math.max(0, Math.floor(x0 * fx)), y0: Math.max(0, Math.floor(y0 * fy)),
@@ -5573,7 +5925,118 @@ function maskToAlpha(mask, box, w, h) {
   for (let p = 0; p < w * h; p++) a[p] = ad[p * 4 + 3] > 128 ? 255 : 0;
   fillAlphaRuns(a, w, h);
   fillAlphaCols(a, w, h);
-  return featherAlpha(a, w, h, 1);
+  // 最后按几何收边：连贯、无空洞、边缘直线（补缝只解决了「小缝」，大空洞与碎块靠这一步）
+  const t = tightenBand(a, w, h);
+  return featherAlpha(t, w, h, 1);
+}
+// —— 收边：把 alpha 按几何重建成「上下边是直线、中间实心」的长条 ——
+// 逐像素的颜色阈值天生做不到下面三件事，只能最后统一按几何收一遍（用户的三条要求）：
+//   ① 中间不能有空白 —— 条带上的高光/白色纹理与背景同色，掩码被挖出空洞；
+//   ② 不能是不连续的图案 —— 掩码碎成几段，导出一堆互不相连的碎块；
+//   ③ 边缘要直线平整 —— 噪点与漏判让轮廓长满毛刺和锯齿。
+// 做法：
+//   ① 逐列找「有效前景段」（长度 ≥ 该列最长段的 15%，至少 2px），取它们的最外沿 → top/bot；
+//      取**最外沿**是为了不把条带上被高光打断的那几段丢掉；
+//   ② 厚度离群剔除：同一根框条在一张照片里的厚度是稳定的，污染只会让它**变厚**
+//      （背景块和产品连成一片），所以参考厚度取一个偏低的分位（30%），
+//      厚度超出 [0.4×, 2.5×] 的整列丢掉 —— 这一步专治「大片背景被连带留下」；
+//   ③ top/bot 各做一次运行中值 → 边缘变直、毛刺消失，真实的宽台阶仍然保留；
+//   ④ 被剔除的列用左右最近的有效列线性插值补齐；两端之外的列保持透明
+//      （条带两端之外本来就该是空的，不能被插值凭空补出来）；
+//   ⑤ alpha = 1 在 [top, bot] 内 —— 空洞、碎块、缺口一并消失。
+function tightenBand(a, w, h) {
+  // ① 行占用率定带：**产品是长条，它的每一行几乎都横跨整幅；背景杂物不会横跨整幅**。
+  //    这是把「产品」和「旁边连成一片的背景」分开的唯一可靠依据 ——
+  //    只按「每列的厚度」判会被背景块骗过去：背景块占的列数一多，中位数本身就带偏了。
+  const rowfill = new Float32Array(h);
+  let mx = 0;
+  for (let y = 0; y < h; y++) {
+    let c = 0;
+    for (let x = 0; x < w; x++) if (a[y * w + x]) c++;
+    rowfill[y] = c / w;
+    if (rowfill[y] > mx) mx = rowfill[y];
+  }
+  if (mx < 0.15) return a;                       // 前景太散，不是「长条」场景，交给上层兜底
+  // ⚠️ 不能用 longestRun：条带上有横贯全幅的高光/亮缝时（用户第 3 张图里那道），
+  //    缝所在的行占用率会掉到 0，最长连续段会把条带**从缝处切成两半**，下半截直接丢掉。
+  //    改成「先取达标的行，再把间隔不超过 5% 画布高度的相邻行并成一组」，取跨度最大的一组。
+  const hiThr = Math.max(0.45, mx * 0.88);
+  const marks = [];
+  for (let y = 0; y < h; y++) if (rowfill[y] >= hiThr) marks.push(y);
+  if (marks.length < 2) return a;
+  const G = Math.max(4, Math.round(h * 0.05));
+  let run = null, bs = -1, gs = marks[0];
+  for (let i = 1; i <= marks.length; i++) {
+    const brk = i >= marks.length || marks[i] - marks[i - 1] > G;
+    if (!brk) continue;
+    const ge = marks[i - 1];
+    if (ge - gs + 1 > bs) { bs = ge - gs + 1; run = [gs, ge]; }
+    if (i < marks.length) gs = marks[i];
+  }
+  if (!run) return a;
+  const bh = run[1] - run[0] + 1;
+  if (bh < 2) return a;
+  // 带内带外各留 6% 带高：够吸收「摆正后残留的极小倾角」，又绝不足以跟到远处的背景块
+  const M = Math.max(1, Math.round(bh * 0.06));
+  const loB = Math.max(0, run[0] - M), hiB = Math.min(h - 1, run[1] + M);
+  // ② 逐列在带窗内取「有效前景段的最外沿」——取最外沿是不想把被高光打断的那几段丢掉
+  const top = new Int32Array(w), bot = new Int32Array(w), ok = new Uint8Array(w);
+  for (let x = 0; x < w; x++) {
+    let maxLen = 0, s = -1;
+    for (let y = loB; y <= hiB + 1; y++) {
+      const on = y <= hiB && a[y * w + x] > 0;
+      if (on) { if (s < 0) s = y; }
+      else if (s >= 0) { if (y - s > maxLen) maxLen = y - s; s = -1; }
+    }
+    if (maxLen < 2) continue;
+    const need = Math.max(2, Math.round(maxLen * 0.15));
+    let lo = -1, hi = -1;
+    s = -1;
+    for (let y = loB; y <= hiB + 1; y++) {
+      const on = y <= hiB && a[y * w + x] > 0;
+      if (on) { if (s < 0) s = y; }
+      else if (s >= 0) { if (y - s >= need) { if (lo < 0) lo = s; hi = y - 1; } s = -1; }
+    }
+    if (lo < 0) continue;
+    top[x] = lo; bot[x] = hi; ok[x] = 1;
+  }
+  const vx = [];
+  for (let x = 0; x < w; x++) if (ok[x]) vx.push(x);
+  if (vx.length < Math.max(4, Math.round(w * 0.02))) return a;   // 有效列太少 → 不敢动，保持原样
+  const x0 = vx[0], x1 = vx[vx.length - 1], n = x1 - x0 + 1;
+  // ③ 被剔除的列用左右最近的有效列线性插值补齐（中间的空洞就是在这里被补掉的）；
+  //    两端之外没有有效列 → 保持透明，不能被凭空补出来
+  const ft = new Float32Array(n), fb = new Float32Array(n);
+  for (let i = 0, k = 0; i < n; i++) {
+    const x = x0 + i;
+    while (k + 1 < vx.length && vx[k + 1] < x) k++;
+    if (ok[x]) { ft[i] = top[x]; fb[i] = bot[x]; continue; }
+    const c0 = vx[k], c1 = (k + 1 < vx.length) ? vx[k + 1] : c0;
+    const t = c1 > c0 ? (x - c0) / (c1 - c0) : 0;
+    ft[i] = top[c0] + (top[c1] - top[c0]) * t;
+    fb[i] = bot[c0] + (bot[c1] - bot[c0]) * t;
+  }
+  // ④ 分位滤波把凹进去的缺口填平（详见 extSmooth1D），再用小窗口中值收掉分位带来的毛刺。
+  // ⚠️ 只用中值是不够的：实测那条 1563px 长的条带，上沿被咬掉 100px 宽、45% 深的一块，
+  //    逐列取「有效段最外沿」时那一列只剩下面 55%，最外沿就是缺口的底部，
+  //    中值窗口要 300px 以上才管得住（2% 的老窗口完全无感）。用户明确选了
+  //    「优先直线、允许抹掉小台阶」，所以这里按条长 14% 开窗口、向外偏置取分位。
+  extSmooth1D(ft, 0.14, 9, 401, 0.2);
+  extSmooth1D(fb, 0.14, 9, 401, 0.8);
+  medianSmooth1D(ft, 0.02, 5); medianSmooth1D(fb, 0.02, 5);
+  // ⑤ 再夹回带上下各 10% 的余量内：允许轻微残留倾斜，但不放行背景块
+  const M2 = Math.max(1, Math.round(bh * 0.10));
+  const lim0 = Math.max(0, run[0] - M2), lim1 = Math.min(h - 1, run[1] + M2);
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < n; i++) {
+    const x = x0 + i;
+    let t0 = Math.round(ft[i]), t1 = Math.round(fb[i]);
+    if (t0 < lim0) t0 = lim0;
+    if (t1 > lim1) t1 = lim1;
+    if (!(t1 >= t0)) continue;
+    for (let y = t0; y <= t1; y++) out[y * w + x] = 255;
+  }
+  return out;
 }
 // 行内填充：框条是横向长条，同一行首尾之间的小空隙（高光与背景同色被漏判）要补上。
 // ⚠️ 间隙上限还要有绝对值封顶：按比例给的话，6000px 的图能到 340px —— 那么宽的缝
@@ -6050,9 +6513,41 @@ function zipStore(entries, when) {
 }
 
 // ================= 抠图工具：文件 / 配对 / 命名 逻辑 =================
-const IMG_EXT_RE = /\.(jpe?g|png|webp|bmp|tiff?)$/i;
-function imgFilesOnly(list) {
-  return Array.prototype.slice.call(list).filter(f => (f.type && /^image\//.test(f.type)) || IMG_EXT_RE.test(f.name || ''));
+// 只收**浏览器真的能解码**的图片：jpg / png / webp / bmp / gif / avif / ico / svg。
+// ⚠️ 别再写成「MIME 以 image/ 开头就收」：.psd 是 image/vnd.adobe.photoshop、.tif 是 image/tiff、
+//    .heic 是 image/heic —— 全都会被收进来当成图片，用户一点就报「读图失败」。
+//    （实测 Chrome 对 TIFF 的 无压缩 / LZW / PackBits / Adobe-Deflate / JPEG-in-TIFF 一律解不了。）
+// 也不许按扩展名收 tif —— 面板提示里曾写着「支持 tif」，那句是错的。
+const IMG_EXT_OK_RE = /\.(jpe?g|jpe|jfif|png|apng|webp|bmp|gif|avif|ico|svg)$/i;
+const IMG_MIME_OK_RE = /^image\/(jpeg|pjpeg|png|apng|webp|bmp|x-ms-bmp|gif|avif|x-icon|vnd\.microsoft\.icon|svg\+xml)$/i;
+const IMG_EXT_SKIP = {
+  '.tif': 'TIFF', '.tiff': 'TIFF', '.psd': 'PSD', '.psb': 'PSB', '.heic': 'HEIC', '.heif': 'HEIC',
+  '.pdf': 'PDF', '.eps': 'EPS', '.ai': 'AI', '.indd': 'InDesign', '.cdr': 'CDR', '.sketch': 'Sketch',
+  '.dng': 'RAW', '.cr2': 'RAW', '.cr3': 'RAW', '.nef': 'RAW', '.arw': 'RAW', '.raf': 'RAW',
+  '.orf': 'RAW', '.rw2': 'RAW', '.raw': 'RAW', '.mp4': '视频', '.mov': '视频', '.webm': '视频',
+};
+// 返回 { ok, skipped }：skipped 里带上「为什么不要它」，UI 直接照着说，别让文件悄悄消失
+function pickImgFiles(list) {
+  const ok = [], skipped = [];
+  Array.prototype.slice.call(list).forEach(f => {
+    const name = fileRelName(f);
+    const m = name.match(/\.[^./\\]+$/);
+    const ext = m ? m[0].toLowerCase() : '';
+    if (IMG_EXT_OK_RE.test(ext) || (!ext && f.type && IMG_MIME_OK_RE.test(f.type))) { ok.push(f); return; }
+    skipped.push({
+      name: name,
+      why: IMG_EXT_SKIP[ext] ? (IMG_EXT_SKIP[ext] + ' 浏览器解不了')
+        : (ext ? (ext.slice(1).toUpperCase() + ' 不是可解码的图片') : '没有扩展名'),
+    });
+  });
+  return { ok: ok, skipped: skipped };
+}
+function skipSummary(skipped) {
+  if (!skipped.length) return '';
+  const kinds = {};
+  skipped.forEach(s => { const k = s.why.replace(/ .*$/, ''); kinds[k] = (kinds[k] || 0) + 1; });
+  const txt = Object.keys(kinds).map(k => `${k} ×${kinds[k]}`).join('、');
+  return `已忽略 ${skipped.length} 个非图片文件（${txt}）；这些格式浏览器解不了，请先另存为 JPG/PNG`;
 }
 function fileRelName(f) { return (f && (f.__rel || f.webkitRelativePath)) || (f && f.name) || ''; }
 function sortImgFiles(list) {
@@ -6070,7 +6565,8 @@ function pairFrameFiles(names, mode) {
 function sanitizeName(s) { return String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim(); }
 function frameOutName(model, frontName, used) {
   let base = sanitizeName(model);
-  if (!base) base = sanitizeName(String(frontName || '').replace(IMG_EXT_RE, ''));
+  // 去掉扩展名（任意扩展名，不只是图片的 —— 以前用的那份白名单会漏掉 .avif 之类）
+  if (!base) base = sanitizeName(String(frontName || '').replace(/\.[^./\\]+$/, ''));
   if (!base) base = 'image';
   let name = base + '.png';
   let n = 2;
@@ -6233,11 +6729,10 @@ function buildToolFrameCut() {
   const setProg = (i, n) => { $('fcBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
 
   // —— 读图（用于预览与处理；用完释放像素） ——
+  // 返回 { cv, note }：note 非空 = 走了降采样兜底（超大图），UI 要把它说出来
   async function loadCv(file) {
     if (!file) return null;
-    const img = await blobToImage(file);
-    const cv = imgToCanvas(img);
-    return cv;
+    return await decodeToCanvas(file, fileRelName(file));
   }
   function releaseCv(cv) { if (cv) { cv.width = 0; cv.height = 0; } }
 
@@ -6269,7 +6764,10 @@ function buildToolFrameCut() {
   }
 
   // —— 选中一张：载入像素、自动识别裁剪范围、需要时摆正、出预览 ——
-  async function selectOne(i, force) {
+  // auto=true 表示「这是自动往前走的」（刚读完文件夹、或上一张坏图跳过后来到这张）。
+  // 手动点某一行时 auto 为空 —— 那种情况下即使这张读不出来也要**停在这里**，
+  // 让用户看清是哪个文件出的问题，而不是又跳到别处去。
+  async function selectOne(i, force, auto) {
     if (st.busy) return;
     if (!force && st.sel === i && st.cur) { st.sel = i; renderRows(); return; }
     st.sel = i;
@@ -6284,12 +6782,31 @@ function buildToolFrameCut() {
     $('fcBoxInfo').textContent = '正在识别…';
     try {
       dropCur();
-      const cv = await loadCv(f);
-      st.cur = { cv: cv };
+      const r = await loadCv(f);
+      st.cur = { cv: r.cv };
+      if (r.note) log(r.note);
       applyFrameOpts();       // 检测 + 摆正 + 预览，一步到位
     } catch (e) {
-      stage.innerHTML = '<span class="cu-empty">读图失败：' + esc(e && e.message || e) + '</span>';
+      const why = (e && e.message) || String(e);
+      stage.innerHTML = '<span class="cu-empty">读图失败：' + esc(why) + '</span>';
       $('fcBoxInfo').textContent = '读图失败';
+      setStatus(i, '读图失败', 'err');
+      // 坏图不能把整条流程卡在第一张上。用户丢进来的是**一整个文件夹**，里面夹一张
+      // 解不开的图很常见（隔空投送重名、下了一半的文件、别的软件导出的 .jpg 其实是 TIFF），
+      // 卡住的话用户只能干瞪眼、还不知道是哪个文件的问题。所以标红这一行、说出来原因，
+      // 然后自动跳到下一张还没试过的。st.tried 记住试过的下标，整批都坏时不会无限往下跳。
+      // ⚠️ 解码失败的消息里**已经带了文件名**（decodeToCanvas 的 who），别再拼一次，
+      //    否则日志里会出现「坏图.jpg：坏图.jpg：浏览器无法解码」这种重复。
+      const rel = fileRelName(f);
+      log((why.indexOf(rel + '：') === 0 ? why : rel + '：' + why) + '（已跳过）');
+      const tried = st.tried || (st.tried = {});
+      tried[i] = 1;
+      if (auto) {
+        for (let j = 0; j < st.files.length; j++) {
+          if (!tried[j]) { renderRows(); return selectOne(j, true, true); }
+        }
+      }
+      renderRows();
     }
   }
   function dropCur() {
@@ -6432,12 +6949,18 @@ function buildToolFrameCut() {
 
   // —— 文件导入：只收正面图，不配对 ——
   function setFiles(list) {
-    st.files = sortImgFiles(imgFilesOnly(list));
+    const pick = pickImgFiles(list);
+    st.files = sortImgFiles(pick.ok);
     dropCur();
     st.sel = 0;
+    st.tried = {};
+    // 被过滤掉的文件必须说出来：悄悄消失比报错更让人摸不着头脑
+    const skip = skipSummary(pick.skipped);
     if (!st.files.length) {
       st.meta = [];
-      $('fcInfo').textContent = '没找到图片文件（支持 jpg / png / webp / bmp / tif）';
+      $('fcInfo').textContent = '没找到可解码的图片（支持 jpg / png / webp / bmp / gif / avif）'
+        + (skip ? ' · ' + skip : '');
+      if (skip) log(skip);
       drawPreview();
       renderRows();
       return;
@@ -6447,8 +6970,9 @@ function buildToolFrameCut() {
     st.meta = st.files.map(f => ({ status: '待处理', cls: '', outName: frameOutName('', fileRelName(f), used) }));
     $('fcInfo').textContent = `${st.files.length} 张图片 · 输出文件名 = 源文件名`;
     log(`已读取 ${st.files.length} 张图片`);
+    if (skip) log(skip);
     renderRows();
-    selectOne(0, true);
+    selectOne(0, true, true);       // 第一张自己读不出来时继续往后找（auto=true）
   }
   $('fcFolder').onchange = () => setFiles($('fcFolder').files);
   $('fcFiles').onchange = () => setFiles($('fcFiles').files);
@@ -6461,11 +6985,15 @@ function buildToolFrameCut() {
     const t0 = Date.now();
     // 当前选中的样张已经在内存里（而且已经检测/摆正过），直接复用，省一次解码和一次检测
     const reuse = (i === st.sel && st.cur && st.cur.cutCv) ? st.cur : null;
-    const cv = reuse ? null : await loadCv(f);
-    let cutCv = reuse ? reuse.cutCv : null, box = reuse ? reuse.box : null;
+    let cv = null, cutCv = reuse ? reuse.cutCv : null, box = reuse ? reuse.box : null;
     let low = reuse ? reuse.low : false, note = reuse ? reuse.note : '';
     try {
       if (!reuse) {
+        // ⚠️ 解码必须放在 try 里：早前它在 try 外面，一张解不开的图会把整个批量导出**中断**掉
+        //    （异常从 processOne 抛出去、runBatch 的循环直接炸掉），用户看到的是「点了导出没反应」。
+        const dec = await loadCv(f);
+        cv = dec.cv;
+        if (dec.note) log(`第 ${i + 1} 张：${dec.note}`);
         const p = prepareFrame(cv, { deskew: st.opt.deskew, angle: st.opt.angle });
         cutCv = p.cv; box = p.box; low = p.low; note = p.note;
       }
@@ -6482,8 +7010,9 @@ function buildToolFrameCut() {
         + (note ? ' · ' + note : ''));
       return { name: name, data: bytes };
     } catch (e) {
-      setStatus(i, '失败', 'err');
-      log(`第 ${i + 1} 张：${e && e.message || e}`);
+      const why = (e && e.message) || String(e);
+      setStatus(i, cv ? '失败' : '读图失败', 'err');
+      log(`第 ${i + 1} 张：${why}${cv ? '' : '（读图失败，已跳过）'}`);
       return null;
     } finally {
       if (!reuse) {
@@ -6616,42 +7145,75 @@ function buildToolProdCut() {
       const tr = document.createElement('tr');
       if (i === st.sel) tr.className = 'on';
       const info = st.files[i];
-      tr.innerHTML = `<td>${i + 1}</td><td><span class="cu-fn" title="${esc(fileRelName(f))}">${esc(fileRelName(f))}</span></td>
+      // ⚠️ st.files 里存的是包装对象 {file,status,cls}，文件名必须走 info.file ——
+      //    早前直接 fileRelName(f) 传了包装对象，文件列整列显示 "undefined"（同一个错误
+      //    也让下面的 preview 把包装对象当成 File 去 createObjectURL，预览从来没成功过）。
+      const rel = fileRelName(info.file);
+      tr.innerHTML = `<td>${i + 1}</td><td><span class="cu-fn" title="${esc(rel)}">${esc(rel)}</span></td>
         <td>${info.dim || '—'}</td><td><span class="cu-badge ${info.cls || ''}">${esc(info.status || '待处理')}</span></td>`;
+      tr.onclick = () => preview(i);
       tb.appendChild(tr);
     });
     $('pdSec').style.display = st.files.length ? '' : 'none';
   }
-  async function preview(i) {
+  // auto=true：自动往前走（刚读完文件夹 / 上一张坏图跳过 / 点「预览下一张」）。
+  // 手动点某一行时停在这里，让用户看清是哪个文件读不出来。
+  async function preview(i, auto) {
     st.sel = i; renderRows();
-    const f = st.files[i];
-    if (!f) return;
+    const item = st.files[i];
+    if (!item) return;
     try {
-      const cv = await loadImgCanvas(f);
+      const cv = await loadImgCanvas(item.file);
       const r = cutPlainBackground(cv, st.opt);
       const stage = $('pdStage'); stage.innerHTML = '';
       if (!r) { stage.innerHTML = '<span class="cu-empty">整张图都被判成背景了，把容差调小试试</span>'; return; }
       stage.appendChild(r.canvas);
-      $('pdBoxInfo').textContent = `${f.name} · 输出 ${r.canvas.width}×${r.canvas.height} px`;
+      item.dim = `${r.canvas.width}×${r.canvas.height}`;
+      item.status = '预览中'; item.cls = '';
+      renderRows();
+      $('pdBoxInfo').textContent = `${fileRelName(item.file)} · 输出 ${r.canvas.width}×${r.canvas.height} px`;
       $('pdBg').style.background = 'rgb(' + r.bg.map(Math.round).join(',') + ')';
       cv.width = 0; cv.height = 0;
-    } catch (e) { $('pdStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(e && e.message || e) + '</span>'; }
+    } catch (e) {
+      const why = (e && e.message) || String(e);
+      $('pdStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(why) + '</span>';
+      // 与框条抠图同一套处理：标红这一行、说出原因、自动跳到下一张还没试过的，
+      // 别让一张坏图把整个文件夹卡在第一张上
+      item.status = '读图失败'; item.cls = 'err';
+      const rel = fileRelName(item.file);   // 解码失败的消息里已经带了文件名，别再拼一次
+      log((why.indexOf(rel + '：') === 0 ? why : rel + '：' + why) + '（已跳过）');
+      const tried = st.tried || (st.tried = {});
+      tried[i] = 1;
+      if (auto) {
+        for (let j = 0; j < st.files.length; j++) if (!tried[j]) { renderRows(); return preview(j, true); }
+      }
+      renderRows();
+    }
   }
-  async function loadImgCanvas(file) { return imgToCanvas(await blobToImage(file)); }
+  // 与框条抠图共用同一套解码（同样能识别「扩展名写错」与超大图降采样兜底）
+  async function loadImgCanvas(file) { return (await decodeToCanvas(file, fileRelName(file))).cv; }
   ['pdTol|tol', 'pdFeather|feather', 'pdPad|pad'].forEach(s => {
     const [id, key] = s.split('|');
     const el = $(id);
     el.oninput = () => { st.opt[key] = +el.value; $(id + 'V').textContent = el.value; preview(st.sel); };
   });
-  $('pdPrevBtn').onclick = () => { if (st.files.length) preview((st.sel + 1) % st.files.length); };
+  $('pdPrevBtn').onclick = () => { if (st.files.length) preview((st.sel + 1) % st.files.length, true); };
   function setFiles(list) {
-    const imgs = sortImgFiles(imgFilesOnly(list));
+    const pick = pickImgFiles(list);
+    const imgs = sortImgFiles(pick.ok);
+    const skip = skipSummary(pick.skipped);
     st.files = imgs.map(f => ({ file: f, status: '待处理', cls: '' }));
-    if (!imgs.length) { $('pdInfo').textContent = '没找到图片文件'; renderRows(); return; }
+    st.tried = {};
+    if (!imgs.length) {
+      $('pdInfo').textContent = '没找到可解码的图片（支持 jpg / png / webp / bmp / gif / avif）' + (skip ? ' · ' + skip : '');
+      if (skip) log(skip);
+      renderRows(); return;
+    }
     $('pdInfo').textContent = `${imgs.length} 张图片`;
     log(`已读取 ${imgs.length} 张图片`);
+    if (skip) log(skip);
     renderRows();
-    preview(0);
+    preview(0, true);       // 第一张自己读不出来时继续往后找（auto=true）
   }
   $('pdFolder').onchange = () => setFiles($('pdFolder').files);
   $('pdFiles').onchange = () => setFiles($('pdFiles').files);
@@ -6666,8 +7228,10 @@ function buildToolProdCut() {
       item.status = '处理中'; item.cls = 'warn'; renderRows();
       $('pdInfo').textContent = `${i + 1}/${st.files.length} 处理中`;
       setProg(i, st.files.length);
+      let decoded = false;
       try {
         const cv = await loadImgCanvas(item.file);
+        decoded = true;
         item.dim = cv.width + '×' + cv.height;
         const r = cutPlainBackground(cv, st.opt);
         cv.width = 0; cv.height = 0;
@@ -6679,8 +7243,11 @@ function buildToolProdCut() {
         item.status = r.box.x1 - r.box.x0 + 1 + '×' + (r.box.y1 - r.box.y0 + 1); item.cls = 'ok';
         log(`→ ${name}（${(bytes.length / 1024).toFixed(0)} KB）`);
       } catch (e) {
-        item.status = '失败'; item.cls = 'err';
-        log(`${fileRelName(item.file)}：${e && e.message || e}`);
+        const why = (e && e.message) || String(e);
+        item.status = decoded ? '失败' : '读图失败'; item.cls = 'err';
+        // 解码失败的消息里已经带了文件名（decodeToCanvas 的 who），别再拼一次
+        const rel = fileRelName(item.file);
+        log((why.indexOf(rel + '：') === 0 ? why : rel + '：' + why) + (decoded ? '' : '（已跳过）'));
       }
       setProg(i + 1, st.files.length);
       renderRows();
@@ -7273,12 +7840,13 @@ if (typeof globalThis !== 'undefined') {
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
     renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut,
     detectStripBox, detectStripBoxRobust, detectByMaskBBox, prepareFrame, deskewCut,
-    estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
-    bandMaskCol, lumSatOf, transposeArr, normAngleDeg,
+    estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
+    bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg,
     fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
-    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, imgFilesOnly, fileRelName,
+    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName,
+    sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
     buildToolQr, buildToolWatermark, buildToolColor,
     qrEncode, qrCanvas, qrCapacity, qrPickVersion, utf8Bytes,
