@@ -4988,6 +4988,64 @@ function detectStripBox(cv, opt) {
   box.mask = { u8: mU8, aw: aw, ah: ah, fullW: W, fullH: H };
   return box;
 }
+
+// —— 更稳的检测：主检测失败时逐级降级，保证「永远有个能用的起点」 ——
+// 真实拍摄里光照/背景千差万别，主检测（阈值偏严）会漏检；漏检后若没有兜底，
+// 用户就只能干瞪眼。返回 { box, low, note }：
+//   box 为 null 才会走「请手动微调」；low=true 表示是降级结果，UI 要提示核对。
+function detectStripBoxRobust(cv) {
+  const b0 = detectStripBox(cv);
+  if (b0) return { box: b0, low: false, note: '' };
+  // 降级 1：放宽阈值（斜着拍、背景与产品颜色接近时最容易漏检）
+  const b1 = detectStripBox(cv, { tL: 0.06, tS: 0.08, rowCov: 0.18, rowCov2: 0.42, colCov: 0.5 });
+  if (b1) return { box: b1, low: true, note: '低置信度，请核对裁剪范围' };
+  // 降级 2：前景掩码包围盒（与背景不同的像素全算前景，取分位数包围盒）
+  const b2 = detectByMaskBBox(cv, false);
+  if (b2) return { box: b2, low: true, note: '低置信度，请核对裁剪范围' };
+  // 降级 3：强制用掩码包围盒（哪怕前景很少/很多），至少给个贴近主体的起点
+  const b3 = detectByMaskBBox(cv, true);
+  if (b3) return { box: b3, low: true, note: '未自动定位到框条，已按「非背景区域」作起点，请手动微调' };
+  return { box: null, low: false, note: '没识别到框条，请手动微调' };
+}
+// 背景取四边中位数 → 前景掩码 → 包围盒（按分位数裁掉零散噪点）
+// force=false 时前景过少/过多都判为不可用；force=true 时无论如何都返回
+function detectByMaskBBox(cv, force) {
+  const W = cv.width, H = cv.height;
+  if (W < 8 || H < 8) return null;
+  const k = Math.min(1, 480 / W);
+  const aw = Math.max(16, Math.round(W * k)), ah = Math.max(16, Math.round(H * k));
+  const d = sampleOf(cv, aw, ah);
+  const N = aw * ah, L = new Float32Array(N), S = new Float32Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    L[p] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    S[p] = mx > 0 ? (mx - mn) / mx : 0;
+  }
+  const bL = [], bS = [];
+  for (let x = 0; x < aw; x++) { bL.push(L[x], L[(ah - 1) * aw + x]); bS.push(S[x], S[(ah - 1) * aw + x]); }
+  for (let y = 0; y < ah; y++) { bL.push(L[y * aw], L[y * aw + aw - 1]); bS.push(S[y * aw], S[y * aw + aw - 1]); }
+  const bgL = medianOf(bL), bgS = medianOf(bS);
+  const u8 = new Uint8Array(N), xs = [], ys = [];
+  for (let y = 0; y < ah; y++) {
+    for (let x = 0; x < aw; x++) {
+      const p = y * aw + x;
+      if (Math.abs(L[p] - bgL) > 0.07 || (S[p] - bgS) > 0.10) { u8[p] = 255; xs.push(x); ys.push(y); }
+    }
+  }
+  if (!force && (xs.length < N * 0.005 || xs.length > N * 0.97)) return null;
+  if (!xs.length) return null;
+  xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+  const q = (arr, r) => arr[Math.min(arr.length - 1, Math.max(0, Math.round((arr.length - 1) * r)))];
+  const qx0 = q(xs, 0.005), qx1 = q(xs, 0.995), qy0 = q(ys, 0.005), qy1 = q(ys, 0.995);
+  if (!force && (qx1 - qx0 < aw * 0.05 || qy1 - qy0 < ah * 0.02)) return null;
+  const sx = W / aw, sy = H / ah;
+  return {
+    x0: Math.max(0, Math.floor(qx0 * sx)), y0: Math.max(0, Math.floor(qy0 * sy)),
+    x1: Math.min(W - 1, Math.ceil((qx1 + 1) * sx)), y1: Math.min(H - 1, Math.ceil((qy1 + 1) * sy)),
+    mask: { u8: u8, aw: aw, ah: ah, fullW: W, fullH: H },
+  };
+}
 // 用分析尺度掩码生成裁剪区的 alpha（上采样 + 行内填充 + 1px 羽化）
 function maskToAlpha(mask, box, w, h) {
   const mc = document.createElement('canvas');
@@ -5147,6 +5205,10 @@ function extractModelNumber(raw) {
   }
   return fallback;
 }
+// ⚠️ 以下 OCR 相关代码目前【没有任何 UI 调用】—— 框条抠图已改成「只拍正面 + 用源文件名命名」，
+//    不再识别背面的型号。保留是为了将来要恢复型号识别时能直接用。
+//    正因为没人调用 loadTesseract()，那 3MB 识别模型不会被下载，也就不会再有「卡在读图」的等待。
+//    注意：脚本只在真正调用时才注入 CDN，所以留着这段不会有任何运行时开销。
 let _ttPromise = null, _ttWorker = null;
 function loadTesseract() {
   if (window.Tesseract) return Promise.resolve(window.Tesseract);
@@ -5552,28 +5614,24 @@ const sleep0 = () => new Promise(r => setTimeout(r, 0));
 // ================= 工具：框条抠图 =================
 function buildToolFrameCut() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>✂️ 框条抠图 <small style="color:var(--text-light);font-weight:400">（正面抠图 → 背面识别型号命名 → 原像素 PNG）</small></h4>
+  box.innerHTML = `<h4>✂️ 框条抠图 <small style="color:var(--text-light);font-weight:400">（只传正面 → 自动去背景 → 原像素透明 PNG）</small></h4>
     <div class="cu-drop" id="fcDrop">
       <label class="cc-upload"><span>📁 选择文件夹</span><input type="file" id="fcFolder" webkitdirectory directory multiple style="display:none"></label>
-      <span class="drop-tip"><i class="tip-idle">或把文件夹拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
-      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">文件夹里按「正面 + 背面」成对拍摄（如 _DSC5653 正面 / _DSC5654 背面）</span>
+      <label class="cc-upload" style="margin-left:6px"><span>🖼️ 选择图片</span><input type="file" id="fcFiles" accept="image/*" multiple style="display:none"></label>
+      <span class="drop-tip"><i class="tip-idle">或把图片 / 整个文件夹拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
     </div>
     <div class="cu-row" style="margin-top:10px">
-      <select class="cu-model" id="fcPairMode" style="width:200px">
-        <option value="fb">相邻两张：前=正面，后=背面</option>
-        <option value="bf">相邻两张：前=背面，后=正面</option>
-      </select>
-      <span class="cu-empty" id="fcInfo">还没有选择文件</span>
+      <span class="cu-empty" id="fcInfo">还没有选择图片</span>
+      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">只放正面图即可 · 输出文件名 = 源文件名（_DSC5653.JPG → _DSC5653.png）</span>
     </div>
 
-    <div class="cu-sec" id="fcPairSec" style="display:none">
-      <div class="cu-sec-t">① 配对与型号
-        <small>型号从背面照片自动识别，可直接改；留空就用正面原文件名</small>
-        <button class="cu-mini" id="fcOcrAll">识别全部型号</button>
+    <div class="cu-sec" id="fcListSec" style="display:none">
+      <div class="cu-sec-t">① 图片清单
+        <small>点一行切换样张；参数在样张上调好后，批量时自动套用到其余图片</small>
       </div>
-      <div style="max-height:250px;overflow:auto">
+      <div style="max-height:210px;overflow:auto">
         <table class="cu-table">
-          <thead><tr><th>#</th><th>正面（抠图）</th><th>背面（识别型号）</th><th>型号 / 输出文件名</th><th>状态</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>源文件</th><th>输出文件名</th><th>状态</th></tr></thead>
           <tbody id="fcRows"></tbody>
         </table>
       </div>
@@ -5623,13 +5681,15 @@ function buildToolFrameCut() {
       <div class="cu-bar"><i id="fcBar"></i></div>
       <div class="cu-log" id="fcLog" style="margin-top:8px"></div>
     </div>
-    <div class="t-tip">用法：把「正面 + 背面」成对拍的照片放进一个文件夹 → 选文件夹 → 参数在第一组上调好 → 批量导出。
-      正面自动识别框条范围并去背景（输出透明底 PNG，<b>原像素尺寸、不做任何压缩</b>），文件名用背面照片上打印的型号（如 <b>9701-A-170.png</b>）。
-      型号识别在本地用 OCR 完成，首次使用需要联网下载一次识别模型（约 3MB），图片本身不会上传。识别错的型号可以直接在表格里改。</div>`;
+    <div class="t-tip">用法：把<b>正面照片</b>导进来（散图、整个文件夹、拖拽都行，不需要拍背面） → 自动识别框条范围并去背景 →
+      在样张上调好锐化 / 亮度 / 对比度 / 饱和度 / 色相 → 点「开始批量抠图」，其余照片会自动套用同一组参数。
+      输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；文件名直接用<b>源文件名</b>（_DSC5653.JPG → _DSC5653.png，重名自动加 -2）。
+      自动没找准范围时，勾上「显示裁剪位置」看红框，再用「裁剪微调」四个方向往里收。
+      整条链路都在本地跑、不需要联网，图片不会上传。</div>`;
 
   const $ = (id) => box.querySelector('#' + id);
   const st = {
-    files: [], pairs: [], sel: 0, cur: null,
+    files: [], meta: [], sel: 0, cur: null,
     opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, nudge: { t: 0, b: 0, l: 0, r: 0 } },
     showFull: false, busy: false,
   };
@@ -5645,105 +5705,115 @@ function buildToolFrameCut() {
   }
   function releaseCv(cv) { if (cv) { cv.width = 0; cv.height = 0; } }
 
-  // —— 配对表 ——
+  // —— 图片清单：每张图就是一张正面，不配对、不识别型号 ——
   function renderRows() {
     const tb = $('fcRows');
     tb.innerHTML = '';
-    st.pairs.forEach((p, i) => {
+    st.files.forEach((f, i) => {
+      const m = st.meta[i] || (st.meta[i] = { status: '待处理', cls: '', outName: '' });
       const tr = document.createElement('tr');
       if (i === st.sel) tr.className = 'on';
       tr.innerHTML = `<td>${i + 1}</td>
-        <td><span class="cu-fn" title="${esc(fileRelName(p.front))}">${esc(fileRelName(p.front))}</span></td>
-        <td>${p.back ? `<span class="cu-fn" title="${esc(fileRelName(p.back))}">${esc(fileRelName(p.back))}</span>` : '<span class="cu-badge warn">缺背面</span>'}</td>
-        <td><input class="cu-model" data-i="${i}" placeholder="未识别（用原文件名）" value="${esc(p.model || '')}"></td>
-        <td><span class="cu-badge ${p.cls || ''}">${esc(p.status || '待处理')}</span></td>
-        <td><button class="cu-mini" data-act="swap" data-i="${i}" title="交换这两张的正面/背面">⇄</button>
-            <button class="cu-mini" data-act="ocr" data-i="${i}" title="用背面重新识别型号">识别</button></td>`;
+        <td><span class="cu-fn" title="${esc(fileRelName(f))}">${esc(fileRelName(f))}</span></td>
+        <td><span class="cu-fn">${esc(m.outName || '')}</span></td>
+        <td><span class="cu-badge ${m.cls || ''}">${esc(m.status || '待处理')}</span></td>`;
+      tr.onclick = () => selectOne(i);
       tb.appendChild(tr);
     });
-    Array.prototype.forEach.call(tb.querySelectorAll('input.cu-model'), inp => {
-      inp.oninput = () => { st.pairs[+inp.dataset.i].model = inp.value.trim(); };
-    });
-    Array.prototype.forEach.call(tb.querySelectorAll('button[data-act]'), btn => {
-      btn.onclick = () => {
-        const i = +btn.dataset.i, p = st.pairs[i];
-        if (btn.dataset.act === 'swap') {
-          if (!p.back) return;
-          const t = p.front; p.front = p.back; p.back = t; p.model = ''; p.status = '待处理'; p.cls = '';
-          renderRows();
-          if (i === st.sel) selectPair(i, true);
-        } else {
-          ocrPair(i).then(() => renderRows());
-        }
-      };
-    });
-    $('fcPairSec').style.display = st.pairs.length ? '' : 'none';
-    $('fcEditSec').style.display = st.pairs.length ? '' : 'none';
-    $('fcRunSec').style.display = st.pairs.length ? '' : 'none';
+    const has = st.files.length > 0;
+    $('fcListSec').style.display = has ? '' : 'none';
+    $('fcEditSec').style.display = has ? '' : 'none';
+    $('fcRunSec').style.display = has ? '' : 'none';
   }
   function setStatus(i, text, cls) {
-    st.pairs[i].status = text; st.pairs[i].cls = cls || '';
-    const tb = $('fcRows');
-    const tr = tb.children[i];
-    if (tr) { tr.children[4].innerHTML = `<span class="cu-badge ${cls || ''}">${esc(text)}</span>`; }
+    const m = st.meta[i] || (st.meta[i] = { outName: '' });
+    m.status = text; m.cls = cls || '';
+    const tr = $('fcRows').children[i];
+    if (tr) { tr.children[3].innerHTML = `<span class="cu-badge ${cls || ''}">${esc(text)}</span>`; }
   }
 
-  // —— 选中一组：载入像素、自动识别裁剪范围、出预览 ——
-  async function selectPair(i, force) {
-    if (st.busy || (!force && st.sel === i && st.cur)) { st.sel = i; renderRows(); return; }
+  // —— 选中一张：载入像素、自动识别裁剪范围、出预览 ——
+  async function selectOne(i, force) {
+    if (st.busy) return;
+    if (!force && st.sel === i && st.cur) { st.sel = i; renderRows(); return; }
     st.sel = i;
     renderRows();
-    const p = st.pairs[i];
-    if (!p) return;
-    $('fcStage').innerHTML = '<span class="cu-empty">正在读图…</span>';
+    const f = st.files[i];
+    if (!f) return;
+    const stage = $('fcStage');
+    // ⚠️ 这里写了临时提示，drawPreview() 就必须负责把它清掉。
+    //    早期版本检测失败时 drawPreview() 直接 return，stage 永远停在「正在读图…」，
+    //    看起来像卡死 —— 其实早就跑完了，只是没人把提示换掉。
+    stage.innerHTML = '<span class="cu-empty">正在读图…</span>';
+    $('fcBoxInfo').textContent = '正在识别…';
     try {
-      if (st.cur) { releaseCv(st.cur.frontCv); releaseCv(st.cur.backCv); }
-      const frontCv = await loadCv(p.front);
-      const backCv = p.back ? await loadCv(p.back) : null;
-      let box = detectStripBox(frontCv);
-      const cur = { frontCv: frontCv, backCv: backCv, box: box, autoBox: box ? Object.assign({}, box) : null };
-      st.cur = cur;
-      $('fcBoxInfo').textContent = box
-        ? `裁剪区 ${box.x0},${box.y0} → ${box.x1},${box.y1}（${box.x1 - box.x0 + 1}×${box.y1 - box.y0 + 1} px）`
-        : '没识别到框条，请手动微调';
+      if (st.cur) { releaseCv(st.cur.cv); st.cur = null; }
+      const cv = await loadCv(f);
+      const r = detectStripBoxRobust(cv);
+      st.cur = { cv: cv, box: r.box, low: r.low, note: r.note || '' };
       drawPreview();
     } catch (e) {
-      $('fcStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(e && e.message || e) + '</span>';
+      stage.innerHTML = '<span class="cu-empty">读图失败：' + esc(e && e.message || e) + '</span>';
+      $('fcBoxInfo').textContent = '读图失败';
     }
   }
-  // 应用微调后的实际裁剪框
+  // 检测失败时的起点：整张图 —— 这样「微调」四个方向还能往里收，不至于完全没法用
+  function baseBox() {
+    const cur = st.cur;
+    if (!cur) return null;
+    if (cur.box) return cur.box;
+    return { x0: 0, y0: 0, x1: cur.cv.width - 1, y1: cur.cv.height - 1, mask: null };
+  }
+  // 在基准框上套用「四向微调 + 留白」。预览与批量导出共用这一个函数 ——
+  // 分成两套算法迟早会变成「预览看着对、导出的不一样」这种极难查的问题。
+  function applyNudge(base, cv) {
+    if (!base || !cv) return null;
+    const n = st.opt.nudge, pad = Math.round(st.opt.pad || 0);
+    const x0 = Math.max(0, base.x0 + (n.l | 0) - pad), y0 = Math.max(0, base.y0 + (n.t | 0) - pad);
+    const x1 = Math.min(cv.width - 1, base.x1 + (n.r | 0) + pad), y1 = Math.min(cv.height - 1, base.y1 + (n.b | 0) + pad);
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x0: x0, y0: y0, x1: x1, y1: y1, mask: base.mask };
+  }
   function curBox() {
     const cur = st.cur;
-    if (!cur || !cur.box) return null;
-    const b = cur.box, n = st.opt.nudge, pad = Math.round(st.opt.pad || 0);
-    const x0 = Math.max(0, b.x0 + (n.l | 0) - pad), y0 = Math.max(0, b.y0 + (n.t | 0) - pad);
-    const x1 = Math.min(cur.frontCv.width - 1, b.x1 + (n.r | 0) + pad), y1 = Math.min(cur.frontCv.height - 1, b.y1 + (n.b | 0) + pad);
-    if (x1 <= x0 || y1 <= y0) return null;
-    return { x0: x0, y0: y0, x1: x1, y1: y1, mask: b.mask };
+    return cur ? applyNudge(baseBox(), cur.cv) : null;
   }
   function drawPreview() {
-    const cur = st.cur;
-    if (!cur || !cur.box) return;
     const stage = $('fcStage');
+    const cur = st.cur;
+    if (!cur) {
+      stage.innerHTML = '<span class="cu-empty">选择图片后这里显示样张</span>';
+      $('fcBoxInfo').textContent = '裁剪区 —';
+      return;
+    }
     stage.innerHTML = '';
     const b = curBox();
-    if (!b) { stage.innerHTML = '<span class="cu-empty">裁剪范围无效，请调小微调值</span>'; return; }
-    if (st.showFull) {
-      // 全图 + 红框，用于看裁剪位置
-      const k = Math.min(1, 760 / cur.frontCv.width);
+    if (!b) {
+      stage.innerHTML = '<span class="cu-empty">裁剪范围无效：微调值把范围压没了，请调小一点</span>';
+      $('fcBoxInfo').textContent = '裁剪范围无效';
+      return;
+    }
+    const dims = (b.x1 - b.x0 + 1) + '×' + (b.y1 - b.y0 + 1);
+    if (st.showFull || !cur.box) {
+      // 全图 + 红框看裁剪位置；没自动识别到时也必须把图显示出来，否则用户没法手动微调
+      const k = Math.min(1, 760 / cur.cv.width);
       const c = document.createElement('canvas');
-      c.width = Math.round(cur.frontCv.width * k);
-      c.height = Math.round(cur.frontCv.height * k);
+      c.width = Math.max(1, Math.round(cur.cv.width * k));
+      c.height = Math.max(1, Math.round(cur.cv.height * k));
       const cx = c.getContext('2d');
-      cx.drawImage(cur.frontCv, 0, 0, c.width, c.height);
+      cx.drawImage(cur.cv, 0, 0, c.width, c.height);
       cx.strokeStyle = '#e74c3c'; cx.lineWidth = 2;
       cx.strokeRect(b.x0 * k, b.y0 * k, (b.x1 - b.x0 + 1) * k, (b.y1 - b.y0 + 1) * k);
       stage.appendChild(c);
+      $('fcBoxInfo').textContent = cur.box
+        ? `裁剪区 ${b.x0},${b.y0} → ${b.x1},${b.y1}（${dims} px）` + (cur.low ? ' · ' + cur.note : '')
+        : `未自动定位到框条 · 当前按整图（${dims} px），请用下面的微调往里收`;
       return;
     }
-    const out = renderCut(cur.frontCv, b, st.opt);
+    const out = renderCut(cur.cv, b, st.opt);
     stage.appendChild(out);
-    $('fcBoxInfo').textContent = `输出 ${out.width}×${out.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`;
+    $('fcBoxInfo').textContent = `输出 ${out.width}×${out.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
+      + (cur.low ? ' · ' + cur.note : '');
   }
   function bindSlider(id, key) {
     const el = $(id), lab = $(id + 'V');
@@ -5762,8 +5832,8 @@ function buildToolFrameCut() {
   $('fcShowFull').onchange = () => { st.showFull = $('fcShowFull').checked; drawPreview(); };
   $('fcRedetect').onclick = () => {
     if (!st.cur) return;
-    const b = detectStripBox(st.cur.frontCv);
-    st.cur.box = b; st.cur.autoBox = b ? Object.assign({}, b) : null;
+    const r = detectStripBoxRobust(st.cur.cv);
+    st.cur.box = r.box; st.cur.low = r.low; st.cur.note = r.note || '';
     ['fcT', 'fcB', 'fcL', 'fcR'].forEach(id => { $(id).value = '0'; });
     st.opt.nudge = { t: 0, b: 0, l: 0, r: 0 };
     drawPreview();
@@ -5774,119 +5844,72 @@ function buildToolFrameCut() {
     drawPreview();
   };
 
-  // —— 文件导入 ——
+  // —— 文件导入：只收正面图，不配对 ——
   function setFiles(list) {
     st.files = sortImgFiles(imgFilesOnly(list));
-    if (st.cur) { releaseCv(st.cur.frontCv); releaseCv(st.cur.backCv); st.cur = null; }
+    if (st.cur) { releaseCv(st.cur.cv); st.cur = null; }
     st.sel = 0;
-    if (!st.files.length) { $('fcInfo').textContent = '没找到图片文件（支持 jpg / png / webp / bmp / tif）'; renderRows(); return; }
-    const names = st.files.map(fileRelName);
-    const idx = pairFrameFiles(names, $('fcPairMode').value);
-    st.pairs = idx.map(x => ({ front: st.files[x.fi], back: x.bi >= 0 ? st.files[x.bi] : null, model: '', status: x.bi >= 0 ? '待处理' : '缺背面', cls: x.bi >= 0 ? '' : 'warn' }));
-    $('fcInfo').textContent = `${st.files.length} 张图 · 配成 ${st.pairs.length} 组`;
-    log(`已读取 ${st.files.length} 张图片，配对 ${st.pairs.length} 组`);
+    if (!st.files.length) {
+      st.meta = [];
+      $('fcInfo').textContent = '没找到图片文件（支持 jpg / png / webp / bmp / tif）';
+      drawPreview();
+      renderRows();
+      return;
+    }
+    // 输出名直接用源文件名（重名自动 -2）；这里先算好，清单与批量导出一致
+    const used = {};
+    st.meta = st.files.map(f => ({ status: '待处理', cls: '', outName: frameOutName('', fileRelName(f), used) }));
+    $('fcInfo').textContent = `${st.files.length} 张图片 · 输出文件名 = 源文件名`;
+    log(`已读取 ${st.files.length} 张图片`);
     renderRows();
-    selectPair(0, true);
+    selectOne(0, true);
   }
   $('fcFolder').onchange = () => setFiles($('fcFolder').files);
-  $('fcPairMode').onchange = () => { if (st.files.length) setFiles(st.files); };
+  $('fcFiles').onchange = () => setFiles($('fcFiles').files);
   bindDropFiles($('fcDrop'), (files) => setFiles(files));
 
-  // —— OCR 型号 ——
-  async function ocrPair(i) {
-    const p = st.pairs[i];
-    if (!p || !p.back || !p.front) return;
-    setStatus(i, '识别中…', 'warn');
-    try {
-      let backCv = (st.cur && i === st.sel && st.cur.backCv) ? st.cur.backCv : null;
-      let tmp = null;
-      if (!backCv) { tmp = await loadCv(p.back); backCv = tmp; }
-      let box = null;
-      if (i === st.sel && st.cur && st.cur.frontCv) box = st.cur.box;
-      else {
-        const fcv = await loadCv(p.front);
-        box = detectStripBox(fcv);
-        releaseCv(fcv);
-      }
-      if (!box) { setStatus(i, '识别失败：' + '背面未定位到条带', 'err'); if (tmp) releaseCv(tmp); return; }
-      const r = await ocrBackModel(backCv, box, (m) => {
-        if (m.status === 'recognizing text') setProg(m.progress || 0, 1);
-      });
-      if (r.note) log(`第 ${i + 1} 组：${r.note}${r.raw ? '（原文：' + r.raw + '）' : ''}`);
-      if (r.code) {
-        p.model = r.code;
-        setStatus(i, '型号 OK', 'ok');
-        log(`第 ${i + 1} 组：识别到型号 ${r.code}`);
-      } else {
-        setStatus(i, '未识别到型号', 'err');
-        if (r.raw) log(`第 ${i + 1} 组：OCR 原文「${r.raw}」→ 没匹配上型号格式，可手动填`);
-      }
-      if (tmp) releaseCv(tmp);
-      renderRows();
-    } catch (e) {
-      setStatus(i, '识别出错', 'err');
-      log(`第 ${i + 1} 组：${e && e.message || e}`);
-    } finally { setProg(0, 1); }
-  }
-  $('fcOcrAll').onclick = async () => {
-    if (st.busy) return;
-    st.busy = true;
-    log('开始识别型号（首次会下载识别模型，请稍候）…');
-    for (let i = 0; i < st.pairs.length; i++) {
-      if (st.pairs[i].model) continue;
-      if (!st.pairs[i].back) continue;
-      $('fcProgText').textContent = `识别型号 ${i + 1}/${st.pairs.length}`;
-      await ocrPair(i);
-      await sleep0();
-    }
-    st.busy = false;
-    $('fcProgText').textContent = '型号识别完成';
-  };
-
   // —— 批量处理 ——
-  async function processPair(i, ctx) {
-    const p = st.pairs[i];
-    const frontCv = ctx.reuseFront || await loadCv(p.front);
+  async function processOne(i, ctx) {
+    const f = st.files[i];
+    if (!f) return null;
+    const t0 = Date.now();
+    // 当前选中的样张已经在内存里了，直接复用（省一次解码 + 一次检测）
+    const reuse = (i === st.sel && st.cur && st.cur.cv) ? st.cur : null;
+    const cv = reuse ? reuse.cv : await loadCv(f);
     try {
-      if (!p.model && p.back) {
-        setStatus(i, '识别型号…', 'warn');
-        const backCv = await loadCv(p.back);
-        const bx = detectStripBox(frontCv);
-        const r = bx ? await ocrBackModel(backCv, bx, null) : { code: '' };
-        releaseCv(backCv);
-        if (r.code) { p.model = r.code; renderRows(); }
-      }
-      const box = detectStripBox(frontCv);
-      if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 组：没识别到框条，已跳过`); return null; }
-      const out = renderCut(frontCv, box, st.opt);
+      const r = reuse ? { box: reuse.box, low: reuse.low, note: reuse.note } : detectStripBoxRobust(cv);
+      if (!r.box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
+      const b = applyNudge(r.box, cv);
+      if (!b) { setStatus(i, '跳过：微调值把范围压没了', 'err'); log(`第 ${i + 1} 张：裁剪范围无效，已跳过`); return null; }
+      const out = renderCut(cv, b, st.opt);
       const bytes = await canvasToPngBytes(out);
-      const name = frameOutName(p.model, fileRelName(p.front), ctx.used);
+      const name = (st.meta[i] && st.meta[i].outName) || frameOutName('', fileRelName(f), ctx.used);
       const dims = out.width + '×' + out.height;
       out.width = 0; out.height = 0;
-      setStatus(i, `${dims}`, 'ok');
-      log(`第 ${i + 1} 组 → ${name}（${dims}px，${(bytes.length / 1024).toFixed(0)} KB）`);
+      setStatus(i, dims, 'ok');
+      log(`第 ${i + 1} 张 → ${name}（${dims}px，${(bytes.length / 1024).toFixed(0)} KB，${Date.now() - t0}ms）`);
       return { name: name, data: bytes };
     } catch (e) {
       setStatus(i, '失败', 'err');
-      log(`第 ${i + 1} 组：${e && e.message || e}`);
+      log(`第 ${i + 1} 张：${e && e.message || e}`);
       return null;
     } finally {
-      if (!ctx.reuseFront) releaseCv(frontCv);
+      if (!reuse) releaseCv(cv);
     }
   }
   async function runBatch(onlyCurrent) {
-    if (st.busy || !st.pairs.length) return;
+    if (st.busy || !st.files.length) return;
     st.busy = true;
-    const list = onlyCurrent ? [st.sel] : st.pairs.map((_, i) => i);
+    const list = onlyCurrent ? [st.sel] : st.files.map((_, i) => i);
     const entries = [], used = {};
-    log(`开始处理 ${list.length} 组…`);
+    log(`开始处理 ${list.length} 张…`);
     for (let k = 0; k < list.length; k++) {
       const i = list[k];
       setStatus(i, '处理中…', 'warn');
       $('fcProgText').textContent = `${k + 1}/${list.length} 处理中`;
       setProg(k, list.length);
-      const reuse = (i === st.sel && st.cur && st.cur.frontCv) ? st.cur.frontCv : null;
-      const r = await processPair(i, { used: used, reuseFront: reuse });
+      await sleep0();      // 让进度条真的刷新出来（不然整批跑完才看到变化）
+      const r = await processOne(i, { used: used });
       if (r) entries.push(r);
       setProg(k + 1, list.length);
       await sleep0();
@@ -5919,12 +5942,12 @@ function buildToolFrameCut() {
     st.busy = true;
     const used = {};
     log('保存到所选文件夹…');
-    for (let i = 0; i < st.pairs.length; i++) {
+    for (let i = 0; i < st.files.length; i++) {
       setStatus(i, '处理中…', 'warn');
-      $('fcProgText').textContent = `${i + 1}/${st.pairs.length} 处理中`;
-      setProg(i, st.pairs.length);
-      const reuse = (i === st.sel && st.cur && st.cur.frontCv) ? st.cur.frontCv : null;
-      const r = await processPair(i, { used: used, reuseFront: reuse });
+      $('fcProgText').textContent = `${i + 1}/${st.files.length} 处理中`;
+      setProg(i, st.files.length);
+      await sleep0();
+      const r = await processOne(i, { used: used });
       if (r) {
         try {
           const fh = await dir.getFileHandle(r.name, { create: true });
@@ -5933,7 +5956,7 @@ function buildToolFrameCut() {
           await ws.close();
         } catch (e) { log(`写入 ${r.name} 失败：${e && e.message || e}`); }
       }
-      setProg(i + 1, st.pairs.length);
+      setProg(i + 1, st.files.length);
       await sleep0();
     }
     st.busy = false;
@@ -6084,7 +6107,7 @@ function buildToolProdCut() {
 
 // ================= 抠图区块（在「实用功能中心」上方，同级） =================
 const CUTS = [
-  { id: 'framecut', name: '框条抠图', icon: '✂️', desc: '读文件夹 · 型号命名', build: buildToolFrameCut },
+  { id: 'framecut', name: '框条抠图', icon: '✂️', desc: '正面去背景 · 原像素 PNG', build: buildToolFrameCut },
   { id: 'prodcut', name: '产品抠图', icon: '🖼️', desc: '去背景 · 批量透明 PNG', build: buildToolProdCut },
 ];
 let activeCut = null;
@@ -6654,7 +6677,7 @@ if (typeof globalThis !== 'undefined') {
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
     renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut,
-    detectStripBox, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha,
+    detectStripBox, detectStripBoxRobust, detectByMaskBBox, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, imgFilesOnly, fileRelName,
