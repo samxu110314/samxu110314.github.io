@@ -4764,7 +4764,7 @@ function buildToolColor() {
   inEl.oninput = () => { alphaOverride = null; render(); };
   pick.oninput = () => { inEl.value = pick.value.toUpperCase(); alphaOverride = null; render(); };
   alpha.oninput = () => { alphaOverride = parseInt(alpha.value, 10) / 100; alphaVal.textContent = alpha.value + '%'; render(); };
-  [['#C9A85C', '芥黄'], ['#7A5C3E', '栗棕'], ['#8B634B', '876C金属'], ['#2D2926', 'PANTONE黑'], ['#C8102E', '中国红'], ['#009ACE', '801C荧光'], ['#00AB84', 'Green C'], ['#1D1D1B', '深灰'], ['#F3ECE0', '米白']].forEach(([h, n]) => {
+  [['#7A5C3E', '栗棕'], ['#2D2926', 'PANTONE黑'], ['#C8102E', '中国红'], ['#00AB84', 'Green C'], ['#1D1D1B', '深灰'], ['#F3ECE0', '米白']].forEach(([h, n]) => {
     const chip = document.createElement('span');
     chip.className = 'tool-mini';
     chip.innerHTML = `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${h};vertical-align:-1px;margin-right:4px"></span>${n}`;
