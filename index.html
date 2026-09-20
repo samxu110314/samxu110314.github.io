@@ -600,6 +600,50 @@
   .cu-checker { background-image: linear-gradient(45deg, #e6eaee 25%, transparent 25%), linear-gradient(-45deg, #e6eaee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6eaee 75%), linear-gradient(-45deg, transparent 75%, #e6eaee 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
   .cu-num { width: 62px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; font-family: inherit; font-size: 12px; text-align: right; color: var(--text); }
   .cu-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; align-items: start; }
+  /* ===== 框条抠图专用版式：左（预览）尽量宽，右（参数调节）收到固定窄列 ===== */
+  .cu-2col.cu-cut { grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; }
+  @media (max-width: 1180px) { .cu-2col.cu-cut { grid-template-columns: minmax(0, 1fr) 266px; } }
+  @media (max-width: 900px) { .cu-2col.cu-cut { grid-template-columns: 1fr; } }
+  .cu-cut .cu-side { display: flex; flex-direction: column; gap: 9px; }
+  .cu-grp { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px 10px; background: #fafbfc; }
+  .cu-grp-t { font-size: 11.5px; font-weight: 600; color: var(--text-light); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
+  .cu-sls { display: grid; gap: 5px; }
+  /* 滑块：上行「名称 + − 数值 +」，下行整条滑轨 —— 窄列里反而更好点 */
+  .cu-sl2 { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1px 8px; }
+  .cu-sl2 > span:first-child { font-size: 12px; color: var(--text-light); }
+  .cu-sl2 input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0; }
+  .cu-nb { display: inline-flex; align-items: center; gap: 4px; }
+  .tool-panel .cu-step {
+    width: 23px; height: 23px; padding: 0; line-height: 1; font-size: 15px; font-weight: 600;
+    border: 1px solid #cfd8e0; background: #fff; border-radius: 6px; color: var(--text);
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .tool-panel .cu-step:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); background: #f2f8fd; }
+  .tool-panel .cu-step:active { background: #e3f0fb; }
+  .tool-panel .cu-numv {
+    width: 52px; padding: 3px 4px; text-align: center; font-size: 12px; border: 1px solid #cfd8e0;
+    border-radius: 6px; font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  .tool-panel .cu-numv:focus { border-color: var(--c-sales, #3498db); }
+  .cu-ng { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+  .cu-ng > label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-light); }
+  .tool-panel .cu-ng .cu-numv { width: 40px; }
+  .tool-panel .cu-ng .cu-step { width: 21px; height: 21px; font-size: 14px; }
+  .cu-cut .cu-stage { min-height: 190px; padding: 12px; }
+  .cu-cut .cu-stage canvas { max-height: 460px; }
+  .cu-cut input[type=range] { padding: 0; }
+  /* 手动调边：整幅画布 + 可拖的四边 + 四角。拖动只改元素样式、不重画图像 → 跟手 */
+  .cu-edgewrap { position: relative; display: inline-block; line-height: 0; }
+  .cu-edgewrap canvas { display: block; }
+  .cu-edim { position: absolute; background: rgba(20,26,33,.5); pointer-events: none; }
+  .cu-eh { position: absolute; background: rgba(231,76,60,.22); border: 1px solid rgba(231,76,60,.9); box-sizing: border-box; }
+  .cu-eh:hover { background: rgba(231,76,60,.45); }
+  .cu-eh.l, .cu-eh.r { width: 11px; cursor: ew-resize; }
+  .cu-eh.t, .cu-eh.b { height: 11px; cursor: ns-resize; }
+  .cu-eh.tl, .cu-eh.tr, .cu-eh.bl, .cu-eh.br { width: 13px; height: 13px; background: rgba(231,76,60,.6); }
+  .cu-eh.tl, .cu-eh.br { cursor: nwse-resize; }
+  .cu-eh.tr, .cu-eh.bl { cursor: nesw-resize; }
+  .cu-mini.on { background: #2c7fb8; border-color: #2c7fb8; color: #fff; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
   .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
@@ -7609,40 +7653,67 @@ function buildToolFrameCut() {
     </div>
 
     <div class="cu-sec" id="fcEditSec" style="display:none">
-      <div class="cu-sec-t">② 调参数 <small>以当前选中的这组为样张，调好后批量套用到其余照片</small></div>
-      <div class="cu-2col">
+      <div class="cu-sec-t">② 调参数 <small>以当前选中的这组为样张；调色滑块套用到整批，裁剪边距只作用于本张</small></div>
+      <div class="cu-2col cu-cut">
         <div>
           <div class="cu-stage cu-checker" id="fcStage"><span class="cu-empty">选择文件夹后这里显示样张</span></div>
           <div class="cu-row" style="margin-top:8px">
             <span class="cu-badge" id="fcBoxInfo">裁剪区 —</span>
+            <button class="cu-mini" id="fcEdge" title="在画布上直接拖动四条边，改完点「完成」">✥ 手动调边</button>
             <label style="font-size:12px;color:var(--text-light)"><input type="checkbox" id="fcShowFull"> 显示裁剪位置</label>
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
-          <div class="cu-row" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            裁剪微调（px）：
-            上<input class="cu-num" id="fcT" value="0"> 下<input class="cu-num" id="fcB" value="0">
-            左<input class="cu-num" id="fcL" value="0"> 右<input class="cu-num" id="fcR" value="0">
-            留白<input class="cu-num" id="fcPad" value="0">
-            <label><input type="checkbox" id="fcTrans" checked> 透明背景</label>
-          </div>
-          <div class="cu-row" style="margin-top:6px;font-size:12px;color:var(--text-light)">
-            <label><input type="checkbox" id="fcDeskew" checked> 自动摆正倾斜</label>
-            <span>本张倾斜 <b id="fcAngleInfo">—</b></span>
-            <span title="留空 = 每张按自己检测到的角度摆正；填数字 = 全部按这个角度摆正">
-              手动角度<input class="cu-num" id="fcAngle" placeholder="自动" style="width:54px">°</span>
+          <div class="cu-row" id="fcEdgeBar" style="display:none;margin-top:7px;font-size:12px;color:var(--text-light)">
+            <span>拖动红框四条边 / 四个角，右侧数值会同步变 · <b>只作用于本张</b></span>
+            <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
+            <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
+            <button class="cu-mini" id="fcEdgeDone">✓ 完成调边</button>
           </div>
         </div>
-        <div>
-          <div class="cu-sliders">
-            <label class="cu-sl">锐化<input type="range" id="fcSharpen" min="-100" max="100" value="0"><b id="fcSharpenV">0</b></label>
-            <label class="cu-sl">亮度<input type="range" id="fcBright" min="-100" max="100" value="0"><b id="fcBrightV">0</b></label>
-            <label class="cu-sl">对比度<input type="range" id="fcContrast" min="-100" max="100" value="0"><b id="fcContrastV">0</b></label>
-            <label class="cu-sl">饱和度<input type="range" id="fcSat" min="-100" max="100" value="0"><b id="fcSatV">0</b></label>
-            <label class="cu-sl">色相<input type="range" id="fcHue" min="-180" max="180" value="0"><b id="fcHueV">0</b></label>
+        <div class="cu-side">
+          <div class="cu-grp">
+            <div class="cu-grp-t">裁剪边距 · 往里切掉的 px<span class="cu-badge warn" id="fcNgTag" style="display:none">本张已手动</span></div>
+            <div class="cu-ng">
+              <label>上 <button class="cu-step" id="fcTD" title="上边少切 1px（往外放）">−</button><input class="cu-numv" id="fcT" value="0"><button class="cu-step" id="fcTU" title="上边多切 1px（往里收）">+</button></label>
+              <label>下 <button class="cu-step" id="fcBD" title="下边少切 1px（往外放）">−</button><input class="cu-numv" id="fcB" value="0"><button class="cu-step" id="fcBU" title="下边多切 1px（往里收）">+</button></label>
+              <label>左 <button class="cu-step" id="fcLD" title="左边少切 1px（往外放）">−</button><input class="cu-numv" id="fcL" value="0"><button class="cu-step" id="fcLU" title="左边多切 1px（往里收）">+</button></label>
+              <label>右 <button class="cu-step" id="fcRD" title="右边少切 1px（往外放）">−</button><input class="cu-numv" id="fcR" value="0"><button class="cu-step" id="fcRU" title="右边多切 1px（往里收）">+</button></label>
+            </div>
+            <div class="cu-row" style="margin-top:7px">
+              <label style="font-size:12px;color:var(--text-light)">留白 <button class="cu-step" id="fcPadD">−</button></label>
+              <input class="cu-numv" id="fcPad" value="0" style="width:44px">
+              <button class="cu-step" id="fcPadU">+</button>
+              <label style="font-size:12px;color:var(--text-light);margin-left:2px"><input type="checkbox" id="fcTrans" checked> 透明背景</label>
+            </div>
           </div>
-          <div class="cu-row" style="margin-top:10px">
-            <button class="cu-mini" id="fcReset">重置参数</button>
-            <span class="cu-empty">调好后点下面「开始批量」，其余照片会自动套用同样的参数</span>
+          <div class="cu-grp">
+            <div class="cu-grp-t">摆正</div>
+            <div class="cu-row" style="font-size:12px;color:var(--text-light)">
+              <label><input type="checkbox" id="fcDeskew" checked> 自动摆正倾斜</label>
+              <span>本张 <b id="fcAngleInfo">—</b></span>
+            </div>
+            <div class="cu-row" style="margin-top:6px;font-size:12px;color:var(--text-light)">
+              <span title="留空 = 每张按自己检测到的角度摆正；填数字 = 全部按这个角度摆正">手动角度</span>
+              <span class="cu-nb">
+                <button class="cu-step" id="fcAngD" title="角度 −0.5°">−</button>
+                <input class="cu-numv" id="fcAngle" placeholder="自动" style="width:56px">
+                <button class="cu-step" id="fcAngU" title="角度 +0.5°">+</button>°
+              </span>
+            </div>
+          </div>
+          <div class="cu-grp">
+            <div class="cu-grp-t">调色 / 锐化 <span style="font-weight:400">（套用到整批）</span></div>
+            <div class="cu-sls">
+              <div class="cu-sl2"><span>锐化</span><span class="cu-nb"><button class="cu-step" id="fcSharpenD">−</button><input class="cu-numv" id="fcSharpenV" value="0"><button class="cu-step" id="fcSharpenU">+</button></span><input type="range" id="fcSharpen" min="-100" max="100" step="1" value="0"></div>
+              <div class="cu-sl2"><span>亮度</span><span class="cu-nb"><button class="cu-step" id="fcBrightD">−</button><input class="cu-numv" id="fcBrightV" value="0"><button class="cu-step" id="fcBrightU">+</button></span><input type="range" id="fcBright" min="-100" max="100" step="1" value="0"></div>
+              <div class="cu-sl2"><span>对比度</span><span class="cu-nb"><button class="cu-step" id="fcContrastD">−</button><input class="cu-numv" id="fcContrastV" value="0"><button class="cu-step" id="fcContrastU">+</button></span><input type="range" id="fcContrast" min="-100" max="100" step="1" value="0"></div>
+              <div class="cu-sl2"><span>饱和度</span><span class="cu-nb"><button class="cu-step" id="fcSatD">−</button><input class="cu-numv" id="fcSatV" value="0"><button class="cu-step" id="fcSatU">+</button></span><input type="range" id="fcSat" min="-100" max="100" step="1" value="0"></div>
+              <div class="cu-sl2"><span>色相</span><span class="cu-nb"><button class="cu-step" id="fcHueD">−</button><input class="cu-numv" id="fcHueV" value="0"><button class="cu-step" id="fcHueU">+</button></span><input type="range" id="fcHue" min="-180" max="180" step="1" value="0"></div>
+            </div>
+            <div class="cu-row" style="margin-top:8px">
+              <button class="cu-mini" id="fcReset">重置参数</button>
+              <span class="cu-empty">调好点下面「开始批量」</span>
+            </div>
           </div>
         </div>
       </div>
@@ -7659,17 +7730,24 @@ function buildToolFrameCut() {
       <div class="cu-log" id="fcLog" style="margin-top:8px"></div>
     </div>
     <div class="t-tip">用法：把<b>正面照片</b>导进来（散图、整个文件夹、拖拽都行，不需要拍背面） → 自动找到框条本体、<b>把拍歪的转正</b>、再去背景 →
-      在样张上调好锐化 / 亮度 / 对比度 / 饱和度 / 色相 → 点「开始批量抠图」，其余照片会自动套用同一组参数。
+      在样张上调好锐化 / 亮度 / 对比度 / 饱和度 / 色相（滑块旁边有 − / + 可以一格一格微调，按住不放会连续走）→ 点「开始批量抠图」，其余照片会自动套用同一组参数。
       输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；文件名直接用<b>源文件名</b>（_DSC5653.JPG → _DSC5653.png，重名自动加 -2）。
-      自动没找准范围时，勾上「显示裁剪位置」看红框，再用「裁剪微调」四个方向往里收；摆正角度不对时，
-      在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
+      <b>个别照片边缘没识别准</b>时点「✥ 手动调边」，在画布上直接拖红框的四条边和四个角——比填数字直观，<b>而且只改这一张</b>（改完想统一，点「套用到全部图片」）；
+      也可以用右侧「裁剪边距」的四向 ± / 输入框精确到 px。摆正角度不对时，在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
       整条链路都在本地跑、不需要联网，图片不会上传。</div>`;
 
   const $ = (id) => box.querySelector('#' + id);
   const st = {
     files: [], meta: [], sel: 0, cur: null,
-    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, nudge: { t: 0, b: 0, l: 0, r: 0 }, deskew: true, angle: null },
+    // ⚠️ 裁剪边距（nudge）**不在 opt 里** —— opt 是「整批共用的调色参数」，
+    //    边距是逐张的（见 nudgeOf / ensureNudge）：用户的原话是「个别框条边缘识别有问题」，
+    //    一张一张改才合理；要整批统一时用「套用到全部图片」一次性铺过去。
+    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, deskew: true, angle: null },
     showFull: false, busy: false,
+    edge: false,        // 手动调边模式
+    qcv: null,          // 快速预览用的复用画布
+    pvT: 0,             // 真渲染的防抖计时器
+    liveCanvas: null,   // 当前显示的预览 canvas（拖滑块时给它加 CSS 滤镜）
   };
   const log = (s) => { const el = $('fcLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
   const setProg = (i, n) => { $('fcBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
@@ -7683,6 +7761,13 @@ function buildToolFrameCut() {
   function releaseCv(cv) { if (cv) { cv.width = 0; cv.height = 0; } }
 
   // —— 图片清单：每张图就是一张正面，不配对、不识别型号 ——
+  // 状态列。手动调过边距的图前面挂个 ✥ —— 一张张改过之后，翻清单得看得出哪几张被改过，
+  // 否则「套用到全部」很容易把某一张的专门修正一起冲掉。
+  function statusHtml(i, text, cls) {
+    const m = st.meta[i];
+    const pen = (m && m.nudge) ? '<span class="cu-badge warn" title="这张手动调过裁剪边距">✥</span> ' : '';
+    return pen + `<span class="cu-badge ${cls || ''}">${esc(text)}</span>`;
+  }
   function renderRows() {
     const tb = $('fcRows');
     tb.innerHTML = '';
@@ -7693,7 +7778,7 @@ function buildToolFrameCut() {
       tr.innerHTML = `<td>${i + 1}</td>
         <td><span class="cu-fn" title="${esc(fileRelName(f))}">${esc(fileRelName(f))}</span></td>
         <td><span class="cu-fn">${esc(m.outName || '')}</span></td>
-        <td><span class="cu-badge ${m.cls || ''}">${esc(m.status || '待处理')}</span></td>`;
+        <td>${statusHtml(i, m.status || '待处理', m.cls)}</td>`;
       tr.onclick = () => selectOne(i);
       tb.appendChild(tr);
     });
@@ -7706,7 +7791,7 @@ function buildToolFrameCut() {
     const m = st.meta[i] || (st.meta[i] = { outName: '' });
     m.status = text; m.cls = cls || '';
     const tr = $('fcRows').children[i];
-    if (tr) { tr.children[3].innerHTML = `<span class="cu-badge ${cls || ''}">${esc(text)}</span>`; }
+    if (tr) { tr.children[3].innerHTML = statusHtml(i, text, cls); }
   }
 
   // —— 选中一张：载入像素、自动识别裁剪范围、需要时摆正、出预览 ——
@@ -7786,6 +7871,31 @@ function buildToolFrameCut() {
     }
     drawPreview();
   }
+  // —— 逐张的裁剪边距 ——
+  // 自动识别是「统计找主体」，个别照片的端头难免多带一点桌面/别的样品；
+  // 这个值就是给每张图单独留的修正量，没有 = 完全按自动结果。
+  // ⚠️ 四个方向**统一语义：正数 = 往里收（切掉多少 px）**。别按「加到哪条边」去存 ——
+  //    左/上是最小边、右/下是最大边，同一个符号在两条边上方向相反，
+  //    结果就是「左端按 + 往里、右端按 + 往外」这种自相矛盾的界面（已经踩过一次）。
+  const NG0 = { t: 0, b: 0, l: 0, r: 0 };
+  function nudgeOf(i) { const m = st.meta[i]; return (m && m.nudge) || null; }
+  function ensureNudge(i) {
+    const m = st.meta[i] || (st.meta[i] = { status: '待处理', cls: '', outName: '' });
+    if (!m.nudge) m.nudge = { t: 0, b: 0, l: 0, r: 0 };
+    return m.nudge;
+  }
+  // 把 nudge 夹回合法范围：不能出画布，也不能把范围压得比 8px 还小。
+  // 放在「改完再夹」而不是「边改边夹」—— 拖到极限时四次夹取会互相打架，手感发黏。
+  function clampNudge(base, cv, n) {
+    if (!base || !cv || !n) return;
+    let x0 = base.x0 + (n.l | 0), x1 = base.x1 - (n.r | 0);
+    let y0 = base.y0 + (n.t | 0), y1 = base.y1 - (n.b | 0);
+    x0 = Math.max(0, Math.min(x0, cv.width - 8));
+    x1 = Math.min(cv.width - 1, Math.max(x1, x0 + 7));
+    y0 = Math.max(0, Math.min(y0, cv.height - 8));
+    y1 = Math.min(cv.height - 1, Math.max(y1, y0 + 7));
+    n.l = x0 - base.x0; n.r = base.x1 - x1; n.t = y0 - base.y0; n.b = base.y1 - y1;
+  }
   // 检测失败时的起点：整张图 —— 这样「微调」四个方向还能往里收，不至于完全没法用
   function baseBox() {
     const cur = st.cur;
@@ -7793,19 +7903,20 @@ function buildToolFrameCut() {
     if (cur.box) return cur.box;
     return { x0: 0, y0: 0, x1: cur.cutCv.width - 1, y1: cur.cutCv.height - 1, mask: null };
   }
-  // 在基准框上套用「四向微调 + 留白」。预览与批量导出共用这一个函数 ——
+  // 在基准框上套用「四向微调 + 留白」。预览、手动调边、批量导出共用这一个函数 ——
   // 分成两套算法迟早会变成「预览看着对、导出的不一样」这种极难查的问题。
-  function applyNudge(base, cv) {
+  function applyNudge(base, cv, n) {
     if (!base || !cv) return null;
-    const n = st.opt.nudge, pad = Math.round(st.opt.pad || 0);
+    n = n || NG0;
+    const pad = Math.round(st.opt.pad || 0);
     const x0 = Math.max(0, base.x0 + (n.l | 0) - pad), y0 = Math.max(0, base.y0 + (n.t | 0) - pad);
-    const x1 = Math.min(cv.width - 1, base.x1 + (n.r | 0) + pad), y1 = Math.min(cv.height - 1, base.y1 + (n.b | 0) + pad);
+    const x1 = Math.min(cv.width - 1, base.x1 - (n.r | 0) + pad), y1 = Math.min(cv.height - 1, base.y1 - (n.b | 0) + pad);
     if (x1 <= x0 || y1 <= y0) return null;
     return { x0: x0, y0: y0, x1: x1, y1: y1, mask: base.mask };
   }
   function curBox() {
     const cur = st.cur;
-    return cur ? applyNudge(baseBox(), cur.cutCv) : null;
+    return cur ? applyNudge(baseBox(), cur.cutCv, nudgeOf(st.sel)) : null;
   }
   // 把「摆正后画布」上的坐标反算回原始照片坐标（只为在「显示裁剪位置」里画红框）。
   // 未摆正时两张画布是同一张，直接原样返回。
@@ -7816,9 +7927,183 @@ function buildToolFrameCut() {
     const ox = x + xf.X0, oy = y + xf.Y0;
     return [xf.cx + ox * ca + oy * sa, xf.cy - ox * sa + oy * ca];
   }
+  // ===== 预览的「快 / 真」两档 =====
+  // 真渲染 renderCut 要跑完整条 alpha 收边链，4000px 宽的条带一次 100~400ms；
+  // 每个 input 事件都跑一遍，拖滑块自然一顿一顿的（用户原话「不太顺滑」）。
+  // 现在拖动中只做两件近乎零成本的事：CSS 滤镜（GPU）给调色一个跟手的近似、
+  // drawImage 给裁剪一个真预览；停手 160ms 后再跑一次真渲染把结果定下来。
+  // 近似之处：亮度用乘法近似（真算法是 +2.55×值）、锐化没有对应滤镜、
+  // alpha 收边（端头/上下沿的那些自动收紧）只有真渲染才有 —— 所以真渲染一定是最后一手。
+  function toneFilter(o) {
+    const f = [];
+    if (o.brightness) f.push('brightness(' + (1 + o.brightness / 100 * 0.85).toFixed(3) + ')');
+    if (o.contrast) f.push('contrast(' + (1 + o.contrast / 100).toFixed(3) + ')');
+    if (o.saturation) f.push('saturate(' + Math.max(0, 1 + o.saturation / 100).toFixed(3) + ')');
+    if (o.hue) f.push('hue-rotate(' + o.hue + 'deg)');
+    return f.length ? f.join(' ') : 'none';
+  }
+  function liveTone() { if (st.liveCanvas) st.liveCanvas.style.filter = toneFilter(st.opt); }
+  function schedulePreview(ms) {
+    if (st.pvT) clearTimeout(st.pvT);
+    st.pvT = setTimeout(() => { st.pvT = 0; drawPreview(); }, ms == null ? 160 : ms);
+  }
+  function flushPreview() { if (st.pvT) { clearTimeout(st.pvT); st.pvT = 0; } }
+  // 只 drawImage 的快速预览（不含 alpha 收边），改边距时用；画布复用，不重复建元素
+  function drawQuick() {
+    const stage = $('fcStage'), cur = st.cur;
+    if (!cur || !cur.cutCv) return false;
+    const b = curBox();
+    if (!b) return false;
+    const cw = b.x1 - b.x0 + 1, ch = b.y1 - b.y0 + 1;
+    let c = st.qcv;
+    if (!c) { c = st.qcv = document.createElement('canvas'); }
+    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, cw, ch);
+    g.drawImage(cur.cutCv, b.x0, b.y0, cw, ch, 0, 0, cw, ch);
+    if (stage.firstChild !== c) { stage.innerHTML = ''; stage.appendChild(c); }
+    st.liveCanvas = c;
+    liveTone();
+    $('fcBoxInfo').textContent = `输出 ${cw}×${ch} px（调整中…）`;
+    return true;
+  }
+  // 边距变了：先秒出近似图，再防抖出真图
+  function onNudgeChange() {
+    syncNudge();
+    if (st.edge) { edgeLayout(); return; }
+    // 「显示裁剪位置」是全图 + 红框，本身就便宜（一次 drawImage + 描边，不带 alpha 收边），
+    // 直接重画就行 —— 走快速预览反而会让画面在「全图」和「裁剪图」之间闪一下。
+    if (st.showFull) { flushPreview(); drawPreview(); return; }
+    if (drawQuick()) schedulePreview(200);
+    else { flushPreview(); drawPreview(); }
+  }
+  // 把逐张边距写回四个输入框 + 更新「本张已手动」角标
+  const NGF = { fcT: 't', fcB: 'b', fcL: 'l', fcR: 'r' };
+  function syncNudge() {
+    const n = nudgeOf(st.sel) || NG0;
+    for (const id in NGF) {
+      const v = String(n[NGF[id]] | 0);
+      if ($(id).value !== v) $(id).value = v;
+    }
+    $('fcNgTag').style.display = nudgeOf(st.sel) ? '' : 'none';
+  }
+  // ---- 手动调边：整幅画布 + 可拖的红框 ----
+  // 【为什么不是「拖输出图那条边」】输出图就是裁剪结果本身，往外拖没有像素可看。
+  //   这里画的是**整幅（已摆正的）画布 + 红框**，跟裁剪工具的直觉一致：框外压暗，
+  //   拖到哪切到哪，框外的东西也还看得见（用户要判断的正是「有没有带进别的东西」）。
+  // 【为什么只改样式不重画图像】拖动时只更新 4 块遮罩 + 8 个手柄的 left/top/width/height，
+  //   图像一次都不重画 → 手感跟手；数值同步到右侧「裁剪边距」。
+  // 【坐标】编辑的就是 curBox()（cutCv 坐标），所以拖完不用做任何换算：
+  //   预览、手动调边、批量导出走的都是 applyNudge 这同一条路。
+  const EH = [['l', 'l'], ['r', 'r'], ['t', 't'], ['b', 'b'], ['tl', 'tl'], ['tr', 'tr'], ['bl', 'bl'], ['br', 'br']];
+  let edgeUI = null;
+  function edgeLayout() {
+    const cur = st.cur;
+    if (!edgeUI || !cur || !cur.cutCv) return null;
+    const b = applyNudge(baseBox(), cur.cutCv, nudgeOf(st.sel));
+    if (!b) return null;
+    const k = edgeUI.k, W = cur.cutCv.width * k, H = cur.cutCv.height * k;
+    const x0 = b.x0 * k, x1 = (b.x1 + 1) * k, y0 = b.y0 * k, y1 = (b.y1 + 1) * k;
+    const set = (el, s) => { for (const p in s) el.style[p] = s[p]; };
+    const w = Math.max(0, x1 - x0), h = Math.max(0, y1 - y0);
+    set(edgeUI.dims[0], { left: '0px', top: '0px', width: x0 + 'px', height: H + 'px' });
+    set(edgeUI.dims[1], { left: x1 + 'px', top: '0px', width: Math.max(0, W - x1) + 'px', height: H + 'px' });
+    set(edgeUI.dims[2], { left: x0 + 'px', top: '0px', width: w + 'px', height: y0 + 'px' });
+    set(edgeUI.dims[3], { left: x0 + 'px', top: y1 + 'px', width: w + 'px', height: Math.max(0, H - y1) + 'px' });
+    const hs = edgeUI.hs;
+    set(hs.l, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px' });
+    set(hs.r, { left: (x1 - 6) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px' });
+    set(hs.t, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: (w + 10) + 'px', height: '11px' });
+    set(hs.b, { left: (x0 - 5) + 'px', top: (y1 - 6) + 'px', width: (w + 10) + 'px', height: '11px' });
+    set(hs.tl, { left: (x0 - 6) + 'px', top: (y0 - 6) + 'px' });
+    set(hs.tr, { left: (x1 - 7) + 'px', top: (y0 - 6) + 'px' });
+    set(hs.bl, { left: (x0 - 6) + 'px', top: (y1 - 7) + 'px' });
+    set(hs.br, { left: (x1 - 7) + 'px', top: (y1 - 7) + 'px' });
+    $('fcBoxInfo').textContent = `✥ 调边中 · 裁剪区 ${b.x0},${b.y0} → ${b.x1},${b.y1}（${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} px）`;
+    return b;
+  }
+  function drawEdgeView() {
+    const stage = $('fcStage'), cur = st.cur;
+    const W = cur.cutCv.width, H = cur.cutCv.height;
+    const key = st.sel + ':' + W + 'x' + H + ':' + (cur.rotated ? 1 : 0) + ':' + (+cur.angle || 0).toFixed(2);
+    if (!edgeUI || edgeUI.key !== key) {
+      const avail = Math.max(280, (stage.clientWidth || 820) - 26);
+      let k = Math.min(1, avail / W, 460 / H);
+      if (!(k > 0) || !isFinite(k)) k = 1;
+      stage.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.className = 'cu-edgewrap';
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(W * k));
+      cv.height = Math.max(1, Math.round(H * k));
+      cv.getContext('2d').drawImage(cur.cutCv, 0, 0, cv.width, cv.height);
+      wrap.appendChild(cv);
+      const dims = [];
+      for (let i = 0; i < 4; i++) { const d = document.createElement('div'); d.className = 'cu-edim'; wrap.appendChild(d); dims.push(d); }
+      const hs = {};
+      EH.forEach(([cls, side]) => {
+        const d = document.createElement('div');
+        d.className = 'cu-eh ' + cls;
+        d.addEventListener('pointerdown', (e) => edgeDrag(e, side));
+        wrap.appendChild(d);
+        hs[side] = d;
+      });
+      stage.appendChild(wrap);
+      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs };
+      st.liveCanvas = cv;
+    }
+    edgeUI.cv.style.filter = toneFilter(st.opt);
+    edgeLayout();
+  }
+  // 拖动一条边（或一个角）。side 里含 'l' 就是左，含 't' 就是上…… 角上是两个字母都含
+  // （'tl' = 左上）→ 两个方向一起走。
+  function edgeDrag(ev, side) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const cur = st.cur, base = baseBox();
+    if (!cur || !cur.cutCv || !base || !edgeUI) return;
+    const k = edgeUI.k;
+    const sx = ev.clientX, sy = ev.clientY;
+    const n0 = nudgeOf(st.sel) || NG0;
+    const n = ensureNudge(st.sel);
+    let dirty = false;
+    const move = (e) => {
+      const dx = (e.clientX - sx) / k, dy = (e.clientY - sy) / k;
+      // 记号见 applyNudge 上面那段：正数 = 往里收，所以右/下要取反
+      if (side.indexOf('l') >= 0) n.l = n0.l + Math.round(dx);
+      if (side.indexOf('r') >= 0) n.r = n0.r - Math.round(dx);
+      if (side.indexOf('t') >= 0) n.t = n0.t + Math.round(dy);
+      if (side.indexOf('b') >= 0) n.b = n0.b - Math.round(dy);
+      clampNudge(base, cur.cutCv, n);
+      dirty = true;
+      edgeLayout();
+      syncNudge();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (!dirty) return;
+      renderRows();
+      log(`第 ${st.sel + 1} 张：手动调边 → 上 ${n.t} 下 ${n.b} 左 ${n.l} 右 ${n.r}（只作用于本张）`);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  function setEdgeMode(on) {
+    if (on && (!st.cur || !st.cur.cutCv)) { log('当前这张读不出来，没法手动调边'); return; }
+    st.edge = !!on;
+    edgeUI = null;
+    $('fcEdge').classList.toggle('on', st.edge);
+    $('fcEdge').textContent = st.edge ? '✓ 完成调边' : '✥ 手动调边';
+    $('fcEdgeBar').style.display = st.edge ? '' : 'none';
+    $('fcShowFull').disabled = st.edge;
+    flushPreview();
+    drawPreview();
+  }
   function drawPreview() {
     const stage = $('fcStage');
     const cur = st.cur;
+    syncNudge();
     if (!cur || !cur.cutCv) {
       // ⚠️ 选中的是一张读不出来的图时，这块提示必须**留在原地**。
       //    否则用户点一下「显示裁剪位置」或随便拨个滑块，drawPreview 就把
@@ -7835,7 +8120,9 @@ function buildToolFrameCut() {
       $('fcBoxInfo').textContent = '裁剪区 —';
       return;
     }
+    if (st.edge) { drawEdgeView(); return; }
     stage.innerHTML = '';
+    st.liveCanvas = null;
     const b = curBox();
     if (!b) {
       stage.innerHTML = '<span class="cu-empty">裁剪范围无效：微调值把范围压没了，请调小一点</span>';
@@ -7846,7 +8133,7 @@ function buildToolFrameCut() {
     if (st.showFull || !cur.box) {
       // 全图（原始照片）+ 红框看裁剪位置；没自动识别到时也必须把图显示出来，
       // 否则用户没法手动微调。摆正过的话，红框按同一套几何关系反算回原图再画。
-      const k = Math.min(1, 760 / cur.cv.width);
+      const k = Math.min(1, 1200 / cur.cv.width);
       const c = document.createElement('canvas');
       c.width = Math.max(1, Math.round(cur.cv.width * k));
       c.height = Math.max(1, Math.round(cur.cv.height * k));
@@ -7860,7 +8147,10 @@ function buildToolFrameCut() {
       });
       cx.closePath();
       cx.strokeStyle = '#e74c3c'; cx.lineWidth = 2; cx.stroke();
+      // 全图视图也挂上调色滤镜：两个视图看起来才是一回事（滤镜只影响观感，不改导出像素）
+      c.style.filter = toneFilter(st.opt);
       stage.appendChild(c);
+      st.liveCanvas = c;
       $('fcBoxInfo').textContent = cur.box
         ? `裁剪区 ${b.x0},${b.y0} → ${b.x1},${b.y1}（${dims} px）` + (cur.low ? ' · ' + cur.note : '')
         : `未自动定位到框条 · 当前按整图（${dims} px），请用下面的微调往里收`;
@@ -7868,23 +8158,91 @@ function buildToolFrameCut() {
     }
     const out = renderCut(cur.cutCv, b, st.opt);
     stage.appendChild(out);
+    st.liveCanvas = out;      // 真渲染已经把调色烘进像素了，滤镜到此为止
     $('fcBoxInfo').textContent = `输出 ${out.width}×${out.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
       + (cur.rotated ? ' · 已摆正 ' + (cur.angle > 0 ? '+' : '') + cur.angle.toFixed(2) + '°' : '')
       + (cur.low ? ' · ' + cur.note : '');
   }
+  // ± 按钮：单击走一格；按住先等 380ms 再每 25ms 连发 —— 既点得准，又能快速推到目标附近
+  //（用户说的「不顺滑」有一半是拖滑块拖不准：滑块 200 格宽、±1px 根本停不住）
+  function wireStep(btn, onStep) {
+    if (!btn) return;
+    let t1 = 0, t2 = 0;
+    const stop = () => {
+      if (t1) { clearTimeout(t1); t1 = 0; }
+      if (t2) {
+        clearInterval(t2); t2 = 0;
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+      }
+    };
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      onStep();
+      t1 = setTimeout(() => {
+        t1 = 0;
+        t2 = setInterval(onStep, 25);
+        // ⚠️ 兜底：指针在窗口外抬起、或 setPointerCapture 失效时，光靠按钮上的
+        //    pointerup 是收不到的 —— 那样连发会一直跑下去（数值自己一路爬到顶）。
+        //    监听只在真开始连发时才挂，停止时立刻摘掉，不会累积。
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
+      }, 380);
+    });
+    ['pointerup', 'pointercancel', 'blur'].forEach(k => btn.addEventListener(k, stop));
+    // 键盘回车/空格走的是 click（detail 为 0），别让它们变成「点了没反应」
+    btn.addEventListener('click', (e) => { e.preventDefault(); if (e.detail === 0) onStep(); });
+  }
   function bindSlider(id, key) {
-    const el = $(id), lab = $(id + 'V');
-    el.oninput = () => { st.opt[key] = +el.value; lab.textContent = el.value; drawPreview(); };
+    const el = $(id), num = $(id + 'V');
+    const lo = +el.min, hi = +el.max;
+    const put = (v, quick) => {
+      v = Math.max(lo, Math.min(hi, Math.round(v) || 0));
+      if (el.value !== String(v)) el.value = v;
+      if (num.value !== String(v)) num.value = v;
+      st.opt[key] = v;
+      if (quick) { liveTone(); schedulePreview(160); }   // 拖动中：滤镜先跟上，再出真图
+      else { flushPreview(); drawPreview(); }            // 松手 / 回车：立刻出真图
+    };
+    el.oninput = () => put(+el.value, true);
+    el.addEventListener('change', () => put(+el.value, false));
+    num.value = el.value;
+    num.oninput = () => { const v = parseFloat(num.value); if (!isNaN(v)) put(v, true); };
+    num.onchange = () => put(parseFloat(num.value) || 0, false);
+    // ± 按钮用 id 取（不用 parentNode + 属性选择器：无头验收 / 回归测试的假 DOM 里那两样都不可靠）
+    wireStep($(id + 'D'), () => put(+el.value - 1, true));
+    wireStep($(id + 'U'), () => put(+el.value + 1, true));
   }
   ['fcSharpen|sharpen', 'fcBright|brightness', 'fcContrast|contrast', 'fcSat|saturation', 'fcHue|hue'].forEach(s => {
     const [id, key] = s.split('|');
     bindSlider(id, key);
   });
+  // 裁剪边距：改的是**本张**（见 nudgeOf 上面的注释），四个方向都配了 ± 按钮
   ['fcT|t', 'fcB|b', 'fcL|l', 'fcR|r'].forEach(s => {
     const [id, key] = s.split('|');
-    $(id).oninput = () => { st.opt.nudge[key] = parseInt($(id).value, 10) || 0; drawPreview(); };
+    const el = $(id);
+    const put = (v) => {
+      const n = ensureNudge(st.sel);
+      n[key] = Math.round(v) || 0;
+      clampNudge(baseBox(), st.cur && st.cur.cutCv, n);
+      onNudgeChange();
+    };
+    el.oninput = () => { const v = parseInt(el.value, 10); if (!isNaN(v)) put(v); };
+    el.onchange = () => put(parseInt(el.value, 10) || 0);
+    const K = key.toUpperCase();
+    wireStep($('fc' + K + 'D'), () => put((nudgeOf(st.sel) || NG0)[key] - 1));
+    wireStep($('fc' + K + 'U'), () => put((nudgeOf(st.sel) || NG0)[key] + 1));
   });
-  $('fcPad').oninput = () => { st.opt.pad = parseInt($('fcPad').value, 10) || 0; drawPreview(); };
+  function putPad(v) {
+    st.opt.pad = Math.max(0, Math.round(v) || 0);
+    $('fcPad').value = st.opt.pad;
+    onNudgeChange();
+  }
+  $('fcPad').oninput = () => { const v = parseInt($('fcPad').value, 10); if (!isNaN(v)) putPad(v); };
+  $('fcPad').onchange = () => putPad(parseInt($('fcPad').value, 10) || 0);
+  wireStep($('fcPadD'), () => putPad(st.opt.pad - 1));
+  wireStep($('fcPadU'), () => putPad(st.opt.pad + 1));
   $('fcTrans').onchange = () => { st.opt.transparent = $('fcTrans').checked; drawPreview(); };
   $('fcShowFull').onchange = () => { st.showFull = $('fcShowFull').checked; drawPreview(); };
   $('fcDeskew').onchange = () => { st.opt.deskew = $('fcDeskew').checked; applyFrameOpts(false); };
@@ -7894,17 +8252,58 @@ function buildToolFrameCut() {
     st.opt.angle = (t === '' || isNaN(v)) ? null : v;
     applyFrameOpts(false);
   };
+  // 手动角度 ±0.5°/格。空着的时候从「本张自动检测到的角度」起算 —— 常见用法是
+  // 「自动摆正了但还差半度」，这时候要接着它微调，而不是从 0 开始。
+  function putAngle(v, clear) {
+    if (clear) { $('fcAngle').value = ''; st.opt.angle = null; }
+    else {
+      const a = Math.max(-45, Math.min(45, Math.round(v * 10) / 10));
+      $('fcAngle').value = a;
+      st.opt.angle = a;
+    }
+    applyFrameOpts(false);
+  }
+  const angNow = () => (st.opt.angle == null ? ((st.cur && st.cur.detAngle) || 0) : st.opt.angle);
+  wireStep($('fcAngD'), () => putAngle(angNow() - 0.5));
+  wireStep($('fcAngU'), () => putAngle(angNow() + 0.5));
+  // —— 手动调边 ——
+  $('fcEdge').onclick = () => setEdgeMode(!st.edge);
+  $('fcEdgeDone').onclick = () => setEdgeMode(false);
+  $('fcEdgeClear').onclick = () => {
+    const m = st.meta[st.sel];
+    if (!m || !m.nudge) { log('本张没有手动边距'); return; }
+    delete m.nudge;
+    renderRows(); syncNudge();
+    log(`第 ${st.sel + 1} 张：已清除手动边距（回到自动识别结果）`);
+    drawPreview();
+  };
+  $('fcEdgeAll').onclick = () => {
+    const n = nudgeOf(st.sel);
+    if (!n) { log('本张还没有手动边距 —— 先把这张调好，再点「套用到全部图片」'); return; }
+    for (let i = 0; i < st.files.length; i++) {
+      ensureNudge(i);
+      const t = st.meta[i].nudge;
+      t.t = n.t; t.b = n.b; t.l = n.l; t.r = n.r;
+    }
+    renderRows();
+    log(`已把手动边距（上 ${n.t} / 下 ${n.b} / 左 ${n.l} / 右 ${n.r} px）套用到全部 ${st.files.length} 张`);
+  };
   $('fcRedetect').onclick = () => {
     if (!st.cur) return;
-    ['fcT', 'fcB', 'fcL', 'fcR'].forEach(id => { $(id).value = '0'; });
-    st.opt.nudge = { t: 0, b: 0, l: 0, r: 0 };
+    // 「重新自动识别」= 把这张的手动痕迹全清掉再跑一遍检测。
+    // ⚠️ 只清**本张** —— 别的图的手动边距是用户一张张调出来的，不能被这一下冲掉。
+    const m = st.meta[st.sel];
+    if (m) delete m.nudge;
     $('fcAngle').value = '';
     st.opt.angle = null;
     applyFrameOpts(true);
+    renderRows();
+    log(`第 ${st.sel + 1} 张：已重新自动识别（本张的手动边距已清除）`);
   };
   $('fcReset').onclick = () => {
     st.opt.sharpen = st.opt.brightness = st.opt.contrast = st.opt.saturation = st.opt.hue = 0;
-    ['fcSharpen', 'fcBright', 'fcContrast', 'fcSat', 'fcHue'].forEach(id => { $(id).value = '0'; $(id + 'V').textContent = '0'; });
+    ['fcSharpen', 'fcBright', 'fcContrast', 'fcSat', 'fcHue'].forEach(id => { $(id).value = '0'; $(id + 'V').value = '0'; });
+    flushPreview();
     drawPreview();
   };
 
@@ -7959,7 +8358,8 @@ function buildToolFrameCut() {
         cutCv = p.cv; box = p.box; low = p.low; note = p.note;
       }
       if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
-      const b = applyNudge(box, cutCv);
+      // 逐张的边距（手动调边 / 右侧 ±）—— 没有就完全按自动结果
+      const b = applyNudge(box, cutCv, nudgeOf(i));
       if (!b) { setStatus(i, '跳过：微调值把范围压没了', 'err'); log(`第 ${i + 1} 张：裁剪范围无效，已跳过`); return null; }
       const out = renderCut(cutCv, b, st.opt);
       const bytes = await canvasToPngBytes(out);
