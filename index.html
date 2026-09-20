@@ -5166,6 +5166,159 @@ function secondBgRef(a) {
   if (inl.length < Math.max(8, n * 0.15)) return null;
   return medianOf(inl);
 }
+// 【已停用】在 L/S 掩码上「按行补全」的第一版做法：保留函数只为老测试/调试引用，
+// 源码里已无调用点。它把「有纹理 + 有种子」的行整行（或行内跨度）补成前景，本意是让
+// 白底白产品的行占用率回到满行，好让下游那个「取行占用最高段」的判据重新可用。
+// 实测它会把**检测本身**带偏：白盒子上的印刷 logo 有纹理、跨度也够宽，
+// 于是整片盒面被补成实心块，连通域打分里它的面积占比压过真正的框条，
+// DSC08578 的检测框整个跳到盒面上（输出 4716×508 里一大半是盒子，能看到「INTCO」水印）。
+// 现在改用下面这条**独立通道** textureBandMask：只往掩码里加「一块横贯画面的纹理带」，
+// 不修改原有像素，让原有的几何打分去决定选谁。
+// 珠光面、浅色木纹的框条在**亮度**和**饱和度**上都跟浅色背景几乎一样，|L−bg| 和 S−bgS
+// 两条判据一起失效，掩码只能抓到它自己的凹槽和上下边缘那几行。实测 DSC08574（米粉珠光条）
+// 产品在源图里高 138 行、掩码在检测框内每行只有 2~30% 的列被判为前景；DSC08580 更糟
+// （产品 205 行，而占用率最高的那几行 55% 其实是**产品下方的接触阴影**）—— 于是「取行占用率
+// 最高的那一段」的 alphaTightBox 直接把产品丢掉，导出只剩一条 37px 高的凹槽线，
+// 用户看到的就是「没有识别到主体」「裁切错误」。
+// 产品面和背景最大的差别其实是**纹理**：木纹/珠光/拉丝在水平方向有细密起伏，
+// 而背景纸、哑光台面是平滑的。所以按行统计水平梯度，把「纹理显著偏高、且本行已经有点
+// 前景种子」的行整行补成前景 —— 补全后产品行成为满行，而阴影行/桌面渐变依旧是低占用，
+// 下游那个行占用率判据才重新变得可用（否则它会一而再地选到阴影那一段）。
+// ⚠️ 「有种子」这个前提不能省：没有它，桌面的木纹、画面里别的样品会各自把整行拖进掩码，
+//    最后连成一片糊框（早期版本踩过这个坑：1920×1281 的样张直接框到全图）。
+// ⚠️ 阈值以**本图**背景纹理为基准，不用固定值：光滑台面和粗糙台面能差一个数量级，
+//    固定阈值在光滑台面上会把噪点全收进来、在粗糙台面上又完全不起作用。
+function bandTextureFill(u8, L, aw, ah) {
+  if (aw < 32 || ah < 32) return;
+  const rowTex = new Float32Array(ah), rowSeed = new Float32Array(ah);
+  const buf = new Float32Array(aw - 1);
+  for (let y = 0; y < ah; y++) {
+    const base = y * aw;
+    let c = 0;
+    for (let x = 0; x < aw; x++) {
+      if (u8[base + x]) c++;
+      if (x < aw - 1) buf[x] = Math.abs(L[base + x + 1] - L[base + x]);
+    }
+    rowSeed[y] = c / aw;
+    Array.prototype.sort.call(buf, (p, q) => p - q);
+    rowTex[y] = buf[buf.length >> 1];
+  }
+  const s = Float32Array.from(rowTex);
+  Array.prototype.sort.call(s, (p, q) => p - q);
+  const bgTex = s[Math.round((s.length - 1) * 0.35)];
+  const lim = Math.max(0.004, bgTex * 1.8);
+  for (let y = 0; y < ah; y++) {
+    if (rowSeed[y] < 0.03 || rowSeed[y] > 0.985) continue;
+    if (rowTex[y] <= lim) continue;
+    const base = y * aw;
+    // ⚠️ 只在该行「已经有前景」的横向范围内补，不要整行填。
+    //    整行填会把紧挨着产品的桌面、接触阴影一起吞进来 —— 实测 DSC08580 左端多出一整块
+    //    灰色桌面，输出宽度从 3677 涨到 6201（几乎全幅），用户看到的就是"又夹带背景了"。
+    let mn = -1, mx2 = -1, cnt = 0;
+    for (let x = 0; x < aw; x++) if (u8[base + x]) { if (mn < 0) mn = x; mx2 = x; cnt++; }
+    if (mn < 0) continue;
+    // ⚠️ 还要看这些前景的**横向跨度**：框条是横贯画面的，而画面里的印刷 logo、旁边的小物件、
+    //    桌面上的字迹都是**局部**的。只靠"有纹理 + 有种子"，白盒子上的「INTCO / www.intco.com.cn」
+    //    水印会被整行补光 —— 实测 DSC08578 因此把整个盒面连成了产品，导出 4716×508 里
+    //    一大半是盒子（能看到水印），真正的框条反而只占下半。
+    //    跨度闸门把这类东西挡在外面：框条行即使只有 3 成列被判为前景，也是**散布全宽**的。
+    if ((mx2 - mn + 1) < aw * 0.45) continue;
+    if (cnt < 2) continue;
+    for (let x = mn; x <= mx2; x++) u8[base + x] = 255;
+  }
+}
+// —— 纹理带通道：白底白产品的**定位**通道（治「没识别到主体」）——
+// 【症状】浅色/珠光/白浮雕的框条摆在白色桌面上，产品的 L 和 S 与桌面几乎相同，
+//   背景模型判不出它：掩码只抓到产品自己的凹槽与上下边缘那几行，
+//   于是检测框要么落到产品**下面那片接触阴影/桌面渐变**上（DSC08572：检测框
+//   y=1904..2701 完全在产品下方，导出的是桌面），要么只覆盖到产品的一小截
+//   （DSC08574 产品 ≈1644..1992，检测框 1648..2001 看着对，但掩码行占用只有 30~60%，
+//   下游「取行占用最高段」的 alphaTightBox 又把输出压到 183 行）。
+// 【判据】唯一还分得开的物理量是**纹理**：实拍棚里桌面（哑光）与白盒子（平滑纸面）
+//   都没有纹理，而框条上的珠光、木纹、浮雕在水平方向有细密起伏。
+//   实测 7 张白底白样张的「逐行水平纹理」剖面：背景恒在地板值（0.0039），
+//   产品行 0.008~0.035，用
+//     lim = 行纹理的 35 分位 + (97 分位 − 35 分位) × 0.35
+//   取最长连续段画红蓝两条线，7 张全部落在产品的上下边缘上（误差 < 1.5% 画高）。
+// 【为什么是独立通道而不是改掩码】第一版直接往 L/S 掩码里补行（bandTextureFill），
+//   会被白盒子上的印刷 logo 骗到 —— logo 有纹理、跨度也够宽，整片盒面被补成实心块，
+//   连通域面积占比压过真框条，DSC08578 的检测框整个跳到盒面上。
+//   独立通道只**加**一块纹理带，不碰原有像素，让原有的几何打分（面积×实心度×长宽比×
+//   贴边惩罚）去决定选纹理带还是选 L/S 候选。
+// ⚠️ 基线必须足够宽（画面宽的 ~0.7%，1200 宽时 ≈6px，这里按列带宽折算）：只用相邻像素差时，
+//    高调的珠光面与平滑桌面落在同一个量化台阶上，剖面是一条直线，完全分不开。
+// ⚠️ 阈值必须**相对本图**（分位数）而非固定值：哑光桌面与粗糙台面能差一个数量级。
+// ⚠️ 整段入参是「本方向的 L 数组 + stride」，横拍用 (L, aw, ah)，竖拍传转置后的数组
+//    (LT, ah, aw) 即可复用同一套逐行逻辑。
+function textureBandMask(u8, L, aw, ah) {
+  if (aw < 48 || ah < 32) return null;
+  const xa = Math.round(aw * 0.08), xb = aw - 1 - xa, nc = xb - xa + 1;
+  if (nc < 24) return null;
+  // 基线半径：≈ 画面宽的 0.84%（900 宽的检测掩码上是 8px ≈ 源图 52px）。
+  // ⚠️ 这个长度是实测定出来的，别改小：基线太短时，高调的珠光面与平滑桌面
+  //    落在同一个量化台阶上（都是 1/255），剖面成了一条直线，8572 那张直接整条失效。
+  //    在 19 张真机样张上扫过 1/80~1/200：1/100 是唯一让 7 张白底白**全部**命中的档位。
+  const D = Math.max(1, Math.round(nc / 100));
+  const wn = nc - 2 * D;
+  if (wn < 8) return null;
+  const rt = new Float32Array(ah), buf = new Float32Array(wn);
+  for (let y = 0; y < ah; y++) {
+    const base = y * aw;
+    for (let i = 0; i < wn; i++) buf[i] = Math.abs(L[base + xa + i + 2 * D] - L[base + xa + i]);
+    rt[y] = quantileOfN(buf, wn, 0.6);
+  }
+  const bg = quantileOfN(rt, ah, 0.35), pk = quantileOfN(rt, ah, 0.97);
+  // 整幅都没有纹理（全是平滑面）→ 这条通道没有信息，直接放弃，别硬凑一个带出来
+  // ⚠️ 门槛要按**亮度的一格量化**（1/255）给，别写「pk 至少是 bg 的 2.5 倍」这种相对判据：
+  //    L 是 8bit 来的，背景那一档的 rowTex 恰好落在一个台阶上（≈0.0039），
+  //    「2.5 倍」会要求 pk ≥ 0.0108，比真实产品行（0.0078）还高 → 高调照片整批被判成「没纹理」。
+  const q = 1 / 255;
+  if (!(pk - bg >= q * 0.9) || !(pk >= q * 1.6)) return null;
+  const lim = bg + (pk - bg) * 0.35;
+  const gap = Math.max(1, Math.round(ah * 0.02));
+  // 达标行取最长连续段（允许 2% 画高的小缝：产品中部偶尔有一条被磨平/过曝的带）
+  // ⚠️ 收尾必须 flush 一次：产品横贯画面时达标行会一直延续到循环结尾，
+  //    「遇到下一个不达标的行才结算」的话这一段永远不会被结算（bs 一直 -1 → 整条通道静默失效）。
+  // ⚠️ 必须丢掉**贴着画面上下边缘**的段：拍产品时框条一定整根落在画面里，而画面上下沿
+  //    恰恰是噪声/景深最近的地方 —— 实测 DSC08572 的画面最下方那 90 行（近处桌面的木纹）
+  //    纹理比产品自身还高，取「最长段」会直接选中它，然后因为不够宽而被整条否掉
+  //    （表现是这张图明明有清楚的纹理带，却完全没生效）。
+  const touching = (a, b) => (a <= 0 || b >= ah - 1);
+  let bs = -1, be = -1, s = -1, last = -1;
+  const take = (a, b) => { if (!touching(a, b) && b - a > be - bs) { bs = a; be = b; } };
+  for (let y = 0; y < ah; y++) {
+    if (rt[y] >= lim) { if (s < 0) s = y; last = y; }
+    else if (s >= 0 && y - last > gap) { take(s, last); s = -1; }
+  }
+  if (s >= 0) take(s, last);
+  if (bs < 0) return null;
+  const bh = be - bs + 1;
+  if (bh < Math.max(3, Math.round(ah * 0.02))) return null;
+  if (bh > ah * 0.45) return null;                  // 超过四成画高 → 不像一根框条
+  // 横向范围：带内逐列用同样口径量一次纹理，取最长的一段（迟滞扩边，收回圆头端头）
+  const ctex = new Float32Array(aw);
+  for (let x = xa + D; x <= xb - D; x++) {
+    let sum = 0;
+    for (let y = bs; y <= be; y++) sum += Math.abs(L[y * aw + x + D] - L[y * aw + x - D]);
+    ctex[x] = sum / bh;
+  }
+  const lo = xa + D, hi = xb - D;
+  let c0 = -1, c1 = -1, m0 = -1, lastx = -1;
+  for (let x = lo; x <= hi; x++) {
+    if (ctex[x] >= lim) { if (m0 < 0) m0 = x; lastx = x; }
+    else if (m0 >= 0 && x - lastx > gap) { if (lastx - m0 > c1 - c0) { c0 = m0; c1 = lastx; } m0 = -1; }
+  }
+  if (m0 >= 0 && lastx - m0 > c1 - c0) { c0 = m0; c1 = lastx; }
+  if (c0 < 0) return null;
+  while (c0 > lo && ctex[c0 - 1] >= lim * 0.6) c0--;
+  while (c1 < hi && ctex[c1 + 1] >= lim * 0.6) c1++;
+  if (c1 - c0 + 1 < aw * 0.35) return null;         // 不够宽 → 不像横贯画面的框条
+  for (let y = bs; y <= be; y++) {
+    const base = y * aw;
+    for (let x = c0; x <= c1; x++) u8[base + x] = 255;
+  }
+  return { y0: bs, y1: be, x0: c0, x1: c1 };
+}
 function bandMaskCol(L, S, aw, ah, o, band, hint) {
   const u8 = new Uint8Array(aw * ah);
   const tl = [], ts = [];
@@ -5202,6 +5355,8 @@ function bandMaskCol(L, S, aw, ah, o, band, hint) {
           if (Math.abs(L[p] - bgL) > o.tL || (S[p] - bgS) > o.tS) u8[p] = 255;
         }
       }
+      // ⚠️ 白底白产品不在这里补行 —— 补了会污染检测本身（见 textureBandMask 的注释），
+      //    改由 detectStripBox 里的「纹理带通道」独立处理。
       return u8;
     }
   }
@@ -5258,6 +5413,7 @@ function bandMaskCol(L, S, aw, ah, o, band, hint) {
       if (Math.abs(L[p] - bgL) > o.tL || (S[p] - bgS) > o.tS) u8[p] = 255;
     }
   }
+  // ⚠️ 同上：白底白产品交给 textureBandMask 这条独立通道，不在这里补行。
   return u8;
 }
 // 转置（行列互换）：竖着拍的照片转置过来就能用上面同一套「逐列」模型。
@@ -5591,36 +5747,67 @@ function projBody(raw, rawComps, mw, mh, o) {
   }
   const rr = longestRun(rowfrac, 0.45, 1);
   if (!rr || rr[1] - rr[0] + 1 < mh * 0.03) return null;
-  let ry0 = rr[0], ry1 = rr[1];
-  while (ry0 > 0 && rowfrac[ry0 - 1] >= 0.12) ry0--;
-  while (ry1 < mh - 1 && rowfrac[ry1 + 1] >= 0.12) ry1++;
-  const colfrac = new Float32Array(mw);
-  for (let x = 0; x < mw; x++) {
-    let c = 0;
-    for (let y = ry0; y <= ry1; y++) if (raw[y * mw + x]) c++;
-    colfrac[x] = c / (ry1 - ry0 + 1);
-  }
-  const cruns = [];
-  {
+  // 逐列覆盖率 + 列段（只在给定的行段内统计）。抽成函数是为了能对**两个行段**各试一次。
+  const colStage = (ya, yb) => {
+    const bh = yb - ya + 1;
+    const colfrac = new Float32Array(mw);
+    for (let x = 0; x < mw; x++) {
+      let c = 0;
+      for (let y = ya; y <= yb; y++) if (raw[y * mw + x]) c++;
+      colfrac[x] = c / bh;
+    }
+    const cruns = [];
     let s = -1;
     for (let x = 0; x <= mw; x++) {
       const on = x < mw && colfrac[x] >= 0.7;
       if (on) { if (s < 0) s = x; }
       else if (s >= 0) { if (x - s >= 4) cruns.push([s, x - 1]); s = -1; }
     }
+    const merged = joinRuns(cruns, mw);
+    if (!merged.length) return null;
+    let cr = merged[0];
+    for (let i = 1; i < merged.length; i++) if (merged[i][1] - merged[i][0] > cr[1] - cr[0]) cr = merged[i];
+    if (cr[1] - cr[0] + 1 < mw * 0.2) return null;
+    let cx0 = cr[0], cx1 = cr[1];
+    // ⚠️ 迟滞扩边的门限要**相对**于段内自身的覆盖率，不能写死 0.35：
+    //    紧挨着条带左端躺着别的样品时，那些列的覆盖率是 0.3~0.45（样品压到了条带这几行里），
+    //    写死 0.35 会一路扩到画面左边缘，把别的样品整块框进来（实测 DSC08582：
+    //    骨架列段本来是 110..819，扩边后变成 0..819，导出的左端五分之一是旁边的黑框样品）。
+    //    改成按段内第一列的覆盖率打折：真条带的端头覆盖率是渐变下降的，差一点点就能过；
+    //    另一个物体的列是**台阶式**掉下去的，直接卡住。
+    const lo0 = Math.max(0.35, colfrac[cr[0]] * 0.65);
+    const lo1 = Math.max(0.35, colfrac[cr[1]] * 0.65);
+    while (cx0 > 0 && colfrac[cx0 - 1] >= lo0) cx0--;
+    while (cx1 < mw - 1 && colfrac[cx1 + 1] >= lo1) cx1++;
+    return [cx0, cx1];
+  };
+  const tryBand = (ya, yb) => {
+    const cr = colStage(ya, yb);
+    if (!cr) return null;
+    const b = refineBody(rawComps, { x0: cr[0], y0: ya, x1: cr[1], y1: yb }, mw, mh);
+    if (!b) return null;
+    if (b.fill < o.minFill) return null;
+    if (b.longFrac < o.minLong && b.norm < o.minArea) return null;
+    return b;
+  };
+  // 「骨架行段」与「迟滞扩边行段」各试一次，取打分更高的那个。
+  // ⚠️ 两个都要试，不能「骨架成功就不看扩边」：扩边那段原是为了给倾斜条带留余量
+  //    （见上面的注释），但 0.12 这个低阈值同时也会把**画面里别的东西**的行收进来 ——
+  //    实测 DSC08582/08584 桌上还并排躺着别的框条样品，那几行的覆盖率是 12~35%：
+  //    够不到 0.45 的骨架线，却够得到 0.12 的扩边线。行段一被拉长（78 行 → 139 行），
+  //    真条带只占其中五六成，「列覆盖 ≥0.7」一列都选不出来，这一路直接空手而归；
+  //    而反过来，白底白样张（DSC08572）的骨架行段偏窄，扩边段反而给出更长更整的条带。
+  //    所以两路都跑、按分取胜，哪一边都不吃亏。
+  let body = tryBand(rr[0], rr[1]);
+  {
+    let ey0 = rr[0], ey1 = rr[1];
+    while (ey0 > 0 && rowfrac[ey0 - 1] >= 0.12) ey0--;
+    while (ey1 < mh - 1 && rowfrac[ey1 + 1] >= 0.12) ey1++;
+    if (ey0 !== rr[0] || ey1 !== rr[1]) {
+      const b2 = tryBand(ey0, ey1);
+      if (b2 && (!body || b2.score > body.score)) body = b2;
+    }
   }
-  const merged = joinRuns(cruns, mw);
-  if (!merged.length) return null;
-  let cr = merged[0];
-  for (let i = 1; i < merged.length; i++) if (merged[i][1] - merged[i][0] > cr[1] - cr[0]) cr = merged[i];
-  if (cr[1] - cr[0] + 1 < mw * 0.2) return null;
-  let cx0 = cr[0], cx1 = cr[1];
-  while (cx0 > 0 && colfrac[cx0 - 1] >= 0.35) cx0--;
-  while (cx1 < mw - 1 && colfrac[cx1 + 1] >= 0.35) cx1++;
-  const body = refineBody(rawComps, { x0: cx0, y0: ry0, x1: cx1, y1: ry1 }, mw, mh);
-  if (!body) return null;
-  if (body.fill < o.minFill) return null;
-  if (body.longFrac < o.minLong && body.norm < o.minArea) return null;
   return body;
 }
 // 一个方向上「连通域候选」与「投影候选」打一架，取更可信的
@@ -5632,13 +5819,23 @@ function projBody(raw, rawComps, mw, mh, o) {
 // 所以「上下还留着背景」比形状更硬。不直接丢弃：万一是用户把框条拍出画了，还得靠它兜底。
 function ownEdgeFactor(body, raw, mw, mh) {
   const k = Math.max(2, Math.round(mh * 0.03));
+  // ⚠️ 只看候选**中段 70%** 的上下邻域，不看两端。
+  //    「上方还有别的样品」这个反例真实存在（实测 DSC08582/08584：桌上并排躺着别的框条，
+  //    它们紧挨着真条带的左右端）—— 如果按整条宽度统计，这些端头的邻居会把比值拱到 0.25 以上，
+  //    于是一个干净、细长、实心度 0.91 的候选（projBody 给的那条）被罚到 0.3，
+  //    最后输给 pickBody 那个把左端样品一起框进去的大块（导出 6176×258，左边五分之一是样品）。
+  //    真正要罚的是「整根框条贴着画面上下边缘」——那种情况下中段上方也照样是满的，
+  //    判据一点没弱（回归里那几条断言仍然成立）。
+  const bw = body.x1 - body.x0 + 1;
+  const mx0 = body.x0 + Math.round(bw * 0.25), mx1 = body.x1 - Math.round(bw * 0.25);
+  const x0 = mx1 >= mx0 ? mx0 : body.x0, x1 = mx1 >= mx0 ? mx1 : body.x1;
   let bad = 0;
   for (let side = 0; side < 2; side++) {
     let den = 0, fg = 0, out = false;
     for (let j = 1; j <= k; j++) {
       const y = side ? body.y1 + j : body.y0 - j;
       if (y < 0 || y >= mh) { out = true; break; }
-      for (let x = body.x0; x <= body.x1; x++) { den++; if (raw[y * mw + x]) fg++; }
+      for (let x = x0; x <= x1; x++) { den++; if (raw[y * mw + x]) fg++; }
     }
     if (out || (den && fg / den > 0.25)) bad++;
   }
@@ -5671,11 +5868,19 @@ function detectStripBox(cv, opt) {
   const ls = lumSatOf(sampleOf(cv, aw, ah), N);
   // 两个方向各跑一遍，取更可信的那一个。抽成函数是为了能用**第二个背景假设**整体重跑。
   const scanBoth = (hint) => {
-    const c0 = bestBody(bandMaskCol(ls.L, ls.S, aw, ah, o, null, hint), aw, ah, o);
+    // 掩码 = L/S 通道 ∪ 纹理带通道。白底白产品只有后一条能定位到（见 textureBandMask 的注释）
+    const raw0 = bandMaskCol(ls.L, ls.S, aw, ah, o, null, hint);
+    textureBandMask(raw0, ls.L, aw, ah);
+    const c0 = bestBody(raw0, aw, ah, o);
     // 已经明显是一条长条时就不必再试竖向了（省一次连通域分析，批量时差近一倍时间）
     const sure = c0 && c0.asp >= 3.5 && c0.longFrac >= 0.5;
-    const c1 = sure ? null : bestBody(
-      bandMaskCol(transposeArr(ls.L, aw, ah), transposeArr(ls.S, aw, ah), ah, aw, o, null, hint), ah, aw, o);
+    let c1 = null;
+    if (!sure) {
+      const LT = transposeArr(ls.L, aw, ah), ST = transposeArr(ls.S, aw, ah);
+      const rawT = bandMaskCol(LT, ST, ah, aw, o, null, hint);
+      textureBandMask(rawT, LT, ah, aw);
+      c1 = bestBody(rawT, ah, aw, o);
+    }
     const s1 = c1 ? c1.score * 0.97 : -1;    // 横着拍才是默认，分数接近时优先正常方向
     if (!c0 && !c1) return null;
     if (!c1 || c0.score >= s1) return { c: c0, u8: c0.u8, angle: c0.angle, x: c0.x0, y: c0.y0, X: c0.x1, Y: c0.y1 };
@@ -5712,14 +5917,129 @@ function detectStripBox(cv, opt) {
     }
   }
   if (!pick) return null;
-  const u8 = pick.u8, angle = pick.angle, x0 = pick.x, y0 = pick.y, x1 = pick.X, y1 = pick.Y;
+  const u8 = pick.u8;
   const fx = W / aw, fy = H / ah;
+  const bx0 = Math.max(0, Math.floor(pick.x * fx)), by0 = Math.max(0, Math.floor(pick.y * fy));
+  const bx1 = Math.min(W - 1, Math.ceil((pick.X + 1) * fx) - 1), by1 = Math.min(H - 1, Math.ceil((pick.Y + 1) * fy) - 1);
   return {
-    x0: Math.max(0, Math.floor(x0 * fx)), y0: Math.max(0, Math.floor(y0 * fy)),
-    x1: Math.min(W - 1, Math.ceil((x1 + 1) * fx) - 1), y1: Math.min(H - 1, Math.ceil((y1 + 1) * fy) - 1),
-    angle: angle,
+    x0: bx0, y0: by0, x1: bx1, y1: by1,
+    angle: stripAngleFor(cv, bx0, by0, bx1, by1, pick.angle),
     mask: { u8: u8, aw: aw, ah: ah, fullW: W, fullH: H },
   };
+}
+// —— 倾角：投影方差法（框条的两条长边与「行」对齐时，逐行梯度能量最集中） ——
+// 这是文档摆正的经典判据，这里用它量框条的倾角。之所以不再用「掩码上下沿拟合」：
+//   掩码里混着框条下方那团**接触阴影**（横贯整幅、与条带连成一片），拟合出来的倾角实测
+//   能偏到 −8.3°（真值 ≈0°）；按这个角度摆正，条带反而被转歪、掩码重采样跟着崩成一条细缝
+//   （19 张真机样张里 7 张如此，导出只剩 50~90 px 高的一条）。
+//   也不用「最小包围盒高度 / 主轴」：那等于主轴方向，阴影团会把它拉偏。
+// 做法：把检测框（上下各外扩 30%）按 θ 旋转，逐行累加竖直差分得剖面 S(y)，
+//   以 Σ S(y)² 为得分 —— 边与行对齐时梯度能量挤进极少数几行，得分最大。
+//   粗扫 0.2° 定峰，再在峰值附近细扫 0.05°。合成样张 0/±2/5° 全部精确命中。
+function estimateSkewProj(cv, box, opt) {
+  const o = Object.assign({ maxw: 700, range: 8, coarse: 0.2, fine: 0.05, margin: 0.3 }, opt || {});
+  if (!box) return 0;
+  const bh = box.y1 - box.y0 + 1;
+  const mg = Math.round(bh * o.margin);
+  const x0 = Math.max(0, box.x0 - 40), y0 = Math.max(0, box.y0 - mg);
+  const x1 = Math.min(cv.width - 1, box.x1 + 40), y1 = Math.min(cv.height - 1, box.y1 + mg);
+  const bw = x1 - x0 + 1, bh2 = y1 - y0 + 1;
+  if (bw < 64 || bh2 < 20) return 0;
+  const k = Math.min(1, o.maxw / bw);
+  const w = Math.max(64, Math.round(bw * k)), h = Math.max(20, Math.round(bh2 * k));
+  const tc = document.createElement('canvas'); tc.width = w; tc.height = h;
+  const tcx = tc.getContext('2d');
+  tcx.imageSmoothingEnabled = true; tcx.imageSmoothingQuality = 'high';
+  tcx.drawImage(cv, x0, y0, bw, bh2, 0, 0, w, h);
+  const d = tcx.getImageData(0, 0, w, h).data;
+  const N = w * h, L = new Float32Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) L[p] = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+  const xa = Math.round(w * 0.04), xb = w - 1 - xa, nc = xb - xa + 1;
+  if (nc < 16 || h < 16) return 0;
+  const ox0 = (w - 1) / 2, oy0 = (h - 1) / 2;
+  const cstep = Math.max(1, Math.round(nc / 220));
+  // 沿「转过 θ 的采样线」逐点取竖直差分 |ΔL|，按行累加成剖面 S(y)。
+  const scan = (th, fn) => {
+    const A = th * Math.PI / 180, ca = Math.cos(A), sa = Math.sin(A);
+    for (let y = 0; y < h; y++) {
+      const dy = y - oy0;
+      for (let i = 0; i < nc; i += cstep) {
+        const dx = xa + i - ox0;
+        const ix = Math.round(ox0 + dx * ca - dy * sa), iy = Math.round(oy0 + dx * sa + dy * ca);
+        let v = 0;
+        if (iy >= 1 && iy < h - 1 && ix >= 0 && ix < w) {
+          v = Math.abs(L[(iy - 1) * w + ix] - L[(iy + 1) * w + ix]);
+          if (v > 0.5) v = 0.5;
+        }
+        fn(v, y);
+      }
+    }
+  };
+  // 得分 = Σ_y S(y)²  —— 「梯度能量尽量挤进少数几行」。
+  // 边与采样线平行时，整条边的能量压在 1~2 行上，Σ S² 取最大；偏一点，
+  // 边就被斜着摊到 nc·sin(Δθ) 行里，每行只剩 1/m，Σ S² 按 1/m 衰减（单调、无平台）。
+  // ⚠️ 走过的两条弯路，别再回去：
+  //   ① 「逐行 0.6 分位 → 取剖面方差」会**饱和**：偏 0.6° 时行内仍有 86% 的点落在边上，
+  //      分位值不变、方差反因摊开而变大 → 系统性偏大 0.4~0.6°（合成 2° 估成 2.4°、5° 估成 5.4°）。
+  //   ② 「数差分 ≥ τ 的采样点个数」**根本不成立**：采样点总数与 θ 几乎无关
+  //      （≈ 2·边长/步长），曲线是平的，结果由噪声决定（合成 2° 估成 7.6°）。
+  //   用「行和」而不是「行均值」：条带只占部分宽度时两者只差一个与 θ 无关的常数因子，
+  //   不影响峰值位置，但行和天然压住了「半幅空桌面」这类弱背景的干扰。
+  const score = (th) => {
+    const S = new Float64Array(h);
+    scan(th, (v, y) => { S[y] += v; });
+    let s = 0;
+    for (let y = 0; y < h; y++) s += S[y] * S[y];
+    return s;
+  };
+  let bTh = 0, bSc = -1;
+  for (let th = -o.range; th <= o.range + 1e-9; th += o.coarse) {
+    const s = score(th);
+    if (s > bSc) { bSc = s; bTh = th; }
+  }
+  let fTh = bTh, fSc = bSc;
+  for (let th = bTh - o.coarse; th <= bTh + o.coarse + 1e-9; th += o.fine) {
+    const s = score(th);
+    if (s > fSc) { fSc = s; fTh = th; }
+  }
+  return +fTh.toFixed(2);
+}
+// 【已停用】原来在这里用「产品两条长边」把检测框收紧，但它是在**摆正之后**又收一次，
+// 而它依赖的 bandLinesInRegion 在摆正画布上并不可靠（19 张真机样张里 3 张返回 null、
+// 2 张给出比条带厚 4~10 倍的厚度）—— 结果反而把框收坏：8576 从 385 行收到 82 行、
+// 8580 从 210 行收到 32 行，输出成了条带中间的一小截。
+// 现在改用「先按掩码行占用率定带、再把输出纵向裁到带的范围」（tightenBand + alphaTightBox），
+// 不需要它了。保留函数只为老测试/调试引用，恒定原样返回。
+function tightenBoxByEdges(cv, box) {
+  return box;
+}
+// 框好之后再用「产品的两条长边」量一次倾角，比掩码上下沿准得多：
+// 掩码的上下沿里混着接触阴影与桌面渐变，拟合出来的倾角实测能偏到 −8.3°（真值不到 1°），
+// 一旦按它摆正，整条产品被转歪、掩码重采样也跟着崩（那几张导出只剩一条细缝）。
+// 只在「横向长条」时用；竖着拍的交给原来的主轴/投影估计（竖条的上下边不是长边）。
+function stripAngleInBox(cv, bx0, by0, bx1, by1, fallback) {
+  const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+  if (!(bw > bh * 1.2) || bw < 128 || bh < 12) return fallback;
+  const m = Math.round(bh * 0.3);
+  const ln = bandLinesInRegion(cv, bx0, by0 - m, bx1, by1 + m);
+  if (!ln) return fallback;
+  if (!(Math.abs(ln.angle) < 25)) return fallback;
+  return ln.angle;
+}
+// 倾角的正式入口：横向长条用投影方差法（稳，实测把 7 张原本歪掉的样张全部摆正），
+// 投影法的结果离谱（≥20°）或框本身不是横向长条时，退回梯度长边拟合，再退回调用方给的值。
+function stripAngleFor(cv, x0, y0, x1, y1, fallback) {
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+  if (!(bw > bh * 1.2) || bw < 128 || bh < 12) return fallback;
+  const p = estimateSkewProj(cv, { x0: x0, y0: y0, x1: x1, y1: y1 });
+  if (isFinite(p) && Math.abs(p) < 20 && Math.abs(p) <= 8) {
+    // 投影法与梯度长边拟合互不矛盾时采信投影法；差异过大时偏向梯度（那是真轮廓）
+    const g = stripAngleInBox(cv, x0, y0, x1, y1, null);
+    if (g != null && Math.abs(g - p) > 6) return g;
+    return p;
+  }
+  const g2 = stripAngleInBox(cv, x0, y0, x1, y1, fallback);
+  return g2 == null ? fallback : g2;
 }
 // —— 更稳的检测：主检测失败时逐级降级，保证「永远有个能用的起点」 ——
 // 真实拍摄里光照/背景千差万别，主检测（阈值偏严）会漏检；漏检后若没有兜底，
@@ -5733,10 +6053,10 @@ function detectStripBoxRobust(cv) {
   if (b1) return { box: b1, low: true, note: '低置信度，请核对裁剪范围', angle: b1.angle || 0 };
   // 降级 2：前景掩码包围盒（与背景不同的像素全算前景，取分位数包围盒）
   const b2 = detectByMaskBBox(cv, false);
-  if (b2) return { box: b2, low: true, note: '低置信度，请核对裁剪范围', angle: 0 };
+  if (b2) return { box: b2, low: true, note: '低置信度，请核对裁剪范围', angle: b2.angle || 0 };
   // 降级 3：强制用掩码包围盒（哪怕前景很少/很多），至少给个贴近主体的起点
   const b3 = detectByMaskBBox(cv, true);
-  if (b3) return { box: b3, low: true, note: '未自动定位到框条，已按「非背景区域」作起点，请手动微调', angle: 0 };
+  if (b3) return { box: b3, low: true, note: '未自动定位到框条，已按「非背景区域」作起点，请手动微调', angle: b3.angle || 0 };
   return { box: null, low: false, note: '没识别到框条，请手动微调', angle: 0 };
 }
 // 背景取四边中位数 → 前景掩码 → 包围盒（按分位数裁掉零散噪点）
@@ -5772,9 +6092,12 @@ function detectByMaskBBox(cv, force) {
   const qx0 = q(xs, 0.005), qx1 = q(xs, 0.995), qy0 = q(ys, 0.005), qy1 = q(ys, 0.995);
   if (!force && (qx1 - qx0 < aw * 0.05 || qy1 - qy0 < ah * 0.02)) return null;
   const sx = W / aw, sy = H / ah;
+  const rx0 = Math.max(0, Math.floor(qx0 * sx)), ry0 = Math.max(0, Math.floor(qy0 * sy));
+  const rx1 = Math.min(W - 1, Math.ceil((qx1 + 1) * sx)), ry1 = Math.min(H - 1, Math.ceil((qy1 + 1) * sy));
   return {
-    x0: Math.max(0, Math.floor(qx0 * sx)), y0: Math.max(0, Math.floor(qy0 * sy)),
-    x1: Math.min(W - 1, Math.ceil((qx1 + 1) * sx)), y1: Math.min(H - 1, Math.ceil((qy1 + 1) * sy)),
+    x0: rx0, y0: ry0, x1: rx1, y1: ry1,
+    // 降级路径原来固定给 0°，等于「倾斜的照片在这里永远不摆正」；同样用长边量一次
+    angle: stripAngleFor(cv, rx0, ry0, rx1, ry1, 0),
     mask: { u8: u8, aw: aw, ah: ah, fullW: W, fullH: H },
   };
 }
@@ -5894,16 +6217,24 @@ function prepareFrame(cv, opt) {
   const manual = (o.angle == null || isNaN(o.angle)) ? null : normAngleDeg(o.angle);
   const ang = manual == null ? (r.angle || 0) : manual;
   res.angle = ang;
-  if (o.deskew === false || Math.abs(ang) < 0.15) return res;
+  if (o.deskew === false || Math.abs(ang) < 0.15) {
+    res.box = tightenBoxByEdges(cv, r.box);
+    return res;
+  }
   const d = deskewCut(cv, r.box, ang);
   if (d && d.cv.width > 1 && d.cv.height > 1) {
-    res.cv = d.cv; res.box = d.box; res.rotated = true; res.xf = d.xf;
+    // 摆正后条带已经是横的，再用长边把框收到正好包住产品（去掉了阴影与被撑高的部分）
+    res.cv = d.cv; res.box = tightenBoxByEdges(d.cv, d.box) || d.box;
+    res.rotated = true; res.xf = d.xf;
   }
   return res;
 }
 
 // 用分析尺度掩码生成裁剪区的 alpha（上采样 + 行内填充 + 1px 羽化）
-function maskToAlpha(mask, box, w, h) {
+// rawOut（可选）：把**还没做几何收边**的那一版 alpha 也带出去。cleanup 之前的那一版
+//   才保留了「这一列上有什么形状的前景」（top/bot）—— 收边之后整块会被填成实心矩形，
+//   列与列之间就再也分不出差别了（下面的 alphaEndsByEdges 要用它）。
+function maskToAlpha(mask, box, w, h, lum, rawOut) {
   const mc = document.createElement('canvas');
   mc.width = mask.aw; mc.height = mask.ah;
   const mctx = mc.getContext('2d');
@@ -5923,11 +6254,17 @@ function maskToAlpha(mask, box, w, h) {
   const ad = actx.getImageData(0, 0, w, h).data;
   const a = new Uint8Array(w * h);
   for (let p = 0; p < w * h; p++) a[p] = ad[p * 4 + 3] > 128 ? 255 : 0;
+  if (rawOut && rawOut.length === a.length) rawOut.set(a);
   fillAlphaRuns(a, w, h);
   fillAlphaCols(a, w, h);
   // 最后按几何收边：连贯、无空洞、边缘直线（补缝只解决了「小缝」，大空洞与碎块靠这一步）
   const t = tightenBand(a, w, h);
-  return featherAlpha(t, w, h, 1);
+  // 再把上下沿吸附到真正的强边缘上：这一步专治「接触阴影被当成产品」——
+  // 阴影与桌面是缓变过渡（每行 1~3 级），产品边缘是台阶（每行 20~40 级），只有梯度分得开
+  const t2 = snapAlphaBand(t, lum, w, h);
+  // 再补一道「不靠梯度」的直线化：白底白产品的边是软过渡，上一步会整条放弃
+  const t3 = straightenBand(t2, w, h);
+  return featherAlpha(t3, w, h, 1);
 }
 // —— 收边：把 alpha 按几何重建成「上下边是直线、中间实心」的长条 ——
 // 逐像素的颜色阈值天生做不到下面三件事，只能最后统一按几何收一遍（用户的三条要求）：
@@ -5944,6 +6281,159 @@ function maskToAlpha(mask, box, w, h) {
 //   ④ 被剔除的列用左右最近的有效列线性插值补齐；两端之外的列保持透明
 //      （条带两端之外本来就该是空的，不能被插值凭空补出来）；
 //   ⑤ alpha = 1 在 [top, bot] 内 —— 空洞、碎块、缺口一并消失。
+// ——— 用「竖直梯度」直接找产品的上下两条长边 ———
+// 为什么必须走梯度：实拍里产品下方那片**接触阴影**常有几百像素高、横贯整幅，与桌面的
+// 亮度差刚好越过颜色阈值 —— 它和产品连成同一个连通块，包围盒被撑高 1.4~2.1 倍；桌面
+// 本身还有照明渐变（同一列里前后能差 30 级），所以「带内 vs 带外」的绝对亮度判据也会
+// 跟着失效。（19 张真机样张实测：11 张的框被阴影撑高、2 张整幅被选中。）
+//   但阴影的边界是**缓变**的（每行 1~3 级），产品边缘是**台阶**（每行 20~40 级）——
+// 颜色阈值看不出这个差别，梯度可以；而且梯度是局部的，与绝对亮度无关。
+function quantileOfN(a, n, q) {
+  if (n <= 0) return 0;
+  const b = Float32Array.prototype.slice.call(a, 0, n);
+  b.sort();
+  return b[Math.min(n - 1, Math.max(0, Math.round((n - 1) * q)))];
+}
+function medianArr(v) {
+  if (!v.length) return 0;
+  const b = v.slice().sort((p, q) => p - q);
+  return b[b.length >> 1];
+}
+// 逐行「边缘强度」：取该行竖直差分的 0.6 分位（不用均值 —— 产品只占一部分宽度时会被
+// 空桌面稀释）。正负两个方向各取一次，谁大用谁，并记下方向（产品的上边与下边方向必然相反）。
+function edgeRowProfile(L, aw, ah, xa, xb, G) {
+  const nc = xb - xa + 1;
+  const S = new Float32Array(ah), SG = new Int8Array(ah);
+  const buf = new Float32Array(nc), tmp = new Float32Array(nc);
+  for (let y = G; y < ah - G; y++) {
+    for (let i = 0; i < nc; i++) buf[i] = L[(y + G) * aw + xa + i] - L[(y - G) * aw + xa + i];
+    for (let i = 0; i < nc; i++) tmp[i] = buf[i];
+    const qp = quantileOfN(tmp, nc, 0.6);
+    for (let i = 0; i < nc; i++) tmp[i] = -buf[i];
+    const qn = quantileOfN(tmp, nc, 0.6);
+    if (qp >= qn) { S[y] = qp; SG[y] = 1; } else { S[y] = qn; SG[y] = -1; }
+  }
+  return { S: S, SG: SG };
+}
+// 一对候选边的得分 = 两条边各自的强度 + 0.6×「带内与带外的亮度差」。
+// 后一项是关键：只有「两条边之间确实是一个不同颜色/明度的东西」才算产品，
+// 否则找出来的可能只是桌面上的两条明暗分界线。
+function edgePairScore(L, aw, ah, xa, xb, yt, yb, S) {
+  const g = Math.max(3, Math.round((yb - yt) * 0.3));
+  const step = Math.max(1, Math.round((xb - xa) / 160));
+  const ins = [], out = [];
+  for (let x = xa; x <= xb; x += step) {
+    let si = 0, ni = 0;
+    for (let y = yt + 1; y < yb; y++) { si += L[y * aw + x]; ni++; }
+    let so = 0, no = 0;
+    for (let y = Math.max(0, yt - g); y < yt; y++) { so += L[y * aw + x]; no++; }
+    for (let y = yb + 1; y <= Math.min(ah - 1, yb + g); y++) { so += L[y * aw + x]; no++; }
+    if (!ni || !no) continue;
+    ins.push(si / ni); out.push(so / no);
+  }
+  if (ins.length < 4) return -1e9;
+  return S[yt] + S[yb] + 0.6 * Math.abs(medianArr(ins) - medianArr(out));
+}
+function pickEdgePair(L, aw, ah, xa, xb, S, SG, tMin, tMax) {
+  const cand = [];
+  for (let y = 1; y < ah - 1; y++) if (S[y] >= 0.02 && S[y] >= S[y - 1] && S[y] >= S[y + 1]) cand.push(y);
+  if (cand.length < 2) return null;
+  cand.sort((a, b) => S[b] - S[a]);
+  const top = cand.slice(0, 26).sort((a, b) => a - b);
+  let best = null;
+  for (let i = 0; i < top.length; i++) {
+    for (let j = i + 1; j < top.length; j++) {
+      const yt = top[i], yb = top[j], th = yb - yt;
+      if (th < tMin || th > tMax) continue;
+      if (SG[yb] === SG[yt]) continue;                 // 上下边方向必须相反
+      const sc = edgePairScore(L, aw, ah, xa, xb, yt, yb, S);
+      if (!best || sc > best.sc) best = { yt: yt, yb: yb, sc: sc };
+    }
+  }
+  return best;
+}
+// 逐列把上下沿吸附到**最靠外的强梯度**上，再做一次抗离群直线拟合。
+// 取「最靠外」而不是「最强」：产品内部的花线/凹槽梯度也很强，靠外才是轮廓。
+function refineEdgeLines(L, aw, ah, xa, xb, yt, yb) {
+  const th = Math.max(3, yb - yt);
+  const win = Math.max(2, Math.round(th * 0.4));
+  const G = 1;
+  const XT = [], ET = [], XB = [], EB = [];
+  const yA = Math.max(G, yt - win), yC = Math.min(ah - 1 - G, yt + win);
+  const yD = Math.max(G, yb - win), yF = Math.min(ah - 1 - G, yb + win);
+  const gradAt = (x, y) => Math.abs(L[(y + G) * aw + x] - L[(y - G) * aw + x]);
+  for (let x = xa; x <= xb; x++) {
+    let mx = 0;
+    for (let y = yA; y <= yC; y++) { const v = gradAt(x, y); if (v > mx) mx = v; }
+    if (mx >= 0.06) {
+      const lim = mx * 0.6;
+      for (let y = yA; y <= yC; y++) if (gradAt(x, y) >= lim) { XT.push(x); ET.push(y); break; }
+    }
+    mx = 0;
+    for (let y = yD; y <= yF; y++) { const v = gradAt(x, y); if (v > mx) mx = v; }
+    if (mx >= 0.06) {
+      const lim = mx * 0.6;
+      for (let y = yF; y >= yD; y--) if (gradAt(x, y) >= lim) { XB.push(x); EB.push(y); break; }
+    }
+  }
+  const need = Math.max(8, Math.round((xb - xa + 1) * 0.45));
+  if (XT.length < need || XB.length < need) return null;
+  const st = fitLineSlope(XT, ET), sb = fitLineSlope(XB, EB);
+  if (st == null || sb == null) return null;
+  const mt = medianArr(ET), mb = medianArr(EB);
+  const mxt = medianArr(XT), mxb = medianArr(XB);
+  const a1 = mt - st * mxt, a2 = mb - sb * mxb;
+  // 两条边各自把点贴得够紧吗（太散说明根本没找到一条直边）
+  const madOf = (X, E, s, a) => {
+    const v = [];
+    for (let i = 0; i < X.length; i++) v.push(Math.abs(E[i] - (a + s * X[i])));
+    return medianArr(v);
+  };
+  const mtol = Math.max(1.2, th * 0.06);
+  if (madOf(XT, ET, st, a1) > mtol || madOf(XB, EB, sb, a2) > mtol) return null;
+  const thick = a2 - a1;                       // 近似：两条边在同一 x 上的间距
+  if (!(thick > Math.max(3, th * 0.4)) || !(thick < th * 2.5)) return null;
+  return { a1: a1, s1: st, a2: a2, s2: sb, thick: thick, nt: XT.length, nb: XB.length, xa: xa, xb: xb };
+}
+// 在源图的某个矩形区域里跑上面这一套，返回**源图坐标**下的两条直线 y = a + s·x 与倾角。
+function bandLinesInRegion(cv, rx0, ry0, rx1, ry1, opt) {
+  const o = Object.assign({ maxw: 1200, G: 2, minThick: 0.02, maxThick: 0.7 }, opt || {});
+  const W = cv.width, H = cv.height;
+  const x0 = Math.max(0, Math.round(rx0)), x1 = Math.min(W - 1, Math.round(rx1));
+  const y0 = Math.max(0, Math.round(ry0)), y1 = Math.min(H - 1, Math.round(ry1));
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+  if (bw < 48 || bh < 24) return null;
+  const k = Math.min(1, o.maxw / bw);
+  const aw = Math.max(48, Math.round(bw * k)), ah = Math.max(24, Math.round(bh * k));
+  const tc = document.createElement('canvas'); tc.width = aw; tc.height = ah;
+  const tctx = tc.getContext('2d');
+  tctx.imageSmoothingEnabled = true; tctx.imageSmoothingQuality = 'high';
+  tctx.drawImage(cv, x0, y0, bw, bh, 0, 0, aw, ah);
+  const d = tctx.getImageData(0, 0, aw, ah).data;
+  const N = aw * ah, L = new Float32Array(N);
+  for (let p = 0, i = 0; p < N; p++, i += 4) L[p] = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+  const pad = Math.max(1, Math.round(aw * 0.02));
+  const xa = pad, xb = aw - 1 - pad;
+  const G = o.G;
+  const prof = edgeRowProfile(L, aw, ah, xa, xb, G);
+  const tMin = Math.max(4, Math.round(ah * o.minThick)), tMax = Math.max(tMin + 2, Math.round(ah * o.maxThick));
+  const pair = pickEdgePair(L, aw, ah, xa, xb, prof.S, prof.SG, tMin, tMax);
+  if (!pair) return null;
+  const lines = refineEdgeLines(L, aw, ah, xa, xb, pair.yt, pair.yb);
+  if (!lines) return null;
+  // 分析坐标 → 源图坐标：x_src = x0 + (x+0.5)·sx，y_src = y0 + (y+0.5)·sy
+  const sx = bw / aw, sy = bh / ah;
+  const s1 = lines.s1 * sy / sx, s2 = lines.s2 * sy / sx;
+  const A1 = y0 + (lines.a1 + 0.5) * sy - s1 * (x0 + 0.5 * sx);
+  const A2 = y0 + (lines.a2 + 0.5) * sy - s2 * (x0 + 0.5 * sx);
+  const slope = (s1 + s2) / 2;
+  return {
+    a1: A1, s1: s1, a2: A2, s2: s2, angle: Math.atan(slope) * 180 / Math.PI,
+    thick: (A2 - A1) / Math.sqrt(1 + slope * slope),
+    xa: x0 + (xa + 0.5) * sx, xb: x0 + (xb + 0.5) * sx,
+    pairScore: pair.sc, gapDeg: Math.abs(Math.atan(s1) - Math.atan(s2)) * 180 / Math.PI,
+  };
+}
 function tightenBand(a, w, h) {
   // ① 行占用率定带：**产品是长条，它的每一行几乎都横跨整幅；背景杂物不会横跨整幅**。
   //    这是把「产品」和「旁边连成一片的背景」分开的唯一可靠依据 ——
@@ -5960,18 +6450,33 @@ function tightenBand(a, w, h) {
   // ⚠️ 不能用 longestRun：条带上有横贯全幅的高光/亮缝时（用户第 3 张图里那道），
   //    缝所在的行占用率会掉到 0，最长连续段会把条带**从缝处切成两半**，下半截直接丢掉。
   //    改成「先取达标的行，再把间隔不超过 5% 画布高度的相邻行并成一组」，取跨度最大的一组。
-  const hiThr = Math.max(0.45, mx * 0.88);
-  const marks = [];
-  for (let y = 0; y < h; y++) if (rowfill[y] >= hiThr) marks.push(y);
-  if (marks.length < 2) return a;
+  // ⚠️ 不能只用「占用率最高的那一段」：白底白产品（产品面上有与背景同色的高光/花纹）
+  //    行占用率普遍只有 0.8，而背景里某个小台面/纸盒块的占用率反而更高 ——
+  //    实测 8574 选到画布底部那 14 行、8572 选到顶部 72 行，整条产品被丢掉。
+  //    产品在照片里总是「又长又基本连贯」的那一段，所以判据要「最长」而不是「最满」。
+  //    做法：阈值从 0.85·mx 逐级放宽，取第一个「长度 ≥ 12% 画布高」的最长连续行段；
+  //    都不够长时退回其中最长的那条。
   const G = Math.max(4, Math.round(h * 0.05));
-  let run = null, bs = -1, gs = marks[0];
-  for (let i = 1; i <= marks.length; i++) {
-    const brk = i >= marks.length || marks[i] - marks[i - 1] > G;
-    if (!brk) continue;
-    const ge = marks[i - 1];
-    if (ge - gs + 1 > bs) { bs = ge - gs + 1; run = [gs, ge]; }
-    if (i < marks.length) gs = marks[i];
+  const longestRun = (thr) => {
+    const marks = [];
+    for (let y = 0; y < h; y++) if (rowfill[y] >= thr) marks.push(y);
+    if (marks.length < 2) return null;
+    let run = null, bs = -1, gs = marks[0];
+    for (let i = 1; i <= marks.length; i++) {
+      const brk = i >= marks.length || marks[i] - marks[i - 1] > G;
+      if (!brk) continue;
+      const ge = marks[i - 1];
+      if (ge - gs + 1 > bs) { bs = ge - gs + 1; run = [gs, ge]; }
+      if (i < marks.length) gs = marks[i];
+    }
+    return (run && run[1] - run[0] + 1 >= 2) ? run : null;
+  };
+  const need = Math.max(12, Math.round(h * 0.12));
+  let run = null;
+  for (const fr of [0.85, 0.7, 0.55, 0.4]) {
+    const r = longestRun(Math.max(0.18, mx * fr));
+    if (r && (!run || r[1] - r[0] > run[1] - run[0])) run = r;
+    if (r && r[1] - r[0] + 1 >= need) { run = r; break; }
   }
   if (!run) return a;
   const bh = run[1] - run[0] + 1;
@@ -6041,6 +6546,153 @@ function tightenBand(a, w, h) {
 // 行内填充：框条是横向长条，同一行首尾之间的小空隙（高光与背景同色被漏判）要补上。
 // ⚠️ 间隙上限还要有绝对值封顶：按比例给的话，6000px 的图能到 340px —— 那么宽的缝
 //    已经不是「高光缝」了，会把条带旁边零星的前景噪点一并连成实心（看起来就是没抠干净）。
+// —— 收边最后一步：把上下沿**吸附到真正的强边缘**上 ——
+// tightenBand 只能靠行占用率定带，而接触阴影横贯整幅、占用率跟产品一样高，分不开；
+// 这里再用梯度收一次：在现有上下沿附近找「最靠外的强竖直梯度」，那才是产品的轮廓。
+// 再把两条边各拟合一条直线 —— 边缘由此变成笔直的两条线，残留的零点几度倾斜也一并吃掉。
+function snapAlphaBand(a, lum, w, h) {
+  if (!lum || w < 16 || h < 8) return a;
+  const top = new Int32Array(w).fill(-1), bot = new Int32Array(w).fill(-1);
+  let vx0 = -1, vx1 = -1, cnt = 0;
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) if (a[y * w + x]) { top[x] = y; break; }
+    for (let y = h - 1; y >= 0; y--) if (a[y * w + x]) { bot[x] = y; break; }
+    if (top[x] >= 0) { cnt++; if (vx0 < 0) vx0 = x; vx1 = x; }
+  }
+  if (cnt < w * 0.25 || vx1 <= vx0) return a;
+  const ths = [];
+  for (let x = vx0; x <= vx1; x++) if (top[x] >= 0) ths.push(bot[x] - top[x] + 1);
+  const T = medianArr(ths);
+  if (T < 6) return a;
+  const win = Math.max(2, Math.round(T * 0.55));
+  const gv = (x, y) => (y > 0 && y < h - 1) ? Math.abs(lum[(y + 1) * w + x] - lum[(y - 1) * w + x]) : 0;
+  const XT = [], ET = [], XB = [], EB = [];
+  for (let x = vx0; x <= vx1; x++) {
+    if (top[x] < 0) continue;
+    const yA = Math.max(1, top[x] - win), yC = Math.min(h - 2, top[x] + win);
+    let mx = 0;
+    for (let y = yA; y <= yC; y++) { const v = gv(x, y); if (v > mx) mx = v; }
+    if (mx >= 0.05) {
+      const lim = mx * 0.6;
+      for (let y = yA; y <= yC; y++) if (gv(x, y) >= lim) { XT.push(x); ET.push(y); break; }
+    }
+    const yD = Math.max(1, bot[x] - win), yF = Math.min(h - 2, bot[x] + win);
+    mx = 0;
+    for (let y = yD; y <= yF; y++) { const v = gv(x, y); if (v > mx) mx = v; }
+    if (mx >= 0.05) {
+      const lim = mx * 0.6;
+      for (let y = yF; y >= yD; y--) if (gv(x, y) >= lim) { XB.push(x); EB.push(y); break; }
+    }
+  }
+  const need = Math.max(6, Math.round((vx1 - vx0 + 1) * 0.4));
+  if (XT.length < need || XB.length < need) return a;
+  const s1 = fitLineSlope(XT, ET), s2 = fitLineSlope(XB, EB);
+  if (s1 == null || s2 == null) return a;
+  const a1 = medianArr(ET) - s1 * medianArr(XT), a2 = medianArr(EB) - s2 * medianArr(XB);
+  const mad = (X, E, s, A) => { const v = []; for (let i = 0; i < X.length; i++) v.push(Math.abs(E[i] - (A + s * X[i]))); return medianArr(v); };
+  const tol = Math.max(1.5, T * 0.06);
+  if (mad(XT, ET, s1, a1) > tol || mad(XB, EB, s2, a2) > tol) return a;
+  const mid = (vx0 + vx1) / 2;
+  const th2 = (a2 - a1) + (s2 - s1) * mid;
+  if (!(th2 > T * 0.4) || !(th2 < T * 2.0)) return a;    // 收得过头或反而变厚 → 不敢动
+  const out = new Uint8Array(w * h);
+  for (let x = vx0; x <= vx1; x++) {
+    let t0 = Math.round(a1 + s1 * x), t1 = Math.round(a2 + s2 * x);
+    if (t0 < 0) t0 = 0;
+    if (t1 > h - 1) t1 = h - 1;
+    if (!(t1 >= t0)) continue;
+    for (let y = t0; y <= t1; y++) out[y * w + x] = 255;
+  }
+  return out;
+}
+// 抗离群直线拟合：先最小二乘，再按残差剔除（> 2.5×MAD）重拟合两次。
+// 直接用最小二乘会被缺口、端头这些离群点拉偏 —— 而它们恰恰是我们要跟直线区分开的东西。
+function fitLineRobust(X, Y) {
+  if (!X || X.length < 8) return null;
+  let xs = X.slice(), ys = Y.slice(), res = null;
+  for (let it = 0; it < 3; it++) {
+    const s = fitLineSlope(xs, ys);
+    if (s == null) return res;
+    const a = medianArr(ys) - s * medianArr(xs);
+    res = { s: s, a: a };
+    const r = [];
+    for (let i = 0; i < xs.length; i++) r.push(Math.abs(ys[i] - (a + s * xs[i])));
+    const lim = Math.max(1.5, medianArr(r) * 2.5);
+    const nx = [], ny = [];
+    for (let i = 0; i < xs.length; i++) if (r[i] <= lim) { nx.push(xs[i]); ny.push(ys[i]); }
+    if (nx.length < 8 || nx.length === xs.length) break;
+    xs = nx; ys = ny;
+  }
+  return res;
+}
+// —— 边缘直线化的兜底（不依赖梯度）——
+// snapAlphaBand 靠梯度找边，白底白产品上那条边是软过渡（每列最大梯度都不到阈值），
+// 它会连一条边都收不齐而直接放弃 —— 实测 8576/8578/8582 就是这样，缺口原样留在导出里。
+// 这里改用「带自身的上下沿」做抗离群直线拟合，再把偏离直线的部分吸回直线：
+//   缺口/高光斑（几十 px 深、只占少数列）→ 补平；
+//   条带端头的圆角（连续几百列的大起伏）→ 原样保留，不会被拉成直线带上背景。
+// 两者的区分靠「连续偏离段的长度」：短段（≤ 宽度 8%）才放宽容差到 deep，
+//   长段一律保留 —— 实测 8576 有条 39 px 深、224 列（5%）的高光缺口，
+//   而端头的渐变长达数百列；只按深度给单一容差时，39 与容差 38.6 只差 0.4 px，
+//   角度微动就会漏掉（n6 通过、n7 同图却漏）。
+function straightenBand(a, w, h, opt) {
+  const o = Object.assign({ maxAllow: 60, frac: 0.10, deepFrac: 0.35, shortFrac: 0.08 }, opt || {});
+  if (!a || w < 8 || h < 8) return a;
+  const top = new Int32Array(w).fill(-1), bot = new Int32Array(w).fill(-1);
+  const XT = [], ET = [], XB = [], EB = [];
+  let n = 0;
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) if (a[y * w + x]) { top[x] = y; break; }
+    for (let y = h - 1; y >= 0; y--) if (a[y * w + x]) { bot[x] = y; break; }
+    if (top[x] >= 0) { XT.push(x); ET.push(top[x]); XB.push(x); EB.push(bot[x]); n++; }
+  }
+  if (n < Math.max(16, w * 0.25) || n < 8) return a;
+  const ths = [];
+  for (let i = 0; i < n; i++) ths.push(EB[i] - ET[i] + 1);
+  const T = medianArr(ths);
+  if (!(T >= 6)) return a;
+  const lt = fitLineRobust(XT, ET), lb = fitLineRobust(XB, EB);
+  if (!lt || !lb) return a;
+  const allow = Math.min(o.maxAllow, Math.max(3, Math.round(T * o.frac)));
+  // 短段才用得上的放宽容差：仍按条厚封顶，避免把「真的大落差」也抹平
+  const deep = Math.min(o.maxAllow * 2.5, Math.max(allow + 4, Math.round(T * o.deepFrac)));
+  const shortRun = Math.max(24, Math.round(w * o.shortFrac));
+  // 某条边的逐列偏差 d[x]（NaN = 该列没有前景）；返回「是否吸到直线上」的标记
+  const pullMark = (d) => {
+    const pull = new Uint8Array(w);
+    for (let x = 0; x < w; x++) if (!isNaN(d[x])) pull[x] = Math.abs(d[x]) <= allow ? 1 : 0;
+    let x = 0;
+    while (x < w) {
+      if (pull[x] || isNaN(d[x])) { x++; continue; }
+      const s = x;
+      let mx2 = 0;
+      while (x < w && !pull[x] && !isNaN(d[x])) { mx2 = Math.max(mx2, Math.abs(d[x])); x++; }
+      if (x - s <= shortRun && mx2 <= deep) for (let i = s; i < x; i++) pull[i] = 1;
+    }
+    return pull;
+  };
+  const dT = new Float64Array(w).fill(NaN), dB = new Float64Array(w).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    dT[XT[i]] = ET[i] - (lt.a + lt.s * XT[i]);
+    dB[XB[i]] = EB[i] - (lb.a + lb.s * XB[i]);
+  }
+  const pT = pullMark(dT), pB = pullMark(dB);
+  const out = new Uint8Array(w * h);
+  let ch = 0;
+  for (let x = 0; x < w; x++) {
+    if (top[x] < 0) continue;
+    let t0 = top[x], t1 = bot[x];
+    const yt = lt.a + lt.s * x, yb = lb.a + lb.s * x;
+    if (pT[x]) t0 = Math.round(yt);
+    if (pB[x]) t1 = Math.round(yb);
+    if (t0 < 0) t0 = 0;
+    if (t1 > h - 1) t1 = h - 1;
+    if (!(t1 >= t0)) continue;
+    for (let y = t0; y <= t1; y++) out[y * w + x] = 255;
+    ch++;
+  }
+  return ch ? out : a;
+}
 function fillAlphaRuns(a, w, h, rowGapPct) {
   const rowGap = Math.max(3, Math.min(120, Math.round(w * (rowGapPct == null ? 0.06 : rowGapPct))));
   for (let y = 0; y < h; y++) {
@@ -6381,6 +7033,134 @@ function applyPixelAdjust(data, w, h, o) {
   }
   return data;
 }
+// —— 收边最后一步：把输出纵向裁到 alpha 的实际范围 ——
+// 检测框常被「接触阴影」撑高好几倍（实测 8572 的框 698 行而产品只有 92 行、
+// 8574 的框是产品厚度的 4 倍），框不裁的话导出就是一大片透明背景 ——
+// 用户的原话是「先找到框条主体再裁切」，所以这一步必须做。
+// 判据与 tightenBand 同源：产品所在的行几乎横穿整幅，背景行占用率明显更低；
+// 阈值从 0.85·mx 逐级放宽，取第一个「长度 ≥ 12% 高」的最长连续行段（长短优先于满度，
+// 理由见 tightenBand 里那段注释）。横向由 alphaTightCols 对称处理（见它上面的注释）。
+// ⚠️ 这个判据成立的前提是「掩码里产品行真的是高占用」。白底白产品不满足这个前提
+//    （掩码只抓到凹槽和边缘，占用 30~60%，而产品下方那团接触阴影反而更高）——
+//    所以必须先由 bandTextureFill 把产品行补满，否则这里会一而再地选到阴影那一段。
+function alphaTightBox(a, w, h) {
+  if (!a || w < 4 || h < 4) return null;
+  const rw = new Int32Array(h);
+  let mx = 0;
+  for (let y = 0; y < h; y++) {
+    let c = 0;
+    for (let x = 0; x < w; x++) if (a[y * w + x]) c++;
+    rw[y] = c;
+    if (c > mx) mx = c;
+  }
+  if (mx <= 0 || mx < w * 0.05) return null;
+  const G = Math.max(4, Math.round(h * 0.05));
+  const longestRun = (thr) => {
+    const marks = [];
+    for (let y = 0; y < h; y++) if (rw[y] >= thr) marks.push(y);
+    if (marks.length < 2) return null;
+    let run = null, bs = -1, gs = marks[0];
+    for (let i = 1; i <= marks.length; i++) {
+      const brk = i >= marks.length || marks[i] - marks[i - 1] > G;
+      if (!brk) continue;
+      const ge = marks[i - 1];
+      if (ge - gs + 1 > bs) { bs = ge - gs + 1; run = [gs, ge]; }
+      if (i < marks.length) gs = marks[i];
+    }
+    return (run && run[1] - run[0] + 1 >= 2) ? run : null;
+  };
+  const need = Math.max(8, Math.round(h * 0.12));
+  let run = null;
+  for (const fr of [0.85, 0.7, 0.55, 0.4]) {
+    const r = longestRun(Math.max(0.18 * w, mx * fr));
+    if (r && (!run || r[1] - r[0] > run[1] - run[0])) run = r;
+    if (r && r[1] - r[0] + 1 >= need) { run = r; break; }
+  }
+  if (!run) return null;
+  return { y0: run[0], y1: run[1], rows: run[1] - run[0] + 1 };
+}
+// —— 横向对称收紧：切掉与主体之间隔着空隙的孤立块 ——
+// 纵向收完还常留着一两块「跟主体不相连」的东西：紧挨产品左端的桌面/盒子底、画面右侧
+// 斜放着的另一个样品。它们在**列**上的表现是占用率掉得很低、但又不是 0（块本身也有厚度），
+// 所以判据和纵向同源：取「列占用 ≥ thr 的最长连续段」。
+// ⚠️ 列占用只在**纵向已经定好的产品带**内统计（ry0..ry1），不能用整个框高：
+//    检测框里产品那一列常常还叠着上下的接触阴影，整列算下来占用能到满高，mx 跟着被撑大，
+//    阈值就顶到产品自己的列之上 → 又静默失效（实测 DSC08580 就是这么 null 掉的）。
+// ⚠️ 只在**两端**收（从左/右各找第一个"够厚"的列），**不切中间**：
+//    中间的空隙可能是产品自己的凹槽/两个可见面之间的缝，切了就把产品劈断了。
+// ⚠️ thr 取 mx*0.55：孤立块能到主体厚度的五成（实测 DSC08580 右端那个斜放样品 51%），
+//    0.4 会放过它。代价是会削掉一点**圆头端头**（端头列占用是渐变的），
+//    这一条已经跟用户确认过：「优先直线，允许抹掉小台阶」。
+function alphaTightCols(a, w, h, ry0, ry1) {
+  if (!a || w < 8 || h < 8) return null;
+  const yy0 = Math.max(0, ry0 == null ? 0 : ry0), yy1 = Math.min(h - 1, ry1 == null ? h - 1 : ry1);
+  const bh = yy1 - yy0 + 1;
+  if (bh < 8) return null;
+  const cw = new Int32Array(w);
+  let mx = 0;
+  for (let x = 0; x < w; x++) {
+    let c = 0;
+    for (let y = yy0; y <= yy1; y++) if (a[y * w + x]) c++;
+    cw[x] = c;
+    if (c > mx) mx = c;
+  }
+  if (mx <= 0 || mx < bh * 0.05) return null;
+  // ⚠️ 阈值只能按 mx（主体的厚度）给，**不能**拿 h 当基准：h 是裁切画布的高，
+  //    检测框被接触阴影撑高后能比产品厚好几倍（实测 DSC08574 是 1290 行 vs 产品 183 行），
+  //    0.15·h 会直接顶到产品列占用之上 → 一列都找不到 → 整个收紧静默失效
+  //    （表现就是"改了代码但输出尺寸一点没变"，最容易白查一轮）。
+  const thr = Math.max(mx * 0.55, 2, bh * 0.02);
+  let x0 = -1, x1 = -1;
+  for (let x = 0; x < w; x++) if (cw[x] >= thr) { x0 = x; break; }
+  for (let x = w - 1; x >= 0; x--) if (cw[x] >= thr) { x1 = x; break; }
+  if (x0 < 0 || x1 < x0) return null;
+  const cols = x1 - x0 + 1;
+  if (cols >= w * 0.995) return null;      // 本来就占满，没什么可裁
+  if (cols < w * 0.4) return null;         // 收完只剩一小截 → 判断不可靠，原样保留
+  return { x0: x0, x1: x1, cols: cols };
+}
+// —— 横向切掉「压根不是这一根」的列：按上下沿的**高度偏离**判，不按列占用 ——
+// 【为什么不能用列占用】画面里并排躺着的别的样品，在条带那几行里也是满的：
+//   实测 DSC08584 左端的黑框样品在掩码里跟条带连成一片，条带的 84 行里它占了六成；
+//   DSC08582 左端的样品覆盖率 0.3~0.45 —— alphaTightCols 的判据在这里全都够不着，
+//   恒返回 null，于是导出把左端的样品整块带上（用户：「这种很明显不对」）。
+// 【分得开的是什么】上下沿的**高度**。同一根框条的上下沿是一条直线（厚度稳定），
+//   别的样品压在旁边，它那一列的上沿会明显高出这条直线（实测 8582 高 33px、8584 高 119px，
+//   而条带自身厚度 76/85px）。
+// 【做法】参考线取**中位数**（对不超过一半的污染是稳的，比最小二乘强），容差 0.4×条带厚度；
+//   从两端各找到第一个「上下沿都在容差内、且厚度够」的列，中间不切。
+//   ⚠️ 必须在**收边之前**的那版 alpha 上做：tightenBand 会把列内填满、被剔除的列还会插值补上，
+//      收拾完之后每一列都是满高，任何按列比较的判据都会失效（这正是 alphaTightCols 空转的原因）。
+function alphaEndsByEdges(a, w, h, ry0, ry1) {
+  if (!a || w < 16 || h < 8) return null;
+  const ya = Math.max(0, ry0 == null ? 0 : ry0), yb = Math.min(h - 1, ry1 == null ? h - 1 : ry1);
+  const bh = yb - ya + 1;
+  if (bh < 6) return null;
+  // ⚠️ 上下沿必须在**整个框高**上量，不能只在带内量。
+  //    别的样品（画面右端那个白盒子、左端那摞黑框）都顶得比条带高得多；只看带内的话，
+  //    它们那一列的上沿会被带的边界**裁齐**到 y0，跟条带一模一样 —— 判据彻底失效
+  //    （实测沿带内量时 DSC08582 右端的白盒子一列都切不掉）。
+  const top = new Int32Array(w).fill(-1), bot = new Int32Array(w).fill(-1), cnt = new Int32Array(w);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) if (a[y * w + x]) { if (top[x] < 0) top[x] = y; bot[x] = y; cnt[x]++; }
+  }
+  // 一列至少得有一半的条带厚度才算「像这一根」（零散的噪点列不算）
+  const need = Math.max(2, Math.round(bh * 0.5));
+  const tv = [], bv = [];
+  for (let x = 0; x < w; x++) if (cnt[x] >= need) { tv.push(top[x]); bv.push(bot[x]); }
+  if (tv.length < Math.max(8, w * 0.15)) return null;
+  const mt = medianArr(tv), mb = medianArr(bv);
+  const T = Math.max(4, mb - mt + 1);
+  const tol = Math.max(3, Math.round(T * 0.4));
+  const ok = (x) => cnt[x] >= need && Math.abs(top[x] - mt) <= tol && Math.abs(bot[x] - mb) <= tol;
+  let x0 = -1, x1 = -1;
+  for (let x = 0; x < w; x++) if (ok(x)) { x0 = x; break; }
+  for (let x = w - 1; x >= 0; x--) if (ok(x)) { x1 = x; break; }
+  if (x0 < 0 || x1 <= x0) return null;
+  if (x1 - x0 + 1 < w * 0.4) return null;          // 收完只剩一小截 → 判断不可靠，原样保留
+  if (x0 === 0 && x1 === w - 1) return null;       // 本来就占满
+  return { x0: x0, x1: x1 };
+}
 // 按裁剪框 + 参数 + 透明背景，生成最终成品 canvas（原像素尺寸，不缩放）
 function renderCut(frontCv, box, o) {
   const w = Math.max(1, box.x1 - box.x0 + 1), h = Math.max(1, box.y1 - box.y0 + 1);
@@ -6389,9 +7169,51 @@ function renderCut(frontCv, box, o) {
   const cx = out.getContext('2d');
   cx.drawImage(frontCv, box.x0, box.y0, w, h, 0, 0, w, h);
   const id = cx.getImageData(0, 0, w, h);
+  // 亮度要在「调色之前」取：收边用的是原始像素的梯度，和锐化/对比度无关
+  let lum = null;
+  if (o.transparent && box.mask) {
+    lum = new Float32Array(w * h);
+    for (let p = 0, i = 0; p < w * h; p++, i += 4)
+      lum[p] = (0.299 * id.data[i] + 0.587 * id.data[i + 1] + 0.114 * id.data[i + 2]) / 255;
+  }
   applyPixelAdjust(id.data, w, h, o);
   if (o.transparent && box.mask) {
-    const a = maskToAlpha(box.mask, box, w, h);
+    const rawA = new Uint8Array(w * h);
+    const a = maskToAlpha(box.mask, box, w, h, lum, rawA);
+    // 最后一步：裁到 alpha 的实际范围。检测框被「接触阴影」撑高的部分、以及紧挨产品
+    // 却与它不相连的桌面/别的样品，都要在这一步丢掉 —— 用户的原话是「先找到框条主体再裁切」。
+    const bb = alphaTightBox(a, w, h);
+    const useB = !!(bb && bb.rows >= 8 && bb.rows < h);
+    const bc = alphaTightCols(a, w, h, useB ? bb.y0 : 0, useB ? bb.y1 : h - 1);
+    const y0 = useB ? bb.y0 : 0;
+    const y1 = useB ? bb.y1 : h - 1;
+    // 两个横向判据取更紧的那个：alphaTightCols 管「与主体隔着空隙的孤立块」，
+    // alphaEndsByEdges 管「并排贴着主体、列占用上看不出来的别的样品」（见它的注释）。
+    let x0 = bc ? bc.x0 : 0;
+    let x1 = bc ? bc.x1 : w - 1;
+    const be = alphaEndsByEdges(rawA, w, h, y0, y1);
+    if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
+    if (y0 !== 0 || y1 !== h - 1 || x0 !== 0 || x1 !== w - 1) {
+      const cy0 = Math.max(0, y0 - 1), cy1 = Math.min(h - 1, y1 + 1);
+      const cx0 = Math.max(0, x0 - 1), cx1 = Math.min(w - 1, x1 + 1);
+      const ch = cy1 - cy0 + 1, cwc = cx1 - cx0 + 1;
+      if (ch >= 8 && cwc >= 8) {
+        const co = document.createElement('canvas');
+        co.width = cwc; co.height = ch;
+        const cid = co.getContext('2d').createImageData(cwc, ch);
+        for (let y = 0; y < ch; y++) {
+          const row = (cy0 + y) * w;
+          for (let x = 0; x < cwc; x++) {
+            const si = (row + cx0 + x) * 4, di = (y * cwc + x) * 4;
+            cid.data[di] = id.data[si]; cid.data[di + 1] = id.data[si + 1];
+            cid.data[di + 2] = id.data[si + 2]; cid.data[di + 3] = a[row + cx0 + x];
+          }
+        }
+        const cox = co.getContext('2d');
+        cox.putImageData(cid, 0, 0);
+        return co;
+      }
+    }
     for (let p = 0, i = 3; p < w * h; p++, i += 4) id.data[i] = a[p];
   }
   cx.putImageData(id, 0, 0);
@@ -6784,6 +7606,7 @@ function buildToolFrameCut() {
       dropCur();
       const r = await loadCv(f);
       st.cur = { cv: r.cv };
+      const mm = st.meta[i]; if (mm) mm.why = '';   // 这张读出来了，清掉上次的失败原因
       if (r.note) log(r.note);
       applyFrameOpts();       // 检测 + 摆正 + 预览，一步到位
     } catch (e) {
@@ -6791,6 +7614,9 @@ function buildToolFrameCut() {
       stage.innerHTML = '<span class="cu-empty">读图失败：' + esc(why) + '</span>';
       $('fcBoxInfo').textContent = '读图失败';
       setStatus(i, '读图失败', 'err');
+      // 把原因一并存下来 —— drawPreview 在「没有样张」时要用它把提示再画回去，
+      // 否则用户一碰控件这条错误就消失了（见 drawPreview 里那段注释）。
+      { const m1 = st.meta[i] || (st.meta[i] = { outName: '' }); m1.why = why; }
       // 坏图不能把整条流程卡在第一张上。用户丢进来的是**一整个文件夹**，里面夹一张
       // 解不开的图很常见（隔空投送重名、下了一半的文件、别的软件导出的 .jpg 其实是 TIFF），
       // 卡住的话用户只能干瞪眼、还不知道是哪个文件的问题。所以标红这一行、说出来原因，
@@ -6832,7 +7658,7 @@ function buildToolFrameCut() {
       const d = p.detAngle;
       info.textContent = (d ? (d > 0 ? '+' : '') + d.toFixed(2) + '°' : '0°')
         + (p.rotated ? '（已摆正）'
-          : (Math.abs(c.angle) >= 0.15 ? '（未摆正）' : ''));
+          : (Math.abs(p.angle) >= 0.15 ? '（未摆正）' : ''));
     }
     drawPreview();
   }
@@ -6870,6 +7696,17 @@ function buildToolFrameCut() {
     const stage = $('fcStage');
     const cur = st.cur;
     if (!cur || !cur.cutCv) {
+      // ⚠️ 选中的是一张读不出来的图时，这块提示必须**留在原地**。
+      //    否则用户点一下「显示裁剪位置」或随便拨个滑块，drawPreview 就把
+      //    「读图失败：<原因>」换成「选择图片后这里显示样张」—— 用户既不知道
+      //    是哪张出的问题、也不知道为什么，只觉得"点了没反应"。
+      const m = st.meta && st.meta[st.sel];
+      const why = (m && m.status === '读图失败' && m.why) ? m.why : '';
+      if (why) {
+        stage.innerHTML = '<span class="cu-empty">读图失败：' + esc(why) + '</span>';
+        $('fcBoxInfo').textContent = '读图失败';
+        return;
+      }
       stage.innerHTML = '<span class="cu-empty">选择图片后这里显示样张</span>';
       $('fcBoxInfo').textContent = '裁剪区 —';
       return;
@@ -7842,7 +8679,8 @@ if (typeof globalThis !== 'undefined') {
     detectStripBox, detectStripBoxRobust, detectByMaskBBox, prepareFrame, deskewCut,
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha,
+    quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName,
