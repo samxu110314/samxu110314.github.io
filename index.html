@@ -7161,6 +7161,127 @@ function alphaEndsByEdges(a, w, h, ry0, ry1) {
   if (x0 === 0 && x1 === w - 1) return null;       // 本来就占满
   return { x0: x0, x1: x1 };
 }
+// —— 横向切掉「压在产品两端的别的东西」：两条子判据取更紧的那个（亮度台阶 + 亮度范围）——
+// 【前两条判据为什么都不够】
+//   · alphaTightCols 按列占用：并排的别的样品在条带那几行里也是满的，切不掉。
+//   · alphaEndsByEdges 按上下沿高度：它的容差是相对**画布高**给的（接触阴影能把画布撑到 500+ 行），
+//     而残留物只比产品高出 33 行，永远落在容差里 —— 实测 DSC08582 它直接返回 null，
+//     整条判据在空转。用户截图里「左端那摞黑框、右端那个白盒子」就是这么留下来的。
+// 【分得开的是什么】亮度水平。产品是一根，沿长边的亮度统计**平稳**；压在两端的别的东西
+//   与产品之间有一条**亮度台阶**：实测 DSC08582 左端 164 → 57（一步 107）、右端 150 → 56，
+//   而产品自己沿长边的波动 < 15。
+// 【⚠️ 必须看「跳变」，绝不能看「偏离中位数」】DSC08580 左端 165 → 114 是**渐变**（产品端头渐暗），
+//   逐列跳变只有 1。按「偏离列中位数」判会把产品自己的渐变端头整段切掉（实测会少三分之一）。
+// 【做法】列亮度取**带内中位数**（对木纹噪声稳，直方图 O(bh) 算），5 列平滑；两端各 20% 范围内：
+//   子判据 A（陡台阶）要求逐列跳变 ≥4 **且**两侧各 16 列的平均亮度差 ≥20；
+//   子判据 B（亮度范围）要求该列落在「中间 60% 列的 5/95 分位 ± 容差」之外。
+//   A 管「边界清晰的异物」，B 管「过渡平缓、只靠颜色分得开的异物」（见子判据 B 的注释）。
+//   两条都在**收边之前**的 alpha 上做：tightenBand 会把列内填满，之后任何按列比较的判据都失效。
+function alphaEndsByTone(a, lum, w, h, ry0, ry1) {
+  if (!a || !lum || w < 32 || h < 8) return null;
+  const ya = Math.max(0, ry0 == null ? 0 : ry0), yb = Math.min(h - 1, ry1 == null ? h - 1 : ry1);
+  const bh = yb - ya + 1;
+  if (bh < 6) return null;
+  const need = Math.max(3, Math.round(bh * 0.25));
+  const med = new Float64Array(w), hist = new Int32Array(256);
+  for (let x = 0; x < w; x++) {
+    hist.fill(0);
+    let n = 0;
+    for (let y = ya; y <= yb; y++) {
+      if (!a[y * w + x]) continue;
+      let v = (lum[y * w + x] * 255) | 0;
+      if (v < 0) v = 0; else if (v > 255) v = 255;
+      hist[v]++; n++;
+    }
+    if (n < need) { med[x] = -1; continue; }
+    let acc = 0, mv = 0, half = (n >> 1) + 1;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= half) { mv = v; break; } }
+    med[x] = mv;
+  }
+  // 5 列平滑：单列的毛刺不该被当成台阶
+  const sm = new Float64Array(w).fill(-1);
+  for (let x = 0; x < w; x++) {
+    let s = 0, n = 0;
+    for (let k = -2; k <= 2; k++) {
+      const xx = x + k;
+      if (xx >= 0 && xx < w && med[xx] >= 0) { s += med[xx]; n++; }
+    }
+    if (n) sm[x] = s / n;
+  }
+  const lvl = (from, to) => {
+    let s = 0, n = 0;
+    for (let x = from; x <= to; x++) if (x >= 0 && x < w && sm[x] >= 0) { s += sm[x]; n++; }
+    return n >= 4 ? s / n : NaN;
+  };
+  // 主体自身的亮度范围（中间 60% 列 —— 那里肯定是产品）。两个子判据的容差都跟着它走：
+  //   ⚠️ 容差写死的话，产品自身明暗起伏大的图（木纹）会把端头的光泽当成异物切掉。
+  const n0 = Math.round(w * 0.2), n1 = w - 1 - n0, mid = [];
+  for (let x = n0; x <= n1; x++) if (sm[x] >= 0) mid.push(sm[x]);
+  let band = 0, loT = -1, hiT = -1;
+  if (mid.length >= 40) {
+    mid.sort((p, q) => p - q);
+    const lo = mid[Math.floor(0.05 * (mid.length - 1))], hi = mid[Math.floor(0.95 * (mid.length - 1))];
+    band = hi - lo;
+    const M = Math.max(28, Math.round(band * 1.2));
+    loT = lo - M; hiT = hi + M;
+  }
+  // ── 子判据 A：陡台阶。逐列跳变要够陡，且两侧各 16 列的水平差得够开 ——
+  //    后者的门槛**跟着主体自身起伏走**（见上），否则产品端面（切口与正面的亮度阶跃，
+  //    实测在合成样张上是 38/255）会被当成异物整段切掉。
+  const SIDE = 16, MINSTEP = 4;
+  const MINLVL = Math.max(20, Math.round(band * 1.2));
+  // dir = +1 左端（bx 是产品第一列，切它左边）／ -1 右端（bx 是残留第一列，切它右边）
+  const pickStep = (from, to, dir) => {
+    let bj = 0, bx = -1;
+    for (let x = from; x <= to; x++) {
+      const p = x - 1;
+      if (p < 0 || x >= w || sm[p] < 0 || sm[x] < 0) continue;
+      const j = Math.abs(sm[x] - sm[p]);
+      if (j > bj) { bj = j; bx = x; }
+    }
+    if (bx < 0 || bj < MINSTEP) return -1;
+    const inS = dir > 0 ? lvl(bx, bx + SIDE) : lvl(bx - SIDE, bx - 1);
+    const outS = dir > 0 ? lvl(bx - SIDE, bx - 1) : lvl(bx, bx + SIDE);
+    if (!(Math.abs(inS - outS) >= MINLVL)) return -1;
+    return bx;
+  };
+  // ── 子判据 B：**超出主体自身的亮度范围**。不需要陡台阶，只看「是不是这一根的颜色」。
+  //    【为什么还要这一条】有一类残留与产品之间的过渡是**平缓**的：_DSC5662 左端那块白条
+  //    （亮度 187）在 166 列里缓缓降到主体 139，逐列跳变只有 3 → 子判据 A 够不着，
+  //    导出仍然带一条白边（用户的诉求是「两头不要带别的东西」）。
+  //    范围取**中间 60% 列**（那里肯定是产品）的 5/95 分位，容差 M = max(28, 1.2×(hi−lo))。
+  //    实测分离度：_DSC5662 外侧 187 超出上限 42 → 切；DSC08580 左端 165 只超出 14 → 不切
+  //    （那是产品端头自身的光泽，切了就是切产品）；DSC08572/576 同理不被误切。
+  const pickRange = (a0, a1, dir) => {
+    if (loT < 0) return -1;
+    const start = dir > 0 ? a0 : a1, stop = dir > 0 ? a1 : a0;
+    // ⚠️ 最外端本来就在主体范围内 → 这一端压根没有异物，必须**直接放弃**。
+    //    少了这一步，DSC08572 这种两头都是产品的图会从最外一列就「连续 4 列达标」→ 白切 4 列。
+    let s0 = 0, c0 = 0;
+    for (let k = 0; k < 4; k++) {
+      const x = start + dir * k;
+      if (x >= 0 && x < w && sm[x] >= 0) { s0 += sm[x]; c0++; }
+    }
+    if (c0 && s0 / c0 >= loT && s0 / c0 <= hiT) return -1;
+    let run = 0;
+    for (let x = start; dir > 0 ? x <= stop : x >= stop; x += dir) {
+      if (x < 0 || x >= w) break;
+      if (sm[x] >= 0 && sm[x] >= loT && sm[x] <= hiT) { if (++run >= 4) return x; }
+      else run = 0;
+    }
+    return -1;
+  };
+  const lim = Math.max(24, Math.round(w * 0.2));
+  let x0 = 0, x1 = w - 1;
+  const xl = Math.max(pickStep(1, lim - 1, 1), pickRange(1, lim - 1, 1));
+  if (xl > 0) x0 = xl;
+  const yl = pickStep(w - lim + 1, w - 2, -1), yr = pickRange(w - lim + 1, w - 2, -1);
+  const xr = (yl > 0 && yr > 0) ? Math.min(yl, yr) : Math.max(yl, yr);
+  if (xr > 0) x1 = xr - 1;
+  if (x0 === 0 && x1 === w - 1) return null;
+  if (x1 - x0 + 1 < w * 0.4) return null;          // 收完只剩一小截 → 判断不可靠，原样保留
+  return { x0: x0, x1: x1 };
+}
 // 按裁剪框 + 参数 + 透明背景，生成最终成品 canvas（原像素尺寸，不缩放）
 function renderCut(frontCv, box, o) {
   const w = Math.max(1, box.x1 - box.x0 + 1), h = Math.max(1, box.y1 - box.y0 + 1);
@@ -7187,12 +7308,15 @@ function renderCut(frontCv, box, o) {
     const bc = alphaTightCols(a, w, h, useB ? bb.y0 : 0, useB ? bb.y1 : h - 1);
     const y0 = useB ? bb.y0 : 0;
     const y1 = useB ? bb.y1 : h - 1;
-    // 两个横向判据取更紧的那个：alphaTightCols 管「与主体隔着空隙的孤立块」，
-    // alphaEndsByEdges 管「并排贴着主体、列占用上看不出来的别的样品」（见它的注释）。
+    // 三个横向判据取最紧的那个：alphaTightCols 管「与主体隔着空隙的孤立块」，
+    // alphaEndsByEdges 管「上下沿明显高出主体一截的别的样品」，
+    // alphaEndsByTone 管「与主体同为满高、只靠亮度台阶分得开的」（见各自注释）。
     let x0 = bc ? bc.x0 : 0;
     let x1 = bc ? bc.x1 : w - 1;
     const be = alphaEndsByEdges(rawA, w, h, y0, y1);
     if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
+    const bt = alphaEndsByTone(rawA, lum, w, h, y0, y1);
+    if (bt) { if (bt.x0 > x0) x0 = bt.x0; if (bt.x1 < x1) x1 = bt.x1; }
     if (y0 !== 0 || y1 !== h - 1 || x0 !== 0 || x1 !== w - 1) {
       const cy0 = Math.max(0, y0 - 1), cy1 = Math.min(h - 1, y1 + 1);
       const cx0 = Math.max(0, x0 - 1), cx1 = Math.min(w - 1, x1 + 1);
@@ -8680,7 +8804,7 @@ if (typeof globalThis !== 'undefined') {
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName,
