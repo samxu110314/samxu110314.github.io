@@ -616,7 +616,19 @@
   }
   /* ===== 产品抠图：同样「预览占满整行 + 参数在下方」，四组（裁剪边距 / 识别参数 /
      识别方式 / 输出），中间那组是横铺的滑块，所以中间列留弹性宽度，两侧固定。 */
-  .cu-cut.cu-pd .cu-side { grid-template-columns: 196px minmax(228px, 1fr) 176px 172px; }
+  /* ⚠️ 两侧的组**不能写死列宽**（原来是 196px / 176px / 172px）。
+     用户报障「左侧调整栏重叠了」的根因就在这里：「裁剪边距」组的内容是四个方向的
+     「label − 输入 +」共 12 个控件排成 2×2，**自然宽约 242px**，比写死的 196px 宽 46px ——
+     内容撑破自己的格子后往右画进中间那组；而中间那组是**后画**的、自带 #fafbfc 背景，
+     会把溢出的 ± 按钮盖住 → 看上去就是「两组压在一起」（实测溢出 37px，子元素跑出组外 6 处）。
+     现在两侧用 max-content 按内容自适应、中间那组拿剩下的弹性宽度，
+     任何字号 / 浏览器缩放 / 系统字体下都不会再互压（列宽不再是「猜一个够用的数」）。 */
+  .cu-cut.cu-pd .cu-side { grid-template-columns: max-content minmax(280px, 1fr) max-content max-content; }
+  /* 标签列 40px 装不下 4 个字的「轮廓平滑 / 边缘羽化」（11.5px 字号要 46px），会折成两行、
+     把那条滑块顶高（报障截图里就能看到「轮廓平」/「滑」竖着摞着）。产品这组标签最长 4 字，
+     单独加宽到 52px；框条那组的调色标签只有 2~3 字，不动它
+     （`.cu-cut .cu-sl2` 是两处共用的，qa_cut_ui 的「最高一组 ≤190px」也在盯框条那边）。 */
+  .cu-cut.cu-pd .cu-sl2 { grid-template-columns: 52px auto minmax(48px, 1fr); }
   @media (max-width: 1220px) {
     .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr 1fr; }
     .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: auto; }
@@ -7533,9 +7545,35 @@ const PD_DS_QUICK = 520;   // 拖滑块时的快速档：像素少 4.5 倍，改
 //                    20‰  → fill 0.7861（开始超出 π/4 = 多吃背景外边）
 //                    30‰  → fill 0.7892（明显多吃背景外边）
 //                   即 16‰ 正好是「fill 最贴近理论值 + 毛刺最小」的交点。**再大就要啃产品外侧了**。
+//   edgeK  0.030   ：边界回拉（pdSnapEdge）沿法线的搜索半径 = 短边的 3%（短边 734 → 22 掩码 px）。
+//                   实测圆镜裙边最深约 30 原图 px（17 掩码 px），22 够用且不会够到产品内部的花纹边。
 const PD_DRIFT_K = 1.7;
 const PD_SNAP_K = 0.030;
 const PD_SMOOTH = 16;
+const PD_EDGE_K = 0.030;
+// 边界回拉的三个闸门（梯度单位 = 1 个掩码格上的灰阶差，步长 1.75 原图像素）：
+//   PD_EDGE_GATE 26：**当前边界**的梯度超过它就说明已经压在真边上 → 一律不动（这是安全性的全部保障）
+//   PD_EDGE_MIN  26：要回拉过去的那条边，梯度至少得有这么大才算「真边」
+//   PD_EDGE_GAIN 12：还得比当前边界强这么多，才值得动（挡掉「两边都是弱边」的抖动）
+const PD_EDGE_GATE = 26;
+const PD_EDGE_MIN = 26;
+const PD_EDGE_GAIN = 12;
+// 纹理闸（5×5 局部灰度标准差，掩码尺度 ≈ 9 原图像素）—— 用来定「哪边是产品」：
+//   产品那侧要比背景那侧毛糙这么多（PD_EDGE_TEXG），且自己至少这么毛糙（PD_EDGE_TEX）。
+//   实测样张：镜框花纹 std 20~47，阴影 / 地板 / 白墙 std 2~10，分离度足够。
+//   ⚠️ 只对「待吸附的那条边」两侧判，不判当前边界 —— 这样**光滑产品**只是不参与吸附，
+//      不会被误伤（代价是它治不了裙边，可接受；宁可不治也不能啃产品）。
+const PD_EDGE_TEX = 10;
+const PD_EDGE_TEXG = 3;
+// 四周留白（原图像素）。用户原话：「裁切后的产品四周都加 20 的空白像素，不要正好切到产品」。
+// 掩码包围盒是**紧贴**产品的，留白 0 时成品的四条边就压在产品的物理外边上 ——
+// 只要轮廓在某个方向多认了 1px，产品就被切掉一条。默认 20 让产品四周必定有一圈背景余量：
+//   · 透明底：那一圈是 alpha = 0，看不见，但产品不再贴边；
+//   · 白底：就是一圈白边，和很多平台对商品主图的要求一致。
+// ⚠️ 单位是**原图像素**（不是输出像素）：选了「长边 2048 / 1024」之后留白会按比例一起缩。
+//    默认档「原像素」下两者相等。
+// ⚠️ 这里只给**内部兜底**：界面上的 `st.opt.pad` 初值取 PD_PAD，用户在「留白」里能改到 0。
+const PD_PAD = 20;
 
 // —— 四边采样 → 背景颜色簇 ——
 // 做法：四边像素做 16 级量化直方图（4096 桶）→ 按频次降序取种子（低于占比门槛就停）→
@@ -7886,6 +7924,119 @@ function pdSnapOut(m, W, H, px, K, thr, dist, tolG) {
   return m;
 }
 
+// —— 边界吸附（治裙边 / 平底）：泛洪「停在阴影、倒影或白墙的渐隐处」时，掩码边界会落在一条
+//    **光滑的亮度坡**上 —— 既不是产品边，也不是背景边。产品是圆的时最难看：整条下缘被抹成
+//    一条近似平线（用户原话「如果产品是圆形的，那裁切的边缘也要是圆形」）；同一张图上还会
+//    同时出现反方向的毛病 —— 阴影恰好比产品下缘深时，泛洪会**啃进**产品里，把圆弧切出一道弦。
+//    做法：对每个轮廓像素求外法线 → 沿法线在 ±K 内算「跨格灰阶差」（= 梯度）→ 若**当前边界**
+//    本身就在弱梯度上（g0 ≤ gate），且 ±K 内有一条**够强、两侧纹理关系正确**的边，
+//    就把这段轮廓挪到那条边上（往内 = 切，往外 = 补）。
+//    ⚠️ 方向只能靠**纹理闸**判（见 PD_EDGE_TEX 注释）：单看梯度方向没法区分「裙边该收」
+//       和「被啃该放」，而两侧的局部粗糙度差别很稳定 —— 产品那侧毛糙、背景那侧平。
+//       反例：`_DSC1030` 左下那段地板白墙交界，亮度阶跃不小，纹理闸一卡就过不去了。
+//    ⚠️ 目标取「**最近的**够强的边」而**不是**「全局最强」：镜框花纹、反光会造出比外轮廓还陡的
+//       内部边，全局最强会一步跳到花纹上，把轮廓啃进去。`need` 里那条 `gmax*0.8` 是为了防止
+//       在一堆弱边里随便捡一条最近的 —— 真边深得多的时候不该把轮廓切在半路。
+//    ⚠️ 第一道闸 `g0 ≤ gate` 是安全性的第二重保障：边界**已经压在真边上**时 g0 很大，一律不动。
+//       （实测样张：压在阴影坡上的边界 g0 ≈ 0~15，压在镜框外沿上的 g0 ≈ 40~60，分离得很干净。）
+//    ⚠️ 不要用「亮度极小值 = 接触阴影线」当目标（更早的一版就是这么写的，实测不行）：阴影的暗核
+//       深浅随地表材质变化，在花纹镜框上还会和框上的深色花纹连成一片，极小值位置飘忽 →
+//       回拉深度忽深忽浅，轮廓被啃出一串台阶。**梯度最大处**才是产品与背景的分界。
+//    ⚠️ 判据要用「跨格灰阶差」而不是 pdSnapOut 那种「上下左右四个邻居的差之和」：后者对**沿法线
+//       方向的缓坡**不敏感、对**垂直于法线的花纹纹理**过度敏感，方向正好反了。
+function pdSnapEdge(m, W, H, px, K, gate, minEdge, gain, texMin, texGain, dbg) {
+  if (!(K > 0)) return m;
+  const lum = (x, y) => { const i = (y * W + x) * 4; return (px[i] + px[i + 1] + px[i + 2]) / 3; };
+  // 5×5 局部标准差（可分离箱模糊：先横后竖），掩码尺度 ≈ 9 原图像素
+  // ⚠️ 滑窗的「加」要在「写结果」之前：先加 x+R、再减 x-R-1，最后写 x 处的和 ——
+  //    顺序写反会漏掉右半窗，算出来的 std 恒在 67~72（看着像数，其实全是错的）。
+  const R = 2, n = W * H, cnt = (2 * R + 1) * (2 * R + 1);
+  const sum = new Float32Array(n), sq = new Float32Array(n);
+  const tmpS = new Float32Array(n), tmpQ = new Float32Array(n);
+  const cl = (i, m) => i < 0 ? 0 : (i >= m ? m - 1 : i);
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    let s = 0, q = 0;
+    for (let x = -R; x <= W - 1 + R; x++) {
+      const v = lum(cl(x + R, W), y); s += v; q += v * v;
+      if (x - R - 1 >= 0) { const vo = lum(x - R - 1, y); s -= vo; q -= vo * vo; }
+      if (x >= 0 && x < W) { tmpS[row + x] = s; tmpQ[row + x] = q; }
+    }
+  }
+  for (let x = 0; x < W; x++) {
+    let s = 0, q = 0;
+    for (let y = -R; y <= H - 1 + R; y++) {
+      const yi = cl(y + R, H), p = yi * W + x;
+      s += tmpS[p]; q += tmpQ[p];
+      if (y - R - 1 >= 0) { const po = (y - R - 1) * W + x; s -= tmpS[po]; q -= tmpQ[po]; }
+      if (y >= 0 && y < H) { const p2 = y * W + x; sum[p2] = s / cnt; sq[p2] = q / cnt; }
+    }
+  }
+  const cut = [], add = [];
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const p = y * W + x;
+    if (!m[p]) continue;
+    if (m[p - 1] && m[p + 1] && m[p - W] && m[p + W]) continue;      // 不是轮廓像素
+    let mx = 0, my = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      if (m[(y + dy) * W + (x + dx)]) { mx += dx; my += dy; }
+    }
+    let nx = -mx, ny = -my;                                          // 外法线（i>0 往外，i<0 往内）
+    const len = Math.sqrt(nx * nx + ny * ny);
+    if (len < 1e-6) continue;
+    nx /= len; ny /= len;
+    const atP = (i) => {
+      const xx = Math.round(x + nx * i), yy = Math.round(y + ny * i);
+      return (xx < 0 || xx >= W || yy < 0 || yy >= H) ? -1 : yy * W + xx;
+    };
+    const at = (i) => {
+      const q = atP(i);
+      return q < 0 ? null : lum(q % W, (q / W) | 0);
+    };
+    const grad = (i) => {                                            // 跨格灰阶差（≈ 梯度 × 步长）
+      const a = at(i - 1), b = at(i + 1);
+      return (a == null || b == null) ? -1 : Math.abs(b - a) / 2;
+    };
+    const g0 = Math.max(grad(-1), grad(0), grad(1));
+    if (g0 > gate) continue;                                         // 已经压在真边上 → 不动
+    let gmax = -1;
+    for (let i = 2; i <= K; i++) { const g = grad(i); if (g < 0) break; if (g > gmax) gmax = g; }
+    for (let i = -2; i >= -K; i--) { const g = grad(i); if (g < 0) break; if (g > gmax) gmax = g; }
+    if (gmax < 0) continue;
+    const need = Math.max(minEdge, g0 + gain, gmax * 0.8);
+    // 在够强的候选里取 |i| 最小的那个；同一距离上先看往内（切）再看往外（补）
+    let bi = 0, rej = 0, rsi = 0, rso = 0;
+    for (let d = 2; d <= K && bi === 0; d++) {
+      for (const i of [-d, d]) {
+        if (Math.abs(i) > K) continue;
+        if (grad(i) < need) continue;
+        const pi = atP(i - 1), po = atP(i + 1);
+        if (pi < 0 || po < 0) continue;
+        const ti = sq[pi] - sum[pi] * sum[pi], to = sq[po] - sum[po] * sum[po];
+        const si = ti > 0 ? Math.sqrt(ti) : 0, so = to > 0 ? Math.sqrt(to) : 0;
+        if (si < texMin || si < so + texGain) { if (!rej) { rej = i; rsi = si; rso = so; } continue; }   // 产品侧要更毛糙 → 纹理闸
+        bi = i; break;
+      }
+    }
+    if (dbg) dbg.push([y, x, +g0.toFixed(1), +gmax.toFixed(1), +need.toFixed(1), bi, rej, +rsi.toFixed(1), +rso.toFixed(1)]);
+    if (bi === 0) continue;                                           // 附近没有可信的真边 → 不动
+    if (bi > 0) {                                                     // 往外补：连同边界一起点亮，不留缝
+      for (let i = 0; i <= bi; i++) {
+        const q = atP(i);
+        if (q >= 0) add.push(q);
+      }
+    } else {                                                          // 往里切：切掉边界到那条边之间的格子
+      for (let i = 0; i > bi; i--) {
+        const q = atP(i);
+        if (q >= 0) cut.push(q);
+      }
+    }
+  }
+  for (let i = 0; i < cut.length; i++) m[cut[i]] = 0;
+  for (let i = 0; i < add.length; i++) m[add[i]] = 1;
+  return m;
+}
+
 // —— 掩码紧致包围盒 ——
 function pdMaskBox(m, W, H) {
   let x0 = W, y0 = H, x1 = -1, y1 = -1;
@@ -7904,7 +8055,9 @@ function pdMaskBox(m, W, H) {
 // 掩码网格是同一套路）。原图直接逐像素算距离要十几秒，缩到 1100 只要 200ms 上下。
 function detectProductMask(cv, o) {
   o = o || {};
-  const tol = Math.max(1, o.tol == null ? 14 : o.tol);
+  // 内部兜底值与界面默认值保持一致（界面「重置参数」给的是 10）：
+  // 免得探针 / 回归不传 tol 时跑出另一套结果，排查时对不上。
+  const tol = Math.max(1, o.tol == null ? 10 : o.tol);
   const W = cv.width, H = cv.height;
   if (!W || !H) return null;
   const ds = o.ds || PD_DS;
@@ -7956,6 +8109,14 @@ function detectProductMask(cv, o) {
   m = pdClose(m, mw, mh, sr > 0 && ck > 0 ? Math.max(2, Math.round(sr * ck)) : 0);
   // 填洞放在形态学之后：开运算可能把细的桥切断、造出新的小孔，让这一步一起收掉。
   m = pdFillHoles(m, mw, mh);
+  // 边界回拉必须放在**形态学之后**：开 / 闭运算先把细碎的毛边规整掉，剩下的才是真正的裙边。
+  // 它只往里切，所以后面补一道很轻的平滑（半径 sr/3）磨掉回拉产生的台阶，然后重新填洞。
+  m = pdSnapEdge(m, mw, mh, px, Math.round((o.edgeK == null ? PD_EDGE_K : o.edgeK) * mn),
+    o.edgeGate == null ? PD_EDGE_GATE : o.edgeGate, o.edgeMin == null ? PD_EDGE_MIN : o.edgeMin,
+    o.edgeGain == null ? PD_EDGE_GAIN : o.edgeGain,
+    o.edgeTex == null ? PD_EDGE_TEX : o.edgeTex, o.edgeTexG == null ? PD_EDGE_TEXG : o.edgeTexG);
+  m = pdSmooth(m, mw, mh, sr > 0 ? Math.max(2, Math.round(sr / 3)) : 0);
+  m = pdFillHoles(m, mw, mh);
   const mb = pdMaskBox(m, mw, mh);
   if (!mb) return null;
 
@@ -7966,7 +8127,8 @@ function detectProductMask(cv, o) {
     x1: Math.min(W - 1, Math.ceil((mb.x1 + 1) * sx) - 1),
     y1: Math.min(H - 1, Math.ceil((mb.y1 + 1) * sy) - 1),
   };
-  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr };
+  // od / driftG 只为探针回传（用来判断某块边界是不是落在「靠 drift 才吃进来」的模糊带上）。
+  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr, od: od, driftG: Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)) };
 }
 
 // —— 把掩码（0/1）双线性铺到裁剪框上，得到 0~255 的 alpha ——
@@ -8075,7 +8237,9 @@ function cutProductOutline(cv, o) {
   if (!det) return null;
   const base = det.box;
   const n = o.nudge || { t: 0, b: 0, l: 0, r: 0 };
-  const pad = Math.round(o.pad || 0);
+  // 留白默认 PD_PAD（20 原图像素，见常数区的注释）：包住掩码包围盒，让成品四周有一圈背景余量，
+  // 产品不会正好贴在被切掉的那条边上。界面上的 `st.opt.pad` 初值同源，用户能改成 0。
+  const pad = Math.round(o.pad == null ? PD_PAD : o.pad);
   const box = {
     x0: Math.max(0, base.x0 + (n.l | 0) - pad), y0: Math.max(0, base.y0 + (n.t | 0) - pad),
     x1: Math.min(W - 1, base.x1 - (n.r | 0) + pad), y1: Math.min(H - 1, base.y1 - (n.b | 0) + pad),
@@ -9397,9 +9561,9 @@ function buildToolProdCut() {
               <label>右 <button class="cu-step" id="pdRD" title="右边少切 1px（往外补回）">−</button><input class="cu-numv" id="pdR" value="0"><button class="cu-step" id="pdRU" title="右边多切 1px（往里收）">+</button></label>
             </div>
             <div class="cu-row" style="margin-top:7px">
-              <label style="font-size:12px;color:var(--text-light)">留白 <button class="cu-step" id="pdPadD">−</button></label>
-              <input class="cu-numv" id="pdPad" value="0" style="width:44px">
-              <button class="cu-step" id="pdPadU">+</button>
+              <label style="font-size:12px;color:var(--text-light);white-space:nowrap">留白 <button class="cu-step" id="pdPadD" title="四周留白少 1px（0 就正好切在产品的边上）">−</button></label>
+              <input class="cu-numv" id="pdPad" value="20" style="width:44px" title="成品四周留出来的空白（原图像素），默认 20 —— 保证产品不会被正好切在边上">
+              <button class="cu-step" id="pdPadU" title="四周留白多 1px">+</button>
             </div>
           </div>
           <div class="cu-grp">
@@ -9454,6 +9618,8 @@ function buildToolProdCut() {
       背景基准取画面四边采样出来的多个颜色簇（墙 + 地板 + 窗户各算一块），所以实拍场景也认得出；轮廓最后会<b>吸附到最近的强边缘</b>上。
       主体内部（镜面 / 玻璃反射到的室内、<b>人物</b>）一律算产品本体，<b>不会被单独抠出来</b>。
       <b>背景确实是纯色 / 浅色渐变</b>时，把「识别方式」换成「纯色背景泛洪」更省事。
+      成品四周默认<b>留 20px 空白</b>（「留白」里可改，单位是原图像素）—— 轮廓识别难免有 1~2px 的偏差，
+      留一圈余量就不会出现「产品正好贴在被切掉的那条边上」；透明底看不见这一圈，白底就是一圈白边。
       <b>轮廓没贴准外框</b>时：先调「轮廓平滑」（0 = 保留原始锯齿；越大越干净，但会磨掉细碎特征）；
       还有偏差就点「✥ 手动调边」直接拖红框的四条边和四个角，或在下方的「裁剪边距」里用四向 ± / 输入框精确到 px ——
       <b>+ 是往里多切、− 是往外补回</b>（补回的那一圈按产品处理）——<b>只改这一张</b>，要统一点「套用到全部图片」。
@@ -9469,10 +9635,11 @@ function buildToolProdCut() {
     // size：输出长边（0 = 原像素不缩放）。bg：'transparent' = 透明底 PNG；'white' = 合成白底。
     // ⚠️ 容差默认 10（不是 14）：用样张扫出来的甜点 —— 圆镜填充率 0.7850 几乎正好等于 π/4 = 0.7854。
     //    14 时是 0.7762（镜框左下那段浅色外缘被泛洪吃掉），9 时是 0.7890（反过来多吃背景）。
-    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: 0, size: 0, bg: 'transparent' },
+    // pad 默认 PD_PAD = 20：四周留 20 原图像素的空白，别让成品正好切在产品的物理边上。
+    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent' },
   };
   const NG0 = { t: 0, b: 0, l: 0, r: 0 };
-  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: 0, size: 0, bg: 'transparent' };
+  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent' };
   const log = (s) => { const el = $('pdLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
   const setProg = (i, n) => { $('pdBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
 
@@ -10559,7 +10726,8 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
-    pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
+    pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdSnapEdge, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
+    PD_EDGE_K, PD_EDGE_GATE, PD_EDGE_MIN, PD_EDGE_GAIN, PD_EDGE_TEX, PD_EDGE_TEXG,
     pdOpen, pdClose, pdRowMorph, pdColMorph,
     PD_DS, PD_DS_QUICK, outSizeOf, scaleToLongSide,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, tagSize, stampNow, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
