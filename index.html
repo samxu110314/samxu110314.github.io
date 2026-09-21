@@ -600,18 +600,28 @@
   .cu-checker { background-image: linear-gradient(45deg, #e6eaee 25%, transparent 25%), linear-gradient(-45deg, #e6eaee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6eaee 75%), linear-gradient(-45deg, transparent 75%, #e6eaee 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
   .cu-num { width: 62px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; font-family: inherit; font-size: 12px; text-align: right; color: var(--text); }
   .cu-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; align-items: start; }
-  /* ===== 框条抠图专用版式：左（预览）尽量宽，右（参数调节）收到固定窄列 ===== */
-  .cu-2col.cu-cut { grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; }
-  @media (max-width: 1180px) { .cu-2col.cu-cut { grid-template-columns: minmax(0, 1fr) 266px; } }
-  @media (max-width: 900px) { .cu-2col.cu-cut { grid-template-columns: 1fr; } }
-  .cu-cut .cu-side { display: flex; flex-direction: column; gap: 9px; }
-  .cu-grp { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px 10px; background: #fafbfc; }
-  .cu-grp-t { font-size: 11.5px; font-weight: 600; color: var(--text-light); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
-  .cu-sls { display: grid; gap: 5px; }
-  /* 滑块：上行「名称 + − 数值 +」，下行整条滑轨 —— 窄列里反而更好点 */
-  .cu-sl2 { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1px 8px; }
-  .cu-sl2 > span:first-child { font-size: 12px; color: var(--text-light); }
-  .cu-sl2 input[type=range] { grid-column: 1 / -1; width: 100%; margin: 0; }
+  /* ===== 框条抠图专用版式：预览占满整行，参数区挪到**下方**、三组并排、整体压矮 =====
+     用户反馈「右侧的调整参数放到框条预览下方吧，小一点」——右侧竖排那一列每项都占一行，
+     高度和预览一样高，很占地方；挪到下面横向铺开之后就矮多了。 */
+  .cu-2col.cu-cut { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .cu-cut .cu-side { display: grid; grid-template-columns: 244px 196px minmax(0, 1fr); gap: 9px; align-items: start; }
+  @media (max-width: 1080px) {
+    .cu-cut .cu-side { grid-template-columns: 1fr 1fr; }
+    .cu-cut .cu-side > .cu-grp:last-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 720px) {
+    .cu-cut .cu-side { grid-template-columns: 1fr; }
+    .cu-cut .cu-side > .cu-grp:last-child { grid-column: auto; }
+  }
+  .cu-grp { border: 1px solid var(--border); border-radius: 9px; padding: 6px 9px 7px; background: #fafbfc; }
+  .cu-grp-t { font-size: 11px; font-weight: 600; color: var(--text-light); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  /* 调色：横向铺开之后每条能压成**一行**（名称 | − 值 + | 滑轨），比竖着一列矮一大截 */
+  .cu-sls { display: grid; grid-template-columns: repeat(auto-fit, minmax(206px, 1fr)); gap: 3px 16px; }
+  .cu-sl2 { display: grid; grid-template-columns: 40px auto minmax(48px, 1fr); align-items: center; gap: 0 6px; }
+  .cu-sl2 > span:first-child { font-size: 11.5px; color: var(--text-light); }
+  .cu-sl2 input[type=range] { grid-column: auto; width: 100%; min-width: 48px; margin: 0; }
+  .cu-sl2 .cu-nb .cu-numv { width: 42px; padding: 1px 3px; }
+  .cu-sl2 .cu-nb .cu-step { width: 20px; height: 20px; font-size: 13px; }
   .cu-nb { display: inline-flex; align-items: center; gap: 4px; }
   .tool-panel .cu-step {
     width: 23px; height: 23px; padding: 0; line-height: 1; font-size: 15px; font-weight: 600;
@@ -630,7 +640,7 @@
   .tool-panel .cu-ng .cu-numv { width: 40px; }
   .tool-panel .cu-ng .cu-step { width: 21px; height: 21px; font-size: 14px; }
   .cu-cut .cu-stage { min-height: 190px; padding: 12px; }
-  .cu-cut .cu-stage canvas { max-height: 460px; }
+  .cu-cut .cu-stage canvas { max-height: 520px; }   /* 参数区挪到下面之后，预览能占的高度也更多了 */
   .cu-cut input[type=range] { padding: 0; }
   /* 手动调边：整幅画布 + 可拖的四边 + 四角。拖动只改元素样式、不重画图像 → 跟手 */
   .cu-edgewrap { position: relative; display: inline-block; line-height: 0; }
@@ -6210,9 +6220,27 @@ function deskewCut(cv, box, angleDeg) {
     }
     if (!(X1 > X0) || !(Y1 > Y0)) return null;
   }
-  const W2 = Math.max(1, Math.ceil(X1 - X0) + 1), H2 = Math.max(1, Math.ceil(Y1 - Y0) + 1);
-  // 源矩形：裁剪框外扩一点，保证旋转后边缘不缺料
-  const m = Math.max(6, Math.round(Math.max(box.x1 - box.x0, box.y1 - box.y0) * 0.04) + 2);
+  // —— 画布要留一圈**余量（bleed）**，返回的裁剪框再往里缩掉同样的量 ——
+  // 【为什么非留不可】上面按占用度把画布裁到刚好等于条带，于是返回的框四条边全部贴着画布边界；
+  //   而「裁剪边距 −（往外放）」需要框外的像素，clampNudge 又把值夹回 ≥0 ——
+  //   结果就是四个方向**只能加不能减**（用户原话），「留白」也一起失效。
+  // 【留多少】按条带尺寸取 3.5%（16~240px），再逐边按**源图边界**收 —— 源图外没有像素，
+  //   留了也只是透明块。余量默认被裁掉（自动结果不变），只在用户往外放时才看得到。
+  const bleed0 = Math.max(16, Math.min(240, Math.round(Math.max(X1 - X0, Y1 - Y0) * 0.035)));
+  // 画布坐标 u 与源坐标 q 的关系（A≈0 时）：u = q − cx − X0，所以「往左还能取多少源像素」= cx + X0
+  const bl = Math.min(bleed0, Math.max(0, Math.floor(cx + X0)));
+  const br = Math.min(bleed0, Math.max(0, Math.floor(W - 1 - (cx + X1))));
+  const bt = Math.min(bleed0, Math.max(0, Math.floor(cy + Y0)));
+  const bb = Math.min(bleed0, Math.max(0, Math.floor(H - 1 - (cy + Y1))));
+  // ⚠️ 余量不能改变掩码的采样网格 —— 掩码分辨率是**按条带尺寸**定的（k2 = 900/TW2），
+  //    若改成按加了余量的画布算，同样的源像素会落到不同的掩码格上，
+  //    下游那些按列/按行取分位、找台阶的判据会整体挪位（实测 _DSC5662 被多切掉 625px）。
+  //    所以：掩码网格仍锚在「条带画布」上（fullW/fullH = 条带尺寸，ox/oy 记下它在画布里的位置）。
+  const W0 = Math.max(1, Math.ceil(X1 - X0) + 1), H0 = Math.max(1, Math.ceil(Y1 - Y0) + 1);
+  X0 -= bl; X1 += br; Y0 -= bt; Y1 += bb;
+  const W2 = W0 + bl + br, H2 = H0 + bt + bb;
+  // 源矩形：裁剪框外扩一点，保证旋转后边缘不缺料（余量也算进去，否则余量位置会缺料变透明）
+  const m = Math.max(6, Math.round(Math.max(box.x1 - box.x0, box.y1 - box.y0) * 0.04) + 2, bleed0 + 2);
   const sx0 = Math.max(0, box.x0 - m), sy0 = Math.max(0, box.y0 - m);
   const sx1 = Math.min(W - 1, box.x1 + m), sy1 = Math.min(H - 1, box.y1 + m);
   const sw = sx1 - sx0 + 1, sh = sy1 - sy0 + 1;
@@ -6230,21 +6258,31 @@ function deskewCut(cv, box, angleDeg) {
   octx.translate(-cx, -cy);
   octx.drawImage(cv, sx0, sy0, sw, sh, sx0, sy0, sw, sh);
   // 掩码用最近邻逆映射重采样（保持硬边，收尾交给 fillAlphaRuns / featherAlpha）
-  const k2 = Math.min(1, 900 / W2);
-  const mw = Math.max(8, Math.round(W2 * k2)), mh = Math.max(8, Math.round(H2 * k2));
+  // ⚠️ 网格按**条带画布**（W0/H0）定，坐标原点也锚在条带画布左上角（X0+bl, Y0+bt）：
+  //    这样「哪块源像素落到哪个掩码格」与没加余量时**完全一致**，下游判据不会挪位。
+  const k2 = Math.min(1, 900 / W0);
+  const mw = Math.max(8, Math.round(W0 * k2)), mh = Math.max(8, Math.round(H0 * k2));
+  const gx0 = X0 + bl, gy0 = Y0 + bt;      // 条带画布原点（画布坐标 = 0 的那一点）
   const mu8 = new Uint8Array(mw * mh);
   for (let my = 0; my < mh; my++) {
-    const oy = (my + 0.5) / k2 + Y0;
+    const oy = (my + 0.5) / k2 + gy0;
     for (let mx = 0; mx < mw; mx++) {
-      const ox = (mx + 0.5) / k2 + X0;
+      const ox = (mx + 0.5) / k2 + gx0;
       const px = cx + ox * ca + oy * sa, py = cy - ox * sa + oy * ca;
       const ix = Math.floor(px / kx), iy = Math.floor(py / ky);
       if (ix >= 0 && iy >= 0 && ix < msk.aw && iy < msk.ah && msk.u8[iy * msk.aw + ix]) mu8[my * mw + mx] = 255;
     }
   }
+  // 返回的框 = 老版本那个「画布满幅」的框，只是整体往里缩掉了余量 ——
+  // ⚠️ 必须写成 bl / W2-1-br，不能写成「按条带范围重新算一遍」：画布宽是 ceil(X1-X0)+1，
+  //    多出来的那 1px 是给旋转插值的余量，重新算会少 1px（框比老版本窄一格）。
+  const bx0 = bl, by0 = bt;
+  const bx1 = Math.max(bx0, W2 - 1 - br), by1 = Math.max(by0, H2 - 1 - bb);
   return {
     cv: out, angle: angleDeg, xf: { X0: X0, Y0: Y0, cx: cx, cy: cy, A: A },
-    box: { x0: 0, y0: 0, x1: W2 - 1, y1: H2 - 1, mask: { u8: mu8, aw: mw, ah: mh, fullW: W2, fullH: H2 } },
+    // mask.fullW/fullH 是**条带画布**的尺寸，ox/oy 是条带画布原点在画布上的位置 ——
+    // maskToAlpha 用它们把「画布坐标」换算成「掩码坐标」（见那里的注释）
+    box: { x0: bx0, y0: by0, x1: bx1, y1: by1, mask: { u8: mu8, aw: mw, ah: mh, fullW: W0, fullH: H0, ox: bl, oy: bt } },
   };
 }
 // 统一入口：检测 →（可选）摆正 → 给出「可直接裁的画布 + 该画布上的裁切框」。
@@ -6290,11 +6328,24 @@ function maskToAlpha(mask, box, w, h, lum, rawOut) {
   }
   mctx.putImageData(mid, 0, 0);
   const sx = mask.aw / mask.fullW, sy = mask.ah / mask.fullH;
+  // 掩码坐标 0 对应画布上的 (mask.ox, mask.oy) —— 摆正后画布在检测框外留了一圈余量
+  // （见 deskewCut 的 bleed），掩码网格仍锚在检测框上，所以要减掉这个原点。
+  const mo = mask.ox || 0, mv = mask.oy || 0;
   const ac = document.createElement('canvas');
   ac.width = w; ac.height = h;
   const actx = ac.getContext('2d');
   actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = 'high';
-  actx.drawImage(mc, box.x0 * sx, box.y0 * sy, Math.max(0.5, w * sx), Math.max(0.5, h * sy), 0, 0, w, h);
+  // ⚠️ 用户「往外放」时，请求的源矩形会超出掩码图像范围。drawImage 对越界源矩形的处理
+  //    各浏览器不一致（可能整块不画），所以自己求交、再把目标矩形按同一比例缩到交出来的
+  //    那一块 —— 交集之外保持全透明（掩码在那里没有主体，正是「框外是背景」的意思）。
+  const sX = (box.x0 - mo) * sx, sY = (box.y0 - mv) * sy;
+  const sW = Math.max(0.5, w * sx), sH = Math.max(0.5, h * sy);
+  const ix0 = Math.max(0, sX), iy0 = Math.max(0, sY);
+  const ix1 = Math.min(mask.aw, sX + sW), iy1 = Math.min(mask.ah, sY + sH);
+  if (ix1 > ix0 && iy1 > iy0) {
+    actx.drawImage(mc, ix0, iy0, ix1 - ix0, iy1 - iy0,
+      (ix0 - sX) / sx, (iy0 - sY) / sy, (ix1 - ix0) / sx, (iy1 - iy0) / sy);
+  }
   const ad = actx.getImageData(0, 0, w, h).data;
   const a = new Uint8Array(w * h);
   for (let p = 0; p < w * h; p++) a[p] = ad[p * 4 + 3] > 128 ? 255 : 0;
@@ -7347,9 +7398,15 @@ function renderCut(frontCv, box, o) {
     const a = maskToAlpha(box.mask, box, w, h, lum, rawA);
     // 最后一步：裁到 alpha 的实际范围。检测框被「接触阴影」撑高的部分、以及紧挨产品
     // 却与它不相连的桌面/别的样品，都要在这一步丢掉 —— 用户的原话是「先找到框条主体再裁切」。
-    const bb = alphaTightBox(a, w, h);
+    //
+    // ⚠️ o.fixed = 这个框已经被用户手动调过了（见下面 outBox 的注释）：**四边全部原样保留**。
+    //    这里必须整段跳过，不能只跳一部分 —— 自动收边是「按框宽的百分比找端头」，
+    //    框一变它的判断就跟着变：实测把框往右放 150px，导出反而**窄了 150px**
+    //    （alphaTightCols / alphaEndsByTone 在更靠内的位置切掉了），
+    //    用户看到的就是「往外放按钮不管用」。
+    const bb = o.fixed ? null : alphaTightBox(a, w, h);
     const useB = !!(bb && bb.rows >= 8 && bb.rows < h);
-    const bc = alphaTightCols(a, w, h, useB ? bb.y0 : 0, useB ? bb.y1 : h - 1);
+    const bc = o.fixed ? null : alphaTightCols(a, w, h, useB ? bb.y0 : 0, useB ? bb.y1 : h - 1);
     const y0 = useB ? bb.y0 : 0;
     const y1 = useB ? bb.y1 : h - 1;
     // 三个横向判据取最紧的那个：alphaTightCols 管「与主体隔着空隙的孤立块」，
@@ -7357,15 +7414,24 @@ function renderCut(frontCv, box, o) {
     // alphaEndsByTone 管「与主体同为满高、只靠亮度台阶分得开的」（见各自注释）。
     let x0 = bc ? bc.x0 : 0;
     let x1 = bc ? bc.x1 : w - 1;
-    const be = alphaEndsByEdges(rawA, w, h, y0, y1);
-    if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
-    const bt = alphaEndsByTone(rawA, lum, w, h, y0, y1);
-    if (bt) { if (bt.x0 > x0) x0 = bt.x0; if (bt.x1 < x1) x1 = bt.x1; }
+    if (!o.fixed) {
+      const be = alphaEndsByEdges(rawA, w, h, y0, y1);
+      if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
+      const bt = alphaEndsByTone(rawA, lum, w, h, y0, y1);
+      if (bt) { if (bt.x0 > x0) x0 = bt.x0; if (bt.x1 < x1) x1 = bt.x1; }
+    }
     if (y0 !== 0 || y1 !== h - 1 || x0 !== 0 || x1 !== w - 1) {
       const cy0 = Math.max(0, y0 - 1), cy1 = Math.min(h - 1, y1 + 1);
       const cx0 = Math.max(0, x0 - 1), cx1 = Math.min(w - 1, x1 + 1);
       const ch = cy1 - cy0 + 1, cwc = cx1 - cx0 + 1;
       if (ch >= 8 && cwc >= 8) {
+        // 把「收边之后真正交出去的框」（画布坐标）带出去：界面上 ± 手动边距就是以它为基准。
+        // 用户看到的是收边后的成品，「少切一点」当然是从成品这条边往外放；若以检测框为基准，
+        // 按一下 − 会从 4162 直接跳到 4892（自动收边丢掉的那 730px 一次性回来），根本没法微调。
+        if (o.outBox) {
+          o.outBox.x0 = box.x0 + cx0; o.outBox.y0 = box.y0 + cy0;
+          o.outBox.x1 = box.x0 + cx1; o.outBox.y1 = box.y0 + cy1;
+        }
         const co = document.createElement('canvas');
         co.width = cwc; co.height = ch;
         const cid = co.getContext('2d').createImageData(cwc, ch);
@@ -7382,7 +7448,10 @@ function renderCut(frontCv, box, o) {
         return co;
       }
     }
+    if (o.outBox) { o.outBox.x0 = box.x0; o.outBox.y0 = box.y0; o.outBox.x1 = box.x1; o.outBox.y1 = box.y1; }
     for (let p = 0, i = 3; p < w * h; p++, i += 4) id.data[i] = a[p];
+  } else if (o.outBox) {
+    o.outBox.x0 = box.x0; o.outBox.y0 = box.y0; o.outBox.x1 = box.x1; o.outBox.y1 = box.y1;
   }
   cx.putImageData(id, 0, 0);
   return out;
@@ -7540,6 +7609,14 @@ function skipSummary(skipped) {
   return `已忽略 ${skipped.length} 个非图片文件（${txt}）；这些格式浏览器解不了，请先另存为 JPG/PNG`;
 }
 function fileRelName(f) { return (f && (f.__rel || f.webkitRelativePath)) || (f && f.name) || ''; }
+// 输出文件名只取**文件原名**（去掉文件夹前缀）：从文件夹导入时 fileRelName 会带 "相册A/DSC1.JPG"，
+// 直接拿去命名，导出的 ZIP 里文件名就多一段目录名（用户反馈：「保存的文件名依然带着文件夹的名称」）。
+// ⚠️ 只用于**输出名**：清单里的「源文件」列继续显示相对路径（要一眼看出是哪张、来自哪个文件夹）。
+function fileBaseName(f) {
+  const rel = fileRelName(f);
+  const i = Math.max(rel.lastIndexOf('/'), rel.lastIndexOf('\\'));
+  return i >= 0 ? rel.slice(i + 1) : rel;
+}
 function sortImgFiles(list) {
   return list.slice().sort((a, b) => naturalCompare(fileRelName(a), fileRelName(b)));
 }
@@ -7637,7 +7714,7 @@ function buildToolFrameCut() {
     </div>
     <div class="cu-row" style="margin-top:10px">
       <span class="cu-empty" id="fcInfo">还没有选择图片</span>
-      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">只放正面图即可 · 输出文件名 = 源文件名（_DSC5653.JPG → _DSC5653.png）</span>
+      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">只放正面图即可 · 输出文件名 = 源文件名，不含文件夹名（相册A/_DSC5653.JPG → _DSC5653.png）</span>
     </div>
 
     <div class="cu-sec" id="fcListSec" style="display:none">
@@ -7664,7 +7741,7 @@ function buildToolFrameCut() {
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="display:none;margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>拖动红框四条边 / 四个角，右侧数值会同步变 · <b>只作用于本张</b></span>
+            <span>拖动红框四条边 / 四个角，下面数值会同步变 · <b>只作用于本张</b></span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
             <button class="cu-mini" id="fcEdgeDone">✓ 完成调边</button>
@@ -7672,7 +7749,7 @@ function buildToolFrameCut() {
         </div>
         <div class="cu-side">
           <div class="cu-grp">
-            <div class="cu-grp-t">裁剪边距 · 往里切掉的 px<span class="cu-badge warn" id="fcNgTag" style="display:none">本张已手动</span></div>
+            <div class="cu-grp-t">裁剪边距 <span style="font-weight:400">（+ 多切 / − 少切，px）</span><span class="cu-badge warn" id="fcNgTag" style="display:none">本张已手动</span></div>
             <div class="cu-ng">
               <label>上 <button class="cu-step" id="fcTD" title="上边少切 1px（往外放）">−</button><input class="cu-numv" id="fcT" value="0"><button class="cu-step" id="fcTU" title="上边多切 1px（往里收）">+</button></label>
               <label>下 <button class="cu-step" id="fcBD" title="下边少切 1px（往外放）">−</button><input class="cu-numv" id="fcB" value="0"><button class="cu-step" id="fcBU" title="下边多切 1px（往里收）">+</button></label>
@@ -7733,7 +7810,7 @@ function buildToolFrameCut() {
       在样张上调好锐化 / 亮度 / 对比度 / 饱和度 / 色相（滑块旁边有 − / + 可以一格一格微调，按住不放会连续走）→ 点「开始批量抠图」，其余照片会自动套用同一组参数。
       输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；文件名直接用<b>源文件名</b>（_DSC5653.JPG → _DSC5653.png，重名自动加 -2）。
       <b>个别照片边缘没识别准</b>时点「✥ 手动调边」，在画布上直接拖红框的四条边和四个角——比填数字直观，<b>而且只改这一张</b>（改完想统一，点「套用到全部图片」）；
-      也可以用右侧「裁剪边距」的四向 ± / 输入框精确到 px。摆正角度不对时，在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
+      也可以用下方「裁剪边距」的四向 ± / 输入框精确到 px：<b>+ 是往里多切、− 是往外少切</b>（框外还留着原图，最多能外放 3.5%），两个方向都有效。摆正角度不对时，在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
       整条链路都在本地跑、不需要联网，图片不会上传。</div>`;
 
   const $ = (id) => box.querySelector('#' + id);
@@ -7862,6 +7939,7 @@ function buildToolFrameCut() {
     const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: st.opt.angle, det: cur.det });
     cur.cutCv = p.cv; cur.box = p.box; cur.low = p.low; cur.note = p.note;
     cur.detAngle = p.detAngle; cur.angle = p.angle; cur.rotated = p.rotated; cur.xf = p.xf;
+    cur.tightBox = null;    // 画布/角度变了 → 「自动收边后的框」这个基准作废，下次渲染重新量
     const info = $('fcAngleInfo');
     if (info) {
       const d = p.detAngle;
@@ -7903,6 +7981,37 @@ function buildToolFrameCut() {
     if (cur.box) return cur.box;
     return { x0: 0, y0: 0, x1: cur.cutCv.width - 1, y1: cur.cutCv.height - 1, mask: null };
   }
+  // —— 手动边距的**基准**：不是检测框，而是「自动收边之后的成品框」 ——
+  // 【为什么不用检测框】界面上 ± 调的是「成品看上去那条边」。自动收边会切掉一大截
+  //   （DSC08582 实测 4892 → 4162），以检测框为基准的话，按一下 − 会从那 4162 直接跳回
+  //   4892（一次跳 730px），根本没法微调。
+  // 【用户那个 bug】「裁切多了，手动却只能加不能减」就出在这里：deskewCut 原来的画布**就是**
+  //   检测框（四边贴着画布边界），clampNudge 把四个方向的负值全夹回 0 → 只能往里加。
+  //   现在画布外留了一圈余量（见 deskewCut 的 bleed），又改以成品框为基准，两个方向才都动得了。
+  // 【哪来的】renderCut 的 outBox 就是它（收边后真正交出去的那个框），渲染时顺手缓存到 cur.tightBox。
+  function refBox() {
+    const cur = st.cur;
+    if (!cur) return null;
+    return cur.tightBox || baseBox();
+  }
+  // 本张第一次改边距时补量一次基准（多跑一遍自动渲染；之后走缓存，改角度/重新识别会清掉）
+  function measureRef() {
+    const cur = st.cur;
+    if (!cur || !cur.cutCv) return null;
+    if (cur.tightBox) return cur.tightBox;
+    const bb = baseBox();
+    // 没掩码（根本没识别到）时收边本来就没跑过，基准就是检测框本身
+    if (!bb || !bb.mask) return bb;
+    const ob = {};
+    const o = renderCut(cur.cutCv, bb, Object.assign({}, st.opt, { outBox: ob }));
+    o.width = 0; o.height = 0;
+    cur.tightBox = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
+    return cur.tightBox;
+  }
+  function curBox() {
+    const cur = st.cur;
+    return cur ? applyNudge(refBox(), cur.cutCv, nudgeOf(st.sel)) : null;
+  }
   // 在基准框上套用「四向微调 + 留白」。预览、手动调边、批量导出共用这一个函数 ——
   // 分成两套算法迟早会变成「预览看着对、导出的不一样」这种极难查的问题。
   function applyNudge(base, cv, n) {
@@ -7913,10 +8022,6 @@ function buildToolFrameCut() {
     const x1 = Math.min(cv.width - 1, base.x1 - (n.r | 0) + pad), y1 = Math.min(cv.height - 1, base.y1 - (n.b | 0) + pad);
     if (x1 <= x0 || y1 <= y0) return null;
     return { x0: x0, y0: y0, x1: x1, y1: y1, mask: base.mask };
-  }
-  function curBox() {
-    const cur = st.cur;
-    return cur ? applyNudge(baseBox(), cur.cutCv, nudgeOf(st.sel)) : null;
   }
   // 把「摆正后画布」上的坐标反算回原始照片坐标（只为在「显示裁剪位置」里画红框）。
   // 未摆正时两张画布是同一张，直接原样返回。
@@ -8000,7 +8105,7 @@ function buildToolFrameCut() {
   function edgeLayout() {
     const cur = st.cur;
     if (!edgeUI || !cur || !cur.cutCv) return null;
-    const b = applyNudge(baseBox(), cur.cutCv, nudgeOf(st.sel));
+    const b = applyNudge(refBox(), cur.cutCv, nudgeOf(st.sel));
     if (!b) return null;
     const k = edgeUI.k, W = cur.cutCv.width * k, H = cur.cutCv.height * k;
     const x0 = b.x0 * k, x1 = (b.x1 + 1) * k, y0 = b.y0 * k, y1 = (b.y1 + 1) * k;
@@ -8060,7 +8165,7 @@ function buildToolFrameCut() {
   function edgeDrag(ev, side) {
     ev.preventDefault();
     ev.stopPropagation();
-    const cur = st.cur, base = baseBox();
+    const cur = st.cur, base = refBox();
     if (!cur || !cur.cutCv || !base || !edgeUI) return;
     const k = edgeUI.k;
     const sx = ev.clientX, sy = ev.clientY;
@@ -8123,7 +8228,27 @@ function buildToolFrameCut() {
     if (st.edge) { drawEdgeView(); return; }
     stage.innerHTML = '';
     st.liveCanvas = null;
-    const b = curBox();
+    // —— 先出成品 ——
+    // 有手动边距 / 留白 → 以「自动收边后的框」为基准四边加减，再**原样**渲染
+    //（不再跑自动收边，原因见 renderCut 里 o.fixed 的注释）；
+    // 没有 → 纯自动，和以前逐像素一致，顺便把「收边后的框」记下来当基准。
+    const nn = nudgeOf(st.sel);
+    const manual = !!((nn && (nn.t || nn.b || nn.l || nn.r)) || st.opt.pad);
+    let out = null, b = null;
+    if (manual) {
+      const nb = applyNudge(measureRef(), cur.cutCv, nn);
+      if (nb) {
+        const ob = {};
+        out = renderCut(cur.cutCv, nb, Object.assign({}, st.opt, { fixed: true, outBox: ob }));
+        b = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
+      }
+    }
+    if (!out) {
+      const ob = {};
+      out = renderCut(cur.cutCv, baseBox(), Object.assign({}, st.opt, { outBox: ob }));
+      cur.tightBox = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
+      b = cur.tightBox;
+    }
     if (!b) {
       stage.innerHTML = '<span class="cu-empty">裁剪范围无效：微调值把范围压没了，请调小一点</span>';
       $('fcBoxInfo').textContent = '裁剪范围无效';
@@ -8156,10 +8281,10 @@ function buildToolFrameCut() {
         : `未自动定位到框条 · 当前按整图（${dims} px），请用下面的微调往里收`;
       return;
     }
-    const out = renderCut(cur.cutCv, b, st.opt);
-    stage.appendChild(out);
-    st.liveCanvas = out;      // 真渲染已经把调色烘进像素了，滤镜到此为止
-    $('fcBoxInfo').textContent = `输出 ${out.width}×${out.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
+    const out2 = out;
+    stage.appendChild(out2);
+    st.liveCanvas = out2;     // 真渲染已经把调色烘进像素了，滤镜到此为止
+    $('fcBoxInfo').textContent = `输出 ${out2.width}×${out2.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
       + (cur.rotated ? ' · 已摆正 ' + (cur.angle > 0 ? '+' : '') + cur.angle.toFixed(2) + '°' : '')
       + (cur.low ? ' · ' + cur.note : '');
   }
@@ -8325,10 +8450,10 @@ function buildToolFrameCut() {
       renderRows();
       return;
     }
-    // 输出名直接用源文件名（重名自动 -2）；这里先算好，清单与批量导出一致
+    // 输出名直接用**源文件原名**（不含文件夹名，重名自动 -2）；这里先算好，清单与批量导出一致
     const used = {};
-    st.meta = st.files.map(f => ({ status: '待处理', cls: '', outName: frameOutName('', fileRelName(f), used) }));
-    $('fcInfo').textContent = `${st.files.length} 张图片 · 输出文件名 = 源文件名`;
+    st.meta = st.files.map(f => ({ status: '待处理', cls: '', outName: frameOutName('', fileBaseName(f), used) }));
+    $('fcInfo').textContent = `${st.files.length} 张图片 · 输出文件名 = 源文件名（不含文件夹名）`;
     log(`已读取 ${st.files.length} 张图片`);
     if (skip) log(skip);
     renderRows();
@@ -8358,12 +8483,21 @@ function buildToolFrameCut() {
         cutCv = p.cv; box = p.box; low = p.low; note = p.note;
       }
       if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
-      // 逐张的边距（手动调边 / 右侧 ±）—— 没有就完全按自动结果
-      const b = applyNudge(box, cutCv, nudgeOf(i));
-      if (!b) { setStatus(i, '跳过：微调值把范围压没了', 'err'); log(`第 ${i + 1} 张：裁剪范围无效，已跳过`); return null; }
-      const out = renderCut(cutCv, b, st.opt);
+      // 逐张的边距（手动调边 / ± 按钮）：以「自动收边后的框」为基准，与预览走同一套
+      //（基准为什么不是检测框、以及 o.fixed 为什么必须加，见 refBox / renderCut 的注释）。
+      // 没有手动值就完全按自动结果 —— 与预览逐像素一致。
+      const nz = nudgeOf(i);
+      const manual = !!((nz && (nz.t || nz.b || nz.l || nz.r)) || st.opt.pad);
+      let out = null;
+      if (manual) {
+        const ob = {};
+        renderCut(cutCv, box, Object.assign({}, st.opt, { outBox: ob }));   // 先量出基准
+        const nb = applyNudge({ x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1, mask: box.mask }, cutCv, nz);
+        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { fixed: true }));
+      }
+      if (!out) out = renderCut(cutCv, box, st.opt);
       const bytes = await canvasToPngBytes(out);
-      const name = (st.meta[i] && st.meta[i].outName) || frameOutName('', fileRelName(f), ctx.used);
+      const name = (st.meta[i] && st.meta[i].outName) || frameOutName('', fileBaseName(f), ctx.used);
       const dims = out.width + '×' + out.height;
       out.width = 0; out.height = 0;
       setStatus(i, dims, 'ok');
@@ -8598,7 +8732,7 @@ function buildToolProdCut() {
         cv.width = 0; cv.height = 0;
         if (!r) throw new Error('整张图都被判成背景（容差过大）');
         const bytes = await canvasToPngBytes(r.canvas);
-        const name = frameOutName('', fileRelName(item.file), used);
+        const name = frameOutName('', fileBaseName(item.file), used);
         r.canvas.width = 0; r.canvas.height = 0;
         entries.push({ name: name, data: bytes });
         item.status = r.box.x1 - r.box.x0 + 1 + '×' + (r.box.y1 - r.box.y0 + 1); item.cls = 'ok';
@@ -9207,7 +9341,7 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
-    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName,
+    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
     sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
     buildToolQr, buildToolWatermark, buildToolColor,
