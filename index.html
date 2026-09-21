@@ -7678,6 +7678,29 @@ function frameOutName(model, frontName, used) {
   if (used) used[name.toLowerCase()] = 1;
   return name;
 }
+// —— 导出文件名的「防重名」后缀 ——
+// 【为什么要有】浏览器下载**不会覆盖同名文件**，第二次会存成「DSC08578 (1).png」；
+//   而 Finder 按名字排序时「(1)」排在原名**后面** —— 用户重新导出后习惯性点开排在最前面那个，
+//   看到的还是上一版。用户报过「8578 手动裁剪了，但下载的图依然是没有裁剪之前的」，
+//   实测导出四条路径（输入框 / 拖红框 / 清除 / 批量 ZIP）全都正确带上了手动边距 ——
+//   坑就在这个重名上：面板读数、清单状态、导出文件三者其实一致，用户手里打开的是旧文件。
+// 【规则】单张导出带上裁剪尺寸：同一次裁剪 → 同名（内容一模一样，撞了也无所谓）；
+//   裁剪改过 → 名字必然不同，新旧一眼分得清。批量（ZIP 内）仍是纯源文件名，
+//   因为 ZIP 包名本身已经带去重的日期时间。
+function tagSize(name, w, h) {
+  const s = String(name || 'image.png');
+  const m = /^(.*)\.([A-Za-z0-9]{1,5})$/.exec(s);
+  const stem = m ? m[1] : s, ext = m ? m[2] : 'png';
+  return stem + '_' + Math.round(w) + 'x' + Math.round(h) + '.' + ext;
+}
+// 打包 ZIP 的名字带到分钟：同一天导两次（张数一样）时名字必须不同，
+// 否则第二次又成了「框条抠图_2026-09-21_19张 (1).zip」，用户点开的还是上一包。
+function stampNow(d) {
+  const t = d || new Date();
+  const p = (x) => String(x).padStart(2, '0');
+  return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate())
+    + '_' + p(t.getHours()) + p(t.getMinutes());
+}
 // 拖文件夹（或散图）进来：用 webkitGetAsEntry 递归展开
 function walkFsEntry(entry, out, prefix) {
   return new Promise(resolve => {
@@ -7750,7 +7773,7 @@ function buildToolFrameCut() {
     </div>
     <div class="cu-row" style="margin-top:10px">
       <span class="cu-empty" id="fcInfo">还没有选择图片</span>
-      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">只放正面图即可 · 输出文件名 = 源文件名，不含文件夹名（相册A/_DSC5653.JPG → _DSC5653.png）</span>
+      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">只放正面图即可 · 输出文件名 = 源文件名，不含文件夹名（相册A/_DSC5653.JPG → _DSC5653.png）· 单张导出会再带裁剪尺寸（_DSC5653_4170x367.png），免得和上一次下载的老文件混起来</span>
     </div>
 
     <div class="cu-sec" id="fcListSec" style="display:none">
@@ -8569,11 +8592,14 @@ function buildToolFrameCut() {
       const bytes = await canvasToPngBytes(out);
       const name = (st.meta[i] && st.meta[i].outName) || frameOutName('', fileBaseName(f), ctx.used);
       const dims = out.width + '×' + out.height;
+      // ⚠️ 尺寸要在**置零释放显存之前**存下来：下面 out.width = 0 之后就读不到了，
+      //    而单张导出的文件名要用它（见 tagSize）。
+      const ow = out.width, oh = out.height;
       out.width = 0; out.height = 0;
       setStatus(i, dims, 'ok');
       log(`第 ${i + 1} 张 → ${name}（${dims}px，${(bytes.length / 1024).toFixed(0)} KB，${Date.now() - t0}ms）`
         + (note ? ' · ' + note : ''));
-      return { name: name, data: bytes };
+      return { name: name, data: bytes, w: ow, h: oh };
     } catch (e) {
       const why = (e && e.message) || String(e);
       setStatus(i, cv ? '失败' : '读图失败', 'err');
@@ -8606,13 +8632,16 @@ function buildToolFrameCut() {
     st.busy = false;
     if (!entries.length) { log('没有可导出的图片'); $('fcProgText').textContent = '没有可导出的图片'; return; }
     if (entries.length === 1) {
-      saveBytes(entries[0].data, entries[0].name, 'image/png');
-      log('已导出 1 张：' + entries[0].name);
+      // 单张导出是「反复调、反复下」的那条路 —— 名字必须自带裁剪尺寸，
+      // 否则浏览器把它存成「DSC08578 (1).png」，用户点开旧文件，看到的就是上一版
+      //（见 tagSize 上面的注释）。批量走 ZIP，里面的文件名仍然是纯源文件名。
+      const nm = tagSize(entries[0].name, entries[0].w, entries[0].h);
+      saveBytes(entries[0].data, nm, 'image/png');
+      log(`已导出 1 张：${nm}（${entries[0].w}×${entries[0].h}px）`);
     } else {
       log('正在打包 ZIP…');
       const zip = zipStore(entries);
-      const stamp = new Date().toISOString().slice(0, 10);
-      saveBytes(zip, `框条抠图_${stamp}_${entries.length}张.zip`, 'application/zip');
+      saveBytes(zip, `框条抠图_${stampNow()}_${entries.length}张.zip`, 'application/zip');
       log(`已导出 ${entries.length} 张 PNG（打包 ${(zip.length / 1048576).toFixed(1)} MB）`);
     }
     $('fcProgText').textContent = `完成：导出 ${entries.length} 张`;
@@ -9412,7 +9441,7 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
-    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
+    naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, tagSize, stampNow, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
     sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
     buildToolQr, buildToolWatermark, buildToolColor,
