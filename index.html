@@ -8962,7 +8962,16 @@ function buildToolFrameCut() {
     const ob = {};
     const o = renderCut(cur.cutCv, bb, Object.assign({}, st.opt, { outBox: ob }));
     o.width = 0; o.height = 0;
-    cur.tightBox = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
+    // ⚠️ `mask` 必须一起缓存进 tightBox —— 这不是「顺手多存一个字段」，而是**预览保真的前提**：
+    //    applyNudge 会把 `base.mask` 原样交给 renderCut，而 renderCut 里抠背景那一段的开关是
+    //    `if (o.transparent && box.mask)`。少了 mask 就整个跳到 else 分支 → 预览变成「原图直接裁」，
+    //    背景不透明；可批量/单张导出那条路是自己带 mask 的（processOne 里显式 `mask: box.mask`）
+    //    → 两边分叉。
+    //    【用户报障】「这次我手动调整的还是没有被保存，下载后依然是错误的」就是这个：
+    //    他往外放（−）/ 加留白时，预览里多出来的那一圈**画着背景**（看着"框大了、背景还在"），
+    //    下载下来那一圈却**是透明的** —— 同一张图上两种结果，用户只能认为「我调的没保存」。
+    //    只有框里全部落在 mask 内（比如纯往里切）时两条路才恰好一致，所以这个 bug 藏了很久。
+    cur.tightBox = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1, mask: bb.mask };
     return cur.tightBox;
   }
   function curBox() {
@@ -9155,6 +9164,26 @@ function buildToolFrameCut() {
     flushPreview();
     drawPreview();
   }
+  // 四边各有多少行 / 列是「基本全透明」（那一行里超过一半的像素 alpha≈0）。
+  // 只为一件事：手动往外放 / 加留白之后，补回来的那一圈如果落在**背景**上，导出就是透明的 ——
+  // 在读数里直接说出来，用户就不会把「往外放带出一圈透明」误当成「我调的没生效」
+  //（用户报障「手动调整的没被保存，下载后依然是错误的」正是踩了这个）。
+  // ⚠️ 只在手动分支调用；扫描范围封在四周 30% 以内 —— 输出常有 4000px 宽，
+  //    全图 getImageData 要几十毫秒，而这里只关心边缘那一条。
+  function transparentBars(c) {
+    const W = c.width, H = c.height;
+    if (W < 8 || H < 8) return null;
+    let d;
+    try { d = c.getContext('2d').getImageData(0, 0, W, H).data; } catch (_) { return null; }
+    const rowA = (y) => { let n = 0; for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 8) n++; return n; };
+    const colA = (x) => { let n = 0; for (let y = 0; y < H; y++) if (d[(y * W + x) * 4 + 3] > 8) n++; return n; };
+    const capH = Math.max(4, Math.round(H * 0.3)), capW = Math.max(4, Math.round(W * 0.3));
+    let t = 0; while (t < capH && rowA(t) < W * 0.5) t++;
+    let b = 0; while (b < capH && b < H - t && rowA(H - 1 - b) < W * 0.5) b++;
+    let l = 0; while (l < capW && colA(l) < H * 0.5) l++;
+    let r = 0; while (r < capW && r < W - l && colA(W - 1 - r) < H * 0.5) r++;
+    return { t: t, b: b, l: l, r: r };
+  }
   function drawPreview() {
     const stage = $('fcStage');
     const cur = st.cur;
@@ -9201,7 +9230,9 @@ function buildToolFrameCut() {
     if (!out) {
       const ob = {};
       out = renderCut(cur.cutCv, baseBox(), Object.assign({}, st.opt, { outBox: ob }));
-      cur.tightBox = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
+      // mask 一起存，理由见 measureRef 里那段（少了它，之后一旦有手动边距/留白，
+      // 预览就会退化成「原图直接裁」，与导出分叉）
+      cur.tightBox = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1, mask: cur.box ? cur.box.mask : null };
       b = cur.tightBox;
     }
     if (!b) {
@@ -9239,9 +9270,22 @@ function buildToolFrameCut() {
     const out2 = out;
     stage.appendChild(out2);
     st.liveCanvas = out2;     // 真渲染已经把调色烘进像素了，滤镜到此为止
+    // 手动往外放 / 加留白时，补回来那一圈如果落在背景上，导出就是透明的 —— 直接说出来
+    let barHint = '';
+    if (manual) {
+      const bars = transparentBars(out2);
+      if (bars) {
+        const seg = [];
+        if (bars.t > 2) seg.push('上 ' + bars.t);
+        if (bars.b > 2) seg.push('下 ' + bars.b);
+        if (bars.l > 2) seg.push('左 ' + bars.l);
+        if (bars.r > 2) seg.push('右 ' + bars.r);
+        if (seg.length) barHint = ' · ⚠️ ' + seg.join(' / ') + 'px 是背景（导出为透明）';
+      }
+    }
     $('fcBoxInfo').textContent = `输出 ${out2.width}×${out2.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
       + (cur.rotated ? ' · 已摆正 ' + (cur.angle > 0 ? '+' : '') + cur.angle.toFixed(2) + '°' : '')
-      + (cur.low ? ' · ' + cur.note : '');
+      + (cur.low ? ' · ' + cur.note : '') + barHint;
   }
   // ± 按钮：单击走一格；按住先等 380ms 再每 25ms 连发 —— 既点得准，又能快速推到目标附近
   //（用户说的「不顺滑」有一半是拖滑块拖不准：滑块 200 格宽、±1px 根本停不住）
@@ -9686,7 +9730,8 @@ function buildToolProdCut() {
       留一圈余量就不会出现「产品正好贴在被切掉的那条边上」；透明底看不见这一圈，白底就是一圈白边。
       <b>轮廓没贴准外框</b>时：先调「轮廓平滑」（0 = 保留原始锯齿；越大越干净，但会磨掉细碎特征）；
       还有偏差就点「✥ 手动调边」直接拖红框的四条边和四个角，或在下方的「裁剪边距」里用四向 ± / 输入框精确到 px ——
-      <b>+ 是往里多切、− 是往外补回</b>（补回的那一圈按产品处理）——<b>只改这一张</b>，要统一点「套用到全部图片」。
+      <b>+ 是往里多切、− 是往外补回</b>（补回的那一圈如果落在背景上，导出时是<b>透明</b>的 ——
+      别处再补也拿不回背景像素，因为背景本来就在抠掉的范围里）——<b>只改这一张</b>，要统一点「套用到全部图片」。
       最后是「调色 / 锐化」：<b>亮度 / 对比度 / 锐化 / 饱和度 / 色相</b>五项，滑块旁边有 − / + 可以一格一格微调
       （按住不放会连续走）。<b>只改产品本身的颜色，改成白底时底色不会被调灰</b>；<b>套用到整批</b>，预览即所得。
       锐化填<b>负数</b>是柔化（去掉镜面噪点 / 摩尔纹），色相只用来校正<b>黄变、冷暖偏色</b>（±5~15° 就够，别拉满）；
