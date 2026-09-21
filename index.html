@@ -629,9 +629,17 @@
      单独加宽到 52px；框条那组的调色标签只有 2~3 字，不动它
      （`.cu-cut .cu-sl2` 是两处共用的，qa_cut_ui 的「最高一组 ≤190px」也在盯框条那边）。 */
   .cu-cut.cu-pd .cu-sl2 { grid-template-columns: 52px auto minmax(48px, 1fr); }
+  /* 调色 / 锐化那一组（五项滑块）**独占一整行** —— 5 条滑块在宽屏下并成一行、
+     在窄屏下自动折行（`.cu-sls` 的 auto-fit），比塞进第 5 列好得多：
+     塞进第一行的第 5 列会把「识别参数」的弹性宽度挤到 280px（它的滑块要 206px×2 才不折），
+     反而把上一轮刚修好的版式又搞乱。 */
+  .cu-cut.cu-pd .cu-side > .cu-grp-wide { grid-column: 1 / -1; }
   @media (max-width: 1220px) {
     .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr 1fr; }
-    .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: auto; }
+    /* ⚠️ 这条原来写的是 `.cu-grp:last-child`。调色组现在是**最后一个子元素**，
+       会被它命中并把 grid-column 打回 auto（= 只占一列），把「整行宽」废掉 ——
+       所以加 :not(.cu-grp-wide) 把整行宽那组排除掉。 */
+    .cu-cut.cu-pd .cu-side > .cu-grp:last-child:not(.cu-grp-wide) { grid-column: auto; }
   }
   @media (max-width: 720px) {
     .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr; }
@@ -7165,6 +7173,47 @@ function applyPixelAdjust(data, w, h, o) {
   }
   return data;
 }
+// 调色参数的 **CSS 滤镜近似**（拖动中的跟手预览用；锐化没有对应滤镜，真渲染才有）。
+// 提到顶层是因为**框条抠图与产品抠图两个面板共用**（原来只定义在框条那个闭包里）。
+// ⚠️ 亮度这里用乘法近似（真算法是 +2.55×值），所以它只是「拖的时候看着跟手」，
+//    松手后一定会跑一次真渲染把结果定下来 —— 别把它当成最终效果。
+function toneFilter(o) {
+  o = o || {};
+  const f = [];
+  if (o.brightness) f.push('brightness(' + (1 + o.brightness / 100 * 0.85).toFixed(3) + ')');
+  if (o.contrast) f.push('contrast(' + (1 + o.contrast / 100).toFixed(3) + ')');
+  if (o.saturation) f.push('saturate(' + Math.max(0, 1 + o.saturation / 100).toFixed(3) + ')');
+  if (o.hue) f.push('hue-rotate(' + o.hue + 'deg)');
+  return f.length ? f.join(' ') : 'none';
+}
+// 有没有任何一项调色 / 锐化参数被改动过（决定要不要走像素运算那条路）
+function hasTone(o) {
+  return !!(o && (o.sharpen || o.brightness || o.contrast || o.saturation || o.hue));
+}
+// 「补齐差值」版的滤镜：want 是滑块当前值，baked 是**上一次真渲染已经烘进像素**的那组值。
+// 为什么需要它：拖动中停一下（>160ms）真渲染就把当时的参数烘进像素并清掉了滤镜，
+// 接着再拖时如果还挂**全量**滤镜，就会在已烘的画面上再叠一次 —— 画面瞬间过冲
+//（例：+30 停一下再拖到 +40，看着像 +80），松手才掉回来，很跳。
+// 滤镜里亮度/对比度/饱和是**乘法**、色相是**加法**，所以按比例/差值补齐。
+// 锐化没有对应的 CSS 滤镜（这段近似里唯一补不了的一项），它的反馈靠停手后的真渲染。
+// ⚠️ 目前**只有产品抠图**用这个差值版；框条抠图那边还在用全量版 toneFilter
+//    （它那套两档预览已经被 qa_cut_ui 的 47 条断言盯着，不在这次改动范围内，别顺手改）。
+function toneDeltaFilter(want, baked) {
+  want = want || {}; baked = baked || {};
+  const g = (o, k) => o[k] || 0;
+  const ratio = (a, b, k) => (1 + a / 100 * k) / (1 + b / 100 * k);
+  const f = [];
+  if (g(want, 'brightness') !== g(baked, 'brightness')) f.push('brightness(' + ratio(g(want, 'brightness'), g(baked, 'brightness'), 0.85).toFixed(4) + ')');
+  if (g(want, 'contrast') !== g(baked, 'contrast')) f.push('contrast(' + ratio(g(want, 'contrast'), g(baked, 'contrast'), 1).toFixed(4) + ')');
+  if (g(want, 'saturation') !== g(baked, 'saturation')) f.push('saturate(' + Math.max(0, ratio(g(want, 'saturation'), g(baked, 'saturation'), 1)).toFixed(4) + ')');
+  if (g(want, 'hue') !== g(baked, 'hue')) f.push('hue-rotate(' + (g(want, 'hue') - g(baked, 'hue')) + 'deg)');
+  return f.length ? f.join(' ') : 'none';
+}
+// 只取调色那五项的快照（用来当 baked 的基准；别把 mode / pad 这些塞进来）
+function toneSnapshot(o) {
+  o = o || {};
+  return { sharpen: o.sharpen || 0, brightness: o.brightness || 0, contrast: o.contrast || 0, saturation: o.saturation || 0, hue: o.hue || 0 };
+}
 // —— 收边最后一步：把输出纵向裁到 alpha 的实际范围 ——
 // 检测框常被「接触阴影」撑高好几倍（实测 8572 的框 698 行而产品只有 92 行、
 // 8574 的框是产品厚度的 4 倍），框不裁的话导出就是一大片透明背景 ——
@@ -8259,6 +8308,17 @@ function cutProductOutline(cv, o) {
     for (let x = 0; x < w; x++) od[(y * w + x) * 4 + 3] = al.alpha[base2 + x];
   }
   cx.putImageData(id, 0, 0);
+  // —— 调色 / 锐化（亮度 / 对比度 / 锐化 / 饱和度 / 色相）——
+  // 与框条抠图**共用同一套像素运算** applyPixelAdjust：预览与导出都走这一条路，
+  // 所以「预览即所得」（框条那边调色是烘进像素的，见 renderCut）。
+  // ⚠️ 位置放在**白底合成之前**，两个理由：
+  //   ① 白底是「背景」，用户调暗画面时不该把背景一起调成灰的（背景恒为纯白）；
+  //   ② applyPixelAdjust 只写 RGB 不碰 alpha，放在 alpha 写入之后 → 透明区照旧全透明。
+  if (hasTone(o)) {
+    const tune = cx.getImageData(0, 0, w, h);
+    applyPixelAdjust(tune.data, w, h, o);
+    cx.putImageData(tune, 0, 0);
+  }
   const ref0 = det.refs[0] || [255, 255, 255];
   // 白底：把裁好的透明图合成到纯白上。放在这里（而不是导出侧）是为了**预览即所得** ——
   // 白底比棋盘底严格得多，边缘残留的灰边 / 半透明边只有在白底上才看得出来。
@@ -8271,7 +8331,7 @@ function cutProductOutline(cv, o) {
     c2.fillRect(0, 0, w, h);
     c2.drawImage(out, 0, 0);
   }
-  return { canvas: canvas, box: box, base: base, bg: ref0, det: det, mask: det.mask };
+  return { canvas: canvas, box: box, base: base, bg: ref0, det: det, mask: det.mask, toneUsed: toneSnapshot(o) };
 }
 
 // —— 产品抠图：从四边泛洪去纯色背景 + 紧致裁切 ——
@@ -8936,14 +8996,7 @@ function buildToolFrameCut() {
   // drawImage 给裁剪一个真预览；停手 160ms 后再跑一次真渲染把结果定下来。
   // 近似之处：亮度用乘法近似（真算法是 +2.55×值）、锐化没有对应滤镜、
   // alpha 收边（端头/上下沿的那些自动收紧）只有真渲染才有 —— 所以真渲染一定是最后一手。
-  function toneFilter(o) {
-    const f = [];
-    if (o.brightness) f.push('brightness(' + (1 + o.brightness / 100 * 0.85).toFixed(3) + ')');
-    if (o.contrast) f.push('contrast(' + (1 + o.contrast / 100).toFixed(3) + ')');
-    if (o.saturation) f.push('saturate(' + Math.max(0, 1 + o.saturation / 100).toFixed(3) + ')');
-    if (o.hue) f.push('hue-rotate(' + o.hue + 'deg)');
-    return f.length ? f.join(' ') : 'none';
-  }
+  // toneFilter 已提到顶层（产品抠图那组滑块也用它），见 applyPixelAdjust 下面。
   function liveTone() { if (st.liveCanvas) st.liveCanvas.style.filter = toneFilter(st.opt); }
   function schedulePreview(ms) {
     if (st.pvT) clearTimeout(st.pvT);
@@ -9601,6 +9654,17 @@ function buildToolProdCut() {
               <button class="cu-mini" id="pdBgW" title="合成为纯白底，输出的 PNG 不带透明通道">白底</button>
             </div>
           </div>
+          <div class="cu-grp cu-grp-wide" id="pdToneGrp">
+            <div class="cu-grp-t">调色 / 锐化 <span style="font-weight:400">（套用到整批 · 只改产品颜色，白底不会被调灰）</span>
+              <button class="cu-mini" id="pdToneReset" style="margin-left:auto" title="五项一起回到 0（原像素，不做任何调色）">重置调色</button></div>
+            <div class="cu-sls">
+              <div class="cu-sl2"><span>亮度</span><span class="cu-nb"><button class="cu-step" id="pdBrightD" title="亮度 −1">−</button><input class="cu-numv" id="pdBrightV" value="0"><button class="cu-step" id="pdBrightU" title="亮度 +1">+</button></span><input type="range" id="pdBright" min="-100" max="100" step="1" value="0" title="整体提亮 / 压暗（±100 = ±255 灰阶）"></div>
+              <div class="cu-sl2"><span>对比度</span><span class="cu-nb"><button class="cu-step" id="pdContrastD" title="对比度 −1">−</button><input class="cu-numv" id="pdContrastV" value="0"><button class="cu-step" id="pdContrastU" title="对比度 +1">+</button></span><input type="range" id="pdContrast" min="-100" max="100" step="1" value="0" title="拉开 / 压缩明暗层次（围绕中灰 128 缩放）"></div>
+              <div class="cu-sl2"><span>锐化</span><span class="cu-nb"><button class="cu-step" id="pdSharpenD" title="锐化 −1">−</button><input class="cu-numv" id="pdSharpenV" value="0"><button class="cu-step" id="pdSharpenU" title="锐化 +1">+</button></span><input type="range" id="pdSharpen" min="-100" max="100" step="1" value="0" title="负值是柔化（去噪 / 去摩尔纹），正值提锐（让镜框花纹、金属边缘更实）"></div>
+              <div class="cu-sl2"><span>饱和度</span><span class="cu-nb"><button class="cu-step" id="pdSatD" title="饱和度 −1">−</button><input class="cu-numv" id="pdSatV" value="0"><button class="cu-step" id="pdSatU" title="饱和度 +1">+</button></span><input type="range" id="pdSat" min="-100" max="100" step="1" value="0" title="−100 = 完全去色（黑白），+100 = 浓艳"></div>
+              <div class="cu-sl2"><span>色相</span><span class="cu-nb"><button class="cu-step" id="pdHueD" title="色相 −1°">−</button><input class="cu-numv" id="pdHueV" value="0"><button class="cu-step" id="pdHueU" title="色相 +1°">+</button></span><input type="range" id="pdHue" min="-180" max="180" step="1" value="0" title="整幅色相旋转（±180°）。校正黄变 / 冷暖偏色用 ±5~15° 就够"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -9623,6 +9687,10 @@ function buildToolProdCut() {
       <b>轮廓没贴准外框</b>时：先调「轮廓平滑」（0 = 保留原始锯齿；越大越干净，但会磨掉细碎特征）；
       还有偏差就点「✥ 手动调边」直接拖红框的四条边和四个角，或在下方的「裁剪边距」里用四向 ± / 输入框精确到 px ——
       <b>+ 是往里多切、− 是往外补回</b>（补回的那一圈按产品处理）——<b>只改这一张</b>，要统一点「套用到全部图片」。
+      最后是「调色 / 锐化」：<b>亮度 / 对比度 / 锐化 / 饱和度 / 色相</b>五项，滑块旁边有 − / + 可以一格一格微调
+      （按住不放会连续走）。<b>只改产品本身的颜色，改成白底时底色不会被调灰</b>；<b>套用到整批</b>，预览即所得。
+      锐化填<b>负数</b>是柔化（去掉镜面噪点 / 摩尔纹），色相只用来校正<b>黄变、冷暖偏色</b>（±5~15° 就够，别拉满）；
+      五项都调回 0 就等于<u>完全不动原像素</u>，点「重置调色」一键回去。
       输出在右侧「输出」组里选：<b>透明底</b>或<b>白底</b>，尺寸可选 <b>原像素</b>／长边 2048／长边 1024
       （<b>只缩不放</b>：原图比目标还小就保持原尺寸）——<b>PNG 无损，全程不做有损压缩</b>；
       整条链路都在本地跑、图片不会上传。</div>`;
@@ -9636,10 +9704,16 @@ function buildToolProdCut() {
     // ⚠️ 容差默认 10（不是 14）：用样张扫出来的甜点 —— 圆镜填充率 0.7850 几乎正好等于 π/4 = 0.7854。
     //    14 时是 0.7762（镜框左下那段浅色外缘被泛洪吃掉），9 时是 0.7890（反过来多吃背景）。
     // pad 默认 PD_PAD = 20：四周留 20 原图像素的空白，别让成品正好切在产品的物理边上。
-    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent' },
+    // 调色五项（sharpen / brightness / contrast / saturation / hue）默认全 0 = 不动原像素，
+    // 交给 cutProductOutline 里的 applyPixelAdjust（与框条抠图同一套运算，-100~+100，色相 ±180）。
+    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent', sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0 },
   };
   const NG0 = { t: 0, b: 0, l: 0, r: 0 };
-  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent' };
+  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent', sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0 };
+  // 调色五项：控件 id → st.opt 的键。syncOpt / syncTone / 绑定 / 重置四处都靠它，
+  // 提在这里声明（别留在绑定那段里）是为了让 syncOpt 无论什么时候被调用都拿得到。
+  // 顺序也定了界面上滑块的顺序（用户点名要的是「亮度、对比度、锐化、饱和度、色相」）。
+  const TONE_MAP = { pdBright: 'brightness', pdContrast: 'contrast', pdSharpen: 'sharpen', pdSat: 'saturation', pdHue: 'hue' };
   const log = (s) => { const el = $('pdLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
   const setProg = (i, n) => { $('pdBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
 
@@ -9686,7 +9760,14 @@ function buildToolProdCut() {
     return o.mode === 'plain' ? detectPlainMask(cv, o) : detectProductMask(cv, o);
   }
   function prodOptions(quick) {
-    const o = { mode: st.opt.mode, tol: st.opt.tol, smooth: st.opt.smooth, feather: st.opt.feather, pad: st.opt.pad, bg: st.opt.bg };
+    const o = {
+      mode: st.opt.mode, tol: st.opt.tol, smooth: st.opt.smooth, feather: st.opt.feather, pad: st.opt.pad, bg: st.opt.bg,
+      // 调色五项也在这里带出去：cutProductOutline 收尾时按它们跑 applyPixelAdjust。
+      // ⚠️ 顺带提醒：detectFor 收到的那份 o 里也带着这几个键，检测函数根本不读它们（只读 mode/tol/smooth/ds），
+      //    所以「改亮度 → 重新识别一遍」在检测上是完全等价的（不会因为调色改了轮廓）。
+      sharpen: st.opt.sharpen, brightness: st.opt.brightness, contrast: st.opt.contrast,
+      saturation: st.opt.saturation, hue: st.opt.hue,
+    };
     if (quick) o.ds = PD_DS_QUICK;      // 拖滑块时的快速档（掩码分辨率低一档，改参数跟手）
     return o;
   }
@@ -9758,6 +9839,10 @@ function buildToolProdCut() {
   // 真识别一次 70~130ms（1920×1281），每个 input 事件都跑会顿；拖动中先按低分辨率出个近似，
   // 停手 90ms 后再跑全分辨率把结果定下来。最终导出永远用全分辨率。
   let pvT = 0;
+  // 上一次**真渲染**已经烘进画布像素的那组调色值（见 toneDeltaFilter 的注释）。
+  // 只在真的渲染成功那一步更新（取 cutProductOutline 回传的 toneUsed）——
+  // 不给它单独维护状态，就不会出现「基准和画布不同步」导致的预览过冲。
+  let bakedTone = null;
   function schedule(quick) {
     if (pvT) clearTimeout(pvT);
     pvT = setTimeout(() => { pvT = 0; analyze(st.sel, quick); }, quick ? 70 : 0);
@@ -9778,9 +9863,19 @@ function buildToolProdCut() {
     set('pdPad', st.opt.pad);
     set('pdMode', st.opt.mode);
     set('pdSize', String(st.opt.size || 0));
+    Object.keys(TONE_MAP).forEach(syncTone);
     const wt = st.opt.bg === 'white';
     if ($('pdBgT')) $('pdBgT').classList.toggle('on', !wt);
     if ($('pdBgW')) $('pdBgW').classList.toggle('on', wt);
+  }
+  // 调色滑块的「滑轨 + 数字框」两处一起同步（改一处漏一处的话，重置之后会看到
+  // 滑轨回到 0 而数字框还留着旧值）
+  function syncTone(id) {
+    const key = TONE_MAP[id];
+    if (!key) return;
+    const el = $(id), num = $(id + 'V');
+    if (el && el.value !== String(st.opt[key])) el.value = st.opt[key];
+    if (num && num.value !== String(st.opt[key])) num.value = st.opt[key];
   }
 
   // ===== 手动调边：整幅原图 + 可拖红框（与框条抠图同一套做法，只是画布是原图不摆正）=====
@@ -9923,13 +10018,15 @@ function buildToolProdCut() {
     }
     stage.appendChild(r.canvas);
     cur.out = r;
+    bakedTone = r.toneUsed;      // 画布里的调色基准（供拖动中的差值滤镜用）
     // 读数 = **最终导出尺寸**（不是裁剪尺寸）：选了「长边 2048 / 1024」或白底之后，
     // 预览画布还是裁剪尺寸，用户必须能从这行读出真正会落盘的像素数。
     // ⚠️ 验收脚本用 /(\d+)×(\d+) px/ 抓这一行比对落盘 PNG，所以「输出 W×H px」要留在最前面。
     const fsz = outSizeOf(r.canvas.width, r.canvas.height, st.opt.size);
     $('pdBoxInfo').textContent = '输出 ' + fsz.w + '×' + fsz.h + ' px（'
       + (fsz.k === 1 ? '原像素' : '长边缩到 ' + fsz.t) + ' · ' + (st.opt.bg === 'white' ? '白底' : '透明底') + '）· 裁剪自 '
-      + r.box.x0 + ',' + r.box.y0 + ' → ' + r.box.x1 + ',' + r.box.y1;
+      + r.box.x0 + ',' + r.box.y0 + ' → ' + r.box.x1 + ',' + r.box.y1
+      + (hasTone(st.opt) ? ' · 已调色' : '');
     $('pdRefInfo').textContent = cur.det && cur.det.plain
       ? '纯色背景泛洪 · 背景色 rgb(' + r.bg.map(Math.round).join(',') + ')'
       : '智能轮廓 · 背景簇 ' + (cur.det ? cur.det.refs.length : 0) + ' 个 · 平滑半径 ' + (cur.det ? cur.det.smoothR : 0) + 'px'
@@ -10027,6 +10124,44 @@ function buildToolProdCut() {
   bindStep($('pdPadD'), $('pdPad'), () => st.opt.pad, putPad);
   bindStep($('pdPadU'), $('pdPad'), () => st.opt.pad, putPad);
   $('pdPad').onchange = () => { const v = parseInt($('pdPad').value, 10); putPad(isNaN(v) ? 0 : v); };
+  // —— 调色 / 锐化（整批，五项）——
+  // 语义与框条抠图**完全一致**（同一套 applyPixelAdjust、同一套 -100~+100 / 色相 ±180）。
+  // 这五项不参与识别（检测函数只读 mode/tol/smooth/ds），所以改它们**不重新识别**，
+  // 只重算一次渲染（cutProductOutline 收尾那段），比「识别参数」快得多。
+  // 拖动中：先给预览画布挂 CSS 滤镜（toneFilter，GPU 跟手）+ 防抖 160ms，
+  // 停手后跑一次真渲染把结果定下来（锐化没有滤镜近似，只有真渲染才看得到）。
+  let toneT = 0;
+  function flushTone() { if (toneT) { clearTimeout(toneT); toneT = 0; } }
+  // ⚠️ 挂的是**差值**滤镜（toneDeltaFilter）而不是全量：真渲染已经把上一组参数烘进像素了，
+  //    再叠一次全量就会过冲（停一下再接着拖最容易看出来）。bakedTone 由 drawPreview 更新。
+  function liveTonePd() { const cv = $('pdStage').querySelector('canvas'); if (cv) cv.style.filter = toneDeltaFilter(st.opt, bakedTone); }
+  function putTone(id, v, quick) {
+    const key = TONE_MAP[id], el = $(id);
+    st.opt[key] = clampI(v, +el.min, +el.max);
+    syncTone(id);
+    if (st.edge) return;      // 调边视图画的是整幅原图、还要看红框，不该给它上滤镜
+    if (quick) {
+      liveTonePd();
+      if (toneT) clearTimeout(toneT);
+      toneT = setTimeout(() => { toneT = 0; drawPreview(); }, 160);
+    } else { flushTone(); drawPreview(); }
+  }
+  Object.keys(TONE_MAP).forEach((id) => {
+    const key = TONE_MAP[id], el = $(id), num = $(id + 'V');
+    el.oninput = () => putTone(id, +el.value, true);
+    el.addEventListener('change', () => putTone(id, +el.value, false));
+    num.value = el.value;
+    num.oninput = () => { const v = parseFloat(num.value); if (!isNaN(v)) putTone(id, v, true); };
+    num.onchange = () => putTone(id, parseFloat(num.value) || 0, false);
+    bindStep($(id + 'D'), null, () => st.opt[key], (v) => putTone(id, v, true));
+    bindStep($(id + 'U'), null, () => st.opt[key], (v) => putTone(id, v, true));
+  });
+  $('pdToneReset').onclick = () => {
+    Object.keys(TONE_MAP).forEach((id) => { st.opt[TONE_MAP[id]] = 0; syncTone(id); });
+    flushTone();
+    if (!st.edge) drawPreview();
+    log('调色 / 锐化五项已回到 0（原像素）');
+  };
   $('pdMode').onchange = () => { st.opt.mode = $('pdMode').value; schedule(false); };
   // 输出尺寸 / 背景都是「整批」参数，不参与识别 → 改完只重渲染预览（不重跑检测，很快）。
   // 背景改了预览也要跟着变：透明模式看棋盘底，白底模式直接看成品效果（白底更严格，
@@ -10722,7 +10857,7 @@ if (typeof globalThis !== 'undefined') {
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
