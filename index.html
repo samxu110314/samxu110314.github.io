@@ -7494,6 +7494,35 @@ function renderCut(frontCv, box, o) {
   if (o.transparent && box.mask) {
     const rawA = new Uint8Array(w * h);
     const a = maskToAlpha(box.mask, box, w, h, lum, rawA);
+    // —— 手动框「多出来的那一圈」：按掩码逐像素判定，别让收边链再抹一遍 ——
+    // 【用户报障 2026-09-21 第四次】「手动调边后点击完成调边，又自动回到没调之前的预览图，
+    //   下载的还是没有手动调的，请修复，手动调边后要保存下来」。
+    // 实测（_DSC5671：检测框 6989×1138、成品 6989×744、掩码网格 900×147 锚在检测框上）：
+    //   成品框顶边**上面**那 300 行，掩码逐行占用一直是 0.70~1.00 —— 掩码认为那里是产品；
+    //   但 maskToAlpha 内部的几何链（tightenBand → snapAlphaBand → straightenBand）会按
+    //   **新传入的那个框**重新找上下沿，把这一圈又抹成 0。于是：用户把框往外拖、调边视图里
+    //   红框明明罩住了产品，导出却是透明的 —— 用户只能认为「我手动调的没保存」。
+    //   （之前只加了一行「⚠️ 落在背景上」的提示，那是把「静默出错」变成「明着出错」，
+    //     并没有把产品还给他。）
+    // 现在：自动框之外、手动框之内这一圈，**以掩码为准** ——
+    //   掩码说是产品的（rawA=255）就保留；掩码说是背景的仍然透明。
+    //   所以「留白 / 放出去一圈透明边」的用法一点没变，而「自动框切掉了一截产品」能靠手动补回来。
+    // ⚠️ 只能放在 maskToAlpha **之后**：放它前面会被 tightenBand 再抹掉；放它前面也拿不到 rawA。
+    if (o.ringBox) {
+      const rb = o.ringBox;
+      for (let y = 0; y < h; y++) {
+        const cy = box.y0 + y, outY = (cy < rb.y0 || cy > rb.y1);
+        for (let x = 0; x < w; x++) {
+          const cx = box.x0 + x;
+          if (outY || cx < rb.x0 || cx > rb.x1) a[y * w + x] = rawA[y * w + x];
+        }
+      }
+      // 环里掩码的碎洞按同一套规则补一下（横向间隙 / 纵向间隙），再柔化一圈边，
+      // 否则环里会撒着 0/255 的麻点（掩码在阴影区本来就是斑驳的）。
+      fillAlphaRuns(a, w, h);
+      fillAlphaCols(a, w, h);
+      featherAlpha(a, w, h, 1);
+    }
     // 最后一步：裁到 alpha 的实际范围。检测框被「接触阴影」撑高的部分、以及紧挨产品
     // 却与它不相连的桌面/别的样品，都要在这一步丢掉 —— 用户的原话是「先找到框条主体再裁切」。
     //
@@ -8765,6 +8794,8 @@ function buildToolFrameCut() {
       输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；文件名直接用<b>源文件名</b>（_DSC5653.JPG → _DSC5653.png，重名自动加 -2）。
       <b>个别照片边缘没识别准</b>时点「✥ 手动调边」，在画布上直接拖红框的四条边和四个角——比填数字直观，<b>而且只改这一张</b>（改完想统一，点「套用到全部图片」）；
       也可以用下方「裁剪边距」的四向 ± / 输入框精确到 px：<b>+ 是往里多切、− 是往外少切</b>（框外还留着原图，最多能外放 3.5%），两个方向都有效。
+      <b>往外放出来的那一圈，只要识别认为那里还是产品就会原样保留</b>（自动切多了、想把条带的一截拿回来，就靠这个）；
+      只有识别判定为背景的地方才是透明的（读数里会报出来）。
       自动判据找的是<b>亮度台阶</b>，端头外面挂着同高同色的桌面时认不出来 —— 所以识别完之后，两端会各自<b>默认再切 100px</b> 兜底（「两端再裁」里可改，填 0 就关掉）；哪张切多了，用「裁剪边距 −」往外放回来即可。摆正角度不对时，在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
       整条链路都在本地跑、不需要联网，图片不会上传。</div>`;
 
@@ -9051,8 +9082,17 @@ function buildToolFrameCut() {
       x1: Math.round(b.x1 * S), y1: Math.round(b.y1 * S), mask: shim,
     };
     if (b2.x1 <= b2.x0 || b2.y1 <= b2.y0) return null;
+    // 快速预览也要带上「手动多出来的那一圈」的基准，否则拖动中看到的还是透明、松手才出产品
+    // —— 正是用户说的「手一动就回到没调的样子」。坐标同样乘 S（理由见上面 mask 缩放那段）。
+    const rb = refBox();
+    if (rb) {
+      b2.ringBox = {
+        x0: Math.round(rb.x0 * S), y0: Math.round(rb.y0 * S),
+        x1: Math.round(rb.x1 * S), y1: Math.round(rb.y1 * S),
+      };
+    }
     // 只用来当预览，颜色一律走 CSS 滤镜那套 —— 所以不传调色参数（锐化在低分辨率下也没意义）
-    return renderCut(q, b2, { transparent: true, fixed: true });
+    return renderCut(q, b2, { transparent: true, fixed: true, ringBox: b2.ringBox });
   }
   // 改边距时的快速预览。返回值交给 onNudgeChange 决定要不要排真渲染。
   function drawQuick() {
@@ -9188,8 +9228,15 @@ function buildToolFrameCut() {
     if (!cur || !cur.cutCv || !base || !edgeUI) return;
     const k = edgeUI.k;
     const sx = ev.clientX, sy = ev.clientY;
-    const n0 = nudgeOf(st.sel) || NG0;
+    // ⚠️ n0 必须是**按下那一刻的数值副本**，不能是 `nudgeOf()` 返回的那个对象本身：
+    //    nudgeOf 与 ensureNudge 给出来的是**同一个对象**，于是 move 里按「相对起点的累计位移」
+    //    反复赋值 = 在已被上一段改过的值上再加一次 → 位移 D 分 m 段发出，最终值 ≈ D·(m+1)/2。
+    //    实测（_DSC5671，k=0.2118）：拖下边 20 CSS px、分 6 段 → 面板 0 → **−334**（3.5 倍）。
+    //    真实鼠标一次拖动会发几十个 pointermove → 放大十几倍，框直接冲到夹取极限。
+    //    【用户报障 2026-09-21】「手动调边后点击完成调边，又自动回到没调之前的预览图」，
+    //    他截图里那个「下 −33 / 上 −238」就是被这样放大出来的（他实际只拖了一点点）。
     const n = ensureNudge(st.sel);
+    const n0 = { t: n.t | 0, b: n.b | 0, l: n.l | 0, r: n.r | 0 };
     let dirty = false;
     const move = (e) => {
       const dx = (e.clientX - sx) / k, dy = (e.clientY - sy) / k;
@@ -9280,10 +9327,13 @@ function buildToolFrameCut() {
     const manual = !!((nn && (nn.t || nn.b || nn.l || nn.r)) || st.opt.pad);
     let out = null, b = null;
     if (manual) {
-      const nb = applyNudge(measureRef(), cur.cutCv, nn);
+      // rb = 自动收边后的成品框：既是手动边距的基准，也是「手动多出来的那一圈」的基准
+      //（ringBox 的作用见 renderCut 里那段 —— 少了它，往外放出来的产品会被收边链抹成透明）。
+      const rb = measureRef();
+      const nb = applyNudge(rb, cur.cutCv, nn);
       if (nb) {
         const ob = {};
-        out = renderCut(cur.cutCv, nb, Object.assign({}, st.opt, { fixed: true, outBox: ob }));
+        out = renderCut(cur.cutCv, nb, Object.assign({}, st.opt, { fixed: true, outBox: ob, ringBox: rb }));
         b = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
       }
     }
@@ -9342,7 +9392,8 @@ function buildToolFrameCut() {
         if (bars.b > 2) seg.push('下 ' + bars.b);
         if (bars.l > 2) seg.push('左 ' + bars.l);
         if (bars.r > 2) seg.push('右 ' + bars.r);
-        if (seg.length) barHint = ' · ⚠️ ' + seg.join(' / ') + 'px 落在背景上（导出后这里没有画面，是透明的；按 + 可收回）';
+        if (seg.length) barHint = ' · ⚠️ ' + seg.join(' / ') + 'px 落在背景上（识别认为那里没有产品 → 导出为透明；按 + 可收回。'
+          + '其余放出去的部分保留照片原样）';
       }
     }
     $('fcBoxInfo').textContent = `输出 ${out2.width}×${out2.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
@@ -9584,8 +9635,12 @@ function buildToolFrameCut() {
       if (manual) {
         const ob = {};
         renderCut(cutCv, box, Object.assign({}, st.opt, { outBox: ob }));   // 先量出基准
+        const rb = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
         const nb = applyNudge({ x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1, mask: box.mask }, cutCv, nz);
-        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { fixed: true }));
+        // ⚠️ ringBox 必须和预览那条路**一模一样**（drawPreview 里同名参数）：
+        //    少了它，导出会把「手动多出来的那一圈」里的产品抹成透明，而预览（或反过来）不会
+        //    → 又变成「预览对、下载不对」。这是 2026-09-21 那次报障的同一条根因。
+        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { fixed: true, ringBox: rb }));
       }
       if (!out) out = renderCut(cutCv, box, st.opt);
       const bytes = await canvasToPngBytes(out);
@@ -10069,8 +10124,10 @@ function buildToolProdCut() {
     if (!cur || !cur.srcCv || !base || !edgeUI) return;
     const k = edgeUI.k;
     const sx = ev.clientX, sy = ev.clientY;
-    const n0 = nudgeOf(st.sel) || NG0;
+    // ⚠️ 同「框条抠图」那条：n0 要取数值副本。nudgeOf / ensureNudge 给的是同一个对象，
+    //    直接引用会让每次 pointermove 都在上一段的结果上再加一次累计位移（放大 (m+1)/2 倍）。
     const n = ensureNudge(st.sel);
+    const n0 = { t: n.t | 0, b: n.b | 0, l: n.l | 0, r: n.r | 0 };
     let dirty = false;
     const move = (e) => {
       const dx = (e.clientX - sx) / k, dy = (e.clientY - sy) / k;
