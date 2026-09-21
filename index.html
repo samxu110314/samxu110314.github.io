@@ -604,7 +604,7 @@
      用户反馈「右侧的调整参数放到框条预览下方吧，小一点」——右侧竖排那一列每项都占一行，
      高度和预览一样高，很占地方；挪到下面横向铺开之后就矮多了。 */
   .cu-2col.cu-cut { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .cu-cut .cu-side { display: grid; grid-template-columns: 244px 196px minmax(0, 1fr); gap: 9px; align-items: start; }
+  .cu-cut .cu-side { display: grid; grid-template-columns: 234px 186px 156px minmax(0, 1fr); gap: 9px; align-items: start; }
   @media (max-width: 1080px) {
     .cu-cut .cu-side { grid-template-columns: 1fr 1fr; }
     .cu-cut .cu-side > .cu-grp:last-child { grid-column: 1 / -1; }
@@ -7214,6 +7214,18 @@ function alphaTightCols(a, w, h, ry0, ry1) {
   if (cols < w * 0.4) return null;         // 收完只剩一小截 → 判断不可靠，原样保留
   return { x0: x0, x1: x1, cols: cols };
 }
+// —— 两端再裁：识别之后两端各固定多切 et 像素 ——
+// 【为什么要一刀固定的】下面三道横向判据（alphaTightCols / alphaEndsByEdges / alphaEndsByTone）
+//   找的全是**亮度台阶**。可很多照片的产品端头外面挂着的是同一张桌面的一小截：
+//   同高、同色、和产品连成一片，压根没有台阶可找 —— 判据再多也认不出来。
+//   与其再堆第四个判据，不如给一条安全带，用户可调（默认 100）、可清零、也能逐张往外放回来。
+// 【夹取】再裁之后至少要留 24px、且不少于原框的 1/4：条带本来就短（或框本来就被收得很紧）时
+//   宁可这一刀不生效，也不能把产品切没。
+function trimEnds(x0, x1, et) {
+  const w0 = x1 - x0 + 1;
+  if (et > 0 && w0 - et * 2 >= Math.max(24, w0 * 0.25)) return [x0 + et, x1 - et];
+  return [x0, x1];
+}
 // —— 横向切掉「压根不是这一根」的列：按上下沿的**高度偏离**判，不按列占用 ——
 // 【为什么不能用列占用】画面里并排躺着的别的样品，在条带那几行里也是满的：
 //   实测 DSC08584 左端的黑框样品在掩码里跟条带连成一片，条带的 84 行里它占了六成；
@@ -7419,6 +7431,15 @@ function renderCut(frontCv, box, o) {
       if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
       const bt = alphaEndsByTone(rawA, lum, w, h, y0, y1);
       if (bt) { if (bt.x0 > x0) x0 = bt.x0; if (bt.x1 < x1) x1 = bt.x1; }
+      // —— 两端默认再裁（整批共用，默认 100px，界面在「两端再裁」组里，0 = 关闭） ——
+      // 上面前三道判据找的都是**亮度台阶**。可是有不少照片的产品端头外面挂着的是
+      // 同一张桌面的一小截：同高、同色、和产品连成一片，压根没有台阶可找
+      //（用户的原话：「有的框条两端还是有空余」）。与其再堆第四个判据，不如给一条安全带 ——
+      // 识别完两端各固定再切一刀，用户可调、可清零、也能用「−」逐张往外放回来。
+      // ⚠️ 这段在 `if (!o.fixed)` 里：用户手动调过边（o.fixed）时框里已经含着这一刀，
+      //    这里再切一次就成了双倍 —— 也就是「调边那一栏的数字和导出尺寸对不上」。
+      const t = trimEnds(x0, x1, Math.max(0, Math.round(o.endTrim || 0)));
+      x0 = t[0]; x1 = t[1];
     }
     if (y0 !== 0 || y1 !== h - 1 || x0 !== 0 || x1 !== w - 1) {
       const cy0 = Math.max(0, y0 - 1), cy1 = Math.min(h - 1, y1 + 1);
@@ -7730,7 +7751,7 @@ function buildToolFrameCut() {
     </div>
 
     <div class="cu-sec" id="fcEditSec" style="display:none">
-      <div class="cu-sec-t">② 调参数 <small>以当前选中的这组为样张；调色滑块套用到整批，裁剪边距只作用于本张</small></div>
+      <div class="cu-sec-t">② 调参数 <small>以当前选中的这组为样张；调色、「两端再裁」「留白」套用到整批，裁剪边距只作用于本张</small></div>
       <div class="cu-2col cu-cut">
         <div>
           <div class="cu-stage cu-checker" id="fcStage"><span class="cu-empty">选择文件夹后这里显示样张</span></div>
@@ -7779,6 +7800,17 @@ function buildToolFrameCut() {
             </div>
           </div>
           <div class="cu-grp">
+            <div class="cu-grp-t">两端再裁 <span style="font-weight:400">（整批，px）</span></div>
+            <div class="cu-row" style="font-size:12px;color:var(--text-light)">
+              <span>左右各</span>
+              <button class="cu-step" id="fcEtD" title="少切 1px">−</button>
+              <input class="cu-numv" id="fcEt" value="100" style="width:48px">
+              <button class="cu-step" id="fcEtU" title="多切 1px">+</button>
+              <span>px</span>
+            </div>
+            <div class="cu-empty" style="margin-top:4px">照识别结果两端各再切</div>
+          </div>
+          <div class="cu-grp">
             <div class="cu-grp-t">调色 / 锐化 <span style="font-weight:400">（套用到整批）</span></div>
             <div class="cu-sls">
               <div class="cu-sl2"><span>锐化</span><span class="cu-nb"><button class="cu-step" id="fcSharpenD">−</button><input class="cu-numv" id="fcSharpenV" value="0"><button class="cu-step" id="fcSharpenU">+</button></span><input type="range" id="fcSharpen" min="-100" max="100" step="1" value="0"></div>
@@ -7810,7 +7842,8 @@ function buildToolFrameCut() {
       在样张上调好锐化 / 亮度 / 对比度 / 饱和度 / 色相（滑块旁边有 − / + 可以一格一格微调，按住不放会连续走）→ 点「开始批量抠图」，其余照片会自动套用同一组参数。
       输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；文件名直接用<b>源文件名</b>（_DSC5653.JPG → _DSC5653.png，重名自动加 -2）。
       <b>个别照片边缘没识别准</b>时点「✥ 手动调边」，在画布上直接拖红框的四条边和四个角——比填数字直观，<b>而且只改这一张</b>（改完想统一，点「套用到全部图片」）；
-      也可以用下方「裁剪边距」的四向 ± / 输入框精确到 px：<b>+ 是往里多切、− 是往外少切</b>（框外还留着原图，最多能外放 3.5%），两个方向都有效。摆正角度不对时，在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
+      也可以用下方「裁剪边距」的四向 ± / 输入框精确到 px：<b>+ 是往里多切、− 是往外少切</b>（框外还留着原图，最多能外放 3.5%），两个方向都有效。
+      自动判据找的是<b>亮度台阶</b>，端头外面挂着同高同色的桌面时认不出来 —— 所以识别完之后，两端会各自<b>默认再切 100px</b> 兜底（「两端再裁」里可改，填 0 就关掉）；哪张切多了，用「裁剪边距 −」往外放回来即可。摆正角度不对时，在「手动角度」里填一个数字（正数 = 右端往下压）会套用到整批。
       整条链路都在本地跑、不需要联网，图片不会上传。</div>`;
 
   const $ = (id) => box.querySelector('#' + id);
@@ -7819,7 +7852,9 @@ function buildToolFrameCut() {
     // ⚠️ 裁剪边距（nudge）**不在 opt 里** —— opt 是「整批共用的调色参数」，
     //    边距是逐张的（见 nudgeOf / ensureNudge）：用户的原话是「个别框条边缘识别有问题」，
     //    一张一张改才合理；要整批统一时用「套用到全部图片」一次性铺过去。
-    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, deskew: true, angle: null },
+    //    pad（留白）和 endTrim（两端再裁）**在 opt 里**：这两个是整批的规则，
+    //    不是某一张的修正；endTrim 默认 100px，见 renderCut 里那一段的注释。
+    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, deskew: true, angle: null, endTrim: 100 },
     showFull: false, busy: false,
     edge: false,        // 手动调边模式
     qcv: null,          // 快速预览用的复用画布
@@ -8225,7 +8260,12 @@ function buildToolFrameCut() {
       $('fcBoxInfo').textContent = '裁剪区 —';
       return;
     }
-    if (st.edge) { drawEdgeView(); return; }
+    // ⚠️ 调边模式走的是另一张视图（整幅画布 + 红框），但红框的基准**同样是「成品框」**
+    //    （edgeLayout 里调 refBox()）。而 refBox() 在 tightBox 为空时会**退回检测框** ——
+    //    切图 / 改编正角度 / 改「两端再裁」都会把它清空，于是红框会突然变成检测框那么大
+    //    （实测 5071×898 而不是 4873×479），后面所有读数、包括靠面板读数的验收全跟着错。
+    //    所以进这条分支之前必须先把基准量出来（有缓存就直接返回，不会白跑）。
+    if (st.edge) { measureRef(); drawEdgeView(); return; }
     stage.innerHTML = '';
     st.liveCanvas = null;
     // —— 先出成品 ——
@@ -8368,6 +8408,21 @@ function buildToolFrameCut() {
   $('fcPad').onchange = () => putPad(parseInt($('fcPad').value, 10) || 0);
   wireStep($('fcPadD'), () => putPad(st.opt.pad - 1));
   wireStep($('fcPadU'), () => putPad(st.opt.pad + 1));
+  // 两端再裁（整批）：改的是**自动结果**本身，缓存里那个「成品框」基准跟着作废 ——
+  // 所以不能复用 onNudgeChange 那条快速预览（它读的就是这个缓存，会先闪一下旧框再跳）。
+  // 也不能直接 edgeLayout()：调边模式下它的基准同样来自那个缓存，必须走 drawPreview
+  // 让基准重新量一遍（drawPreview 里对调边分支有专门处理）。
+  function putEndTrim(v) {
+    st.opt.endTrim = Math.max(0, Math.min(600, Math.round(v) || 0));
+    $('fcEt').value = st.opt.endTrim;
+    if (st.cur) st.cur.tightBox = null;
+    flushPreview();
+    drawPreview();
+  }
+  $('fcEt').oninput = () => { const v = parseInt($('fcEt').value, 10); if (!isNaN(v)) putEndTrim(v); };
+  $('fcEt').onchange = () => putEndTrim(parseInt($('fcEt').value, 10) || 0);
+  wireStep($('fcEtD'), () => putEndTrim(st.opt.endTrim - 1));
+  wireStep($('fcEtU'), () => putEndTrim(st.opt.endTrim + 1));
   $('fcTrans').onchange = () => { st.opt.transparent = $('fcTrans').checked; drawPreview(); };
   $('fcShowFull').onchange = () => { st.showFull = $('fcShowFull').checked; drawPreview(); };
   $('fcDeskew').onchange = () => { st.opt.deskew = $('fcDeskew').checked; applyFrameOpts(false); };
@@ -9338,7 +9393,7 @@ if (typeof globalThis !== 'undefined') {
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
