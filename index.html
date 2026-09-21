@@ -9012,23 +9012,83 @@ function buildToolFrameCut() {
     st.pvT = setTimeout(() => { st.pvT = 0; drawPreview(); }, ms == null ? 160 : ms);
   }
   function flushPreview() { if (st.pvT) { clearTimeout(st.pvT); st.pvT = 0; } }
-  // 只 drawImage 的快速预览（不含 alpha 收边），改边距时用；画布复用，不重复建元素
+  // 快速预览：把**整条 renderCut**（含 mask→alpha 收边链）跑在一张降低分辨率的画布上。
+  // 【为什么必须这么做】以前 drawQuick 是纯 drawImage —— 画出来是**没抠背景的原图**。
+  //   于是「手一动，背景就回来」，而下载下来是抠过的 →（用户 2026-09-21 第三次报）
+  //   「手动调整后…自动又回到识别的区域，下载的也不对」。只要连发把出真图的防抖一直重置，
+  //   这个假画面还会一直留在屏幕上（截图 B 就是这个状态）。
+  // 【为什么不用真渲染当快预览】实测 6791×989 的真渲染要 730ms，而连发是 25ms 一格。
+  // 【为什么整张预览都在低分辨率上做】真尺寸的画布是 6791×989 ≈ 27MB，每步改 1px 高度就得
+  //   重新分配 + 清屏一次（实测连发只能跑到 9 步/秒）。降到 QUICK_W 宽之后这一步彻底没了；
+  //   屏上尺寸用 inline style 顶到与真渲染一致，所以**位置和大小都不会跳**，只是稍微软一点。
+  // 【掩码怎么跟着缩】maskToAlpha 里 sx = mask.aw/mask.fullW，源矩形 = (box.x0−ox)·sx。
+  //   画布缩 S 倍后令 fullW/fullH 也乘 S（等价于把 sx 缩到 1/S）、ox/oy 乘 S，就自动成立：
+  //     sX = (x0·S − ox·S)·(sx/S) = (x0 − ox)·sx   ✓
+  //     sW = (w·S)·(sx/S)          = w·sx          ✓
+  //   —— 正因为这两条，低分辨率版才能复用同一个函数、同一套判据，不需要另写一份。
+  const QUICK_W = 1100;
+  const QUICK_S = (cw) => Math.min(1, QUICK_W / Math.max(1, cw));
+  function quickCut(b) {
+    const cur = st.cur;
+    if (!cur || !cur.cutCv || !b || !b.mask) return null;
+    const cw = b.x1 - b.x0 + 1;
+    const S = QUICK_S(cw);
+    let q = st.qscv;
+    if (!q) q = st.qscv = document.createElement('canvas');
+    const qw = Math.max(8, Math.round(cur.cutCv.width * S)), qh = Math.max(8, Math.round(cur.cutCv.height * S));
+    if (q.width !== qw || q.height !== qh) { q.width = qw; q.height = qh; }
+    const qx = q.getContext('2d');
+    qx.clearRect(0, 0, qw, qh);
+    qx.drawImage(cur.cutCv, 0, 0, qw, qh);
+    const msk = b.mask;
+    const shim = {
+      u8: msk.u8, aw: msk.aw, ah: msk.ah,
+      fullW: (msk.fullW || msk.aw) * S, fullH: (msk.fullH || msk.ah) * S,
+      ox: (msk.ox || 0) * S, oy: (msk.oy || 0) * S,
+    };
+    const b2 = {
+      x0: Math.round(b.x0 * S), y0: Math.round(b.y0 * S),
+      x1: Math.round(b.x1 * S), y1: Math.round(b.y1 * S), mask: shim,
+    };
+    if (b2.x1 <= b2.x0 || b2.y1 <= b2.y0) return null;
+    // 只用来当预览，颜色一律走 CSS 滤镜那套 —— 所以不传调色参数（锐化在低分辨率下也没意义）
+    return renderCut(q, b2, { transparent: true, fixed: true });
+  }
+  // 改边距时的快速预览。返回值交给 onNudgeChange 决定要不要排真渲染。
   function drawQuick() {
     const stage = $('fcStage'), cur = st.cur;
     if (!cur || !cur.cutCv) return false;
+    const nn = nudgeOf(st.sel);
+    const manual = !!((nn && (nn.t || nn.b || nn.l || nn.r)) || st.opt.pad);
+    // ⚠️ 有手动边距时基准必须是「自动收边后的成品框」。它为空（改过角度 / 改过「两端再裁」）时
+    //    refBox() 会退回**检测框** —— 那画出来的就是「检测框 + 边距」，比正式结果大一大圈，
+    //    正是用户说的「自动又回到识别的区域」。这种情况别硬画，交给真渲染（它会自己把基准量出来）。
+    if (manual && !cur.tightBox) return false;
     const b = curBox();
     if (!b) return false;
     const cw = b.x1 - b.x0 + 1, ch = b.y1 - b.y0 + 1;
-    let c = st.qcv;
-    if (!c) { c = st.qcv = document.createElement('canvas'); }
-    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-    const g = c.getContext('2d');
-    g.clearRect(0, 0, cw, ch);
-    g.drawImage(cur.cutCv, b.x0, b.y0, cw, ch, 0, 0, cw, ch);
+    if (cw < 8 || ch < 8) return false;
+    // 开了「透明背景」→ 直接拿低分辨率成品当预览（颜色和 alpha 出自同一条链，不会再出现
+    // 「屏上有背景、下载下来是透明」这种两套结果）。关掉时导出本来就不透明，照旧画原图。
+    let c = (st.opt.transparent && b.mask) ? quickCut(b) : null;
+    if (!c) {
+      const S = QUICK_S(cw);
+      const dw = Math.max(8, Math.round(cw * S)), dh = Math.max(8, Math.round(ch * S));
+      c = st.qcv || (c = st.qcv = document.createElement('canvas'));
+      if (c.width !== dw || c.height !== dh) { c.width = dw; c.height = dh; }
+      const g = c.getContext('2d');
+      g.clearRect(0, 0, dw, dh);
+      g.drawImage(cur.cutCv, b.x0, b.y0, cw, ch, 0, 0, dw, dh);
+    }
+    // 屏上尺寸算得跟「真渲染被 max-width/max-height 收起后」一样，避免一闪一缩
+    const stageW = Math.max(40, stage.clientWidth - 27);   // .cu-stage 的 padding 12×2 + 边框 1×2
+    const disp = Math.min(stageW / cw, 520 / ch, 1);
+    c.style.width = Math.max(8, Math.floor(cw * disp)) + 'px';
+    c.style.height = Math.max(8, Math.floor(ch * disp)) + 'px';
     if (stage.firstChild !== c) { stage.innerHTML = ''; stage.appendChild(c); }
     st.liveCanvas = c;
     liveTone();
-    $('fcBoxInfo').textContent = `输出 ${cw}×${ch} px（调整中…）`;
+    $('fcBoxInfo').textContent = `输出 ${cw}×${ch} px（快速预览 · 停手后定稿）`;
     return true;
   }
   // 边距变了：先秒出近似图，再防抖出真图
@@ -9270,7 +9330,9 @@ function buildToolFrameCut() {
     const out2 = out;
     stage.appendChild(out2);
     st.liveCanvas = out2;     // 真渲染已经把调色烘进像素了，滤镜到此为止
-    // 手动往外放 / 加留白时，补回来那一圈如果落在背景上，导出就是透明的 —— 直接说出来
+    // 手动往外放 / 加留白时，补回来那一圈如果落在背景上，导出就是透明的 —— 直接说出来。
+    // ⚠️ 措辞要说清「背景那块会变透明、不是整张导出成透明」：只写「导出为透明」，
+    //    用户很容易读成「下载下来是空的」（2026-09-21 报障里就有这一层误读）。
     let barHint = '';
     if (manual) {
       const bars = transparentBars(out2);
@@ -9280,7 +9342,7 @@ function buildToolFrameCut() {
         if (bars.b > 2) seg.push('下 ' + bars.b);
         if (bars.l > 2) seg.push('左 ' + bars.l);
         if (bars.r > 2) seg.push('右 ' + bars.r);
-        if (seg.length) barHint = ' · ⚠️ ' + seg.join(' / ') + 'px 是背景（导出为透明）';
+        if (seg.length) barHint = ' · ⚠️ ' + seg.join(' / ') + 'px 落在背景上（导出后这里没有画面，是透明的；按 + 可收回）';
       }
     }
     $('fcBoxInfo').textContent = `输出 ${out2.width}×${out2.height} px（原像素）· 裁剪自 ${b.x0},${b.y0}-${b.x1},${b.y1}`
@@ -9291,30 +9353,35 @@ function buildToolFrameCut() {
   //（用户说的「不顺滑」有一半是拖滑块拖不准：滑块 200 格宽、±1px 根本停不住）
   function wireStep(btn, onStep) {
     if (!btn) return;
-    let t1 = 0, t2 = 0;
+    let t1 = 0, t2 = 0, t3 = 0;
     const stop = () => {
       if (t1) { clearTimeout(t1); t1 = 0; }
-      if (t2) {
-        clearInterval(t2); t2 = 0;
-        window.removeEventListener('pointerup', stop);
-        window.removeEventListener('pointercancel', stop);
-      }
+      if (t2) { clearInterval(t2); t2 = 0; }
+      if (t3) { clearTimeout(t3); t3 = 0; }
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
     };
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      stop();                     // 上一次若没收干净，先收干净（重复按同一个/别的按钮都不累积）
       try { btn.setPointerCapture(e.pointerId); } catch (_) {}
       onStep();
+      // ⚠️ 兜底监听必须**按下时就挂**，不能等 380ms 之后 ——
+      //    【用户报障 2026-09-21】「手动调整后…自动又回到识别的区域，下载的也不对」。
+      //    按下之后 380ms 内松手、而光标已经离开按钮（或 setPointerCapture 失效）时，
+      //    按钮上的 pointerup 收不到、window 上的还没挂 → 连发在 380ms 后启动后**永远停不下来**：
+      //    数值一路爬到夹取极限（用户截图里的「上 −240」正是 −检测框.y0 这个极限值），
+      //    而且每 25ms 一次的重画会不断重置出真图的防抖 → 面板永久停在「快速预览」里。
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
       t1 = setTimeout(() => {
         t1 = 0;
         t2 = setInterval(onStep, 25);
-        // ⚠️ 兜底：指针在窗口外抬起、或 setPointerCapture 失效时，光靠按钮上的
-        //    pointerup 是收不到的 —— 那样连发会一直跑下去（数值自己一路爬到顶）。
-        //    监听只在真开始连发时才挂，停止时立刻摘掉，不会累积。
-        window.addEventListener('pointerup', stop);
-        window.addEventListener('pointercancel', stop);
+        // 最后一道保险：真出意外（事件被吞、指针丢失）也不能无限连发
+        t3 = setTimeout(stop, 20000);
       }, 380);
     });
-    ['pointerup', 'pointercancel', 'blur'].forEach(k => btn.addEventListener(k, stop));
+    ['pointerup', 'pointercancel', 'blur', 'lostpointercapture'].forEach(k => btn.addEventListener(k, stop));
     // 键盘回车/空格走的是 click（detail 为 0），别让它们变成「点了没反应」
     btn.addEventListener('click', (e) => { e.preventDefault(); if (e.detail === 0) onStep(); });
   }
@@ -9348,8 +9415,15 @@ function buildToolFrameCut() {
     const el = $(id);
     const put = (v) => {
       const n = ensureNudge(st.sel);
+      const was = n.t + ',' + n.b + ',' + n.l + ',' + n.r;
       n[key] = Math.round(v) || 0;
       clampNudge(baseBox(), st.cur && st.cur.cutCv, n);
+      syncNudge();          // 夹取后的真值要写回输入框（用户可能敲了 −9999 这种）
+      // ⚠️ 值没变就**什么都别做**：连发撞上夹取极限时每 25ms 都会进来一次，
+      //    以前每次都会重画一遍快速预览 + 重置出真图的防抖 → 真渲染永远排不上，
+      //    面板就永久停在「（调整中…）」那张**没抠背景**的画面上
+      //    （用户报障「自动又回到识别的区域、下载的也不对」的现场）。
+      if (n.t + ',' + n.b + ',' + n.l + ',' + n.r === was) return;
       onNudgeChange();
     };
     el.oninput = () => { const v = parseInt(el.value, 10); if (!isNaN(v)) put(v); };
@@ -9359,8 +9433,10 @@ function buildToolFrameCut() {
     wireStep($('fc' + K + 'U'), () => put((nudgeOf(st.sel) || NG0)[key] + 1));
   });
   function putPad(v) {
-    st.opt.pad = Math.max(0, Math.round(v) || 0);
-    $('fcPad').value = st.opt.pad;
+    const nv = Math.max(0, Math.round(v) || 0);
+    $('fcPad').value = nv;
+    if (nv === st.opt.pad) return;      // 值没变就别重画（连发撞极限时不能把防抖一直重置）
+    st.opt.pad = nv;
     onNudgeChange();
   }
   $('fcPad').oninput = () => { const v = parseInt($('fcPad').value, 10); if (!isNaN(v)) putPad(v); };
@@ -9372,8 +9448,10 @@ function buildToolFrameCut() {
   // 也不能直接 edgeLayout()：调边模式下它的基准同样来自那个缓存，必须走 drawPreview
   // 让基准重新量一遍（drawPreview 里对调边分支有专门处理）。
   function putEndTrim(v) {
-    st.opt.endTrim = Math.max(0, Math.min(600, Math.round(v) || 0));
-    $('fcEt').value = st.opt.endTrim;
+    const nv = Math.max(0, Math.min(600, Math.round(v) || 0));
+    $('fcEt').value = nv;
+    if (nv === st.opt.endTrim) return;   // 值没变就别重画（连发撞极限时不能把防抖一直重置）
+    st.opt.endTrim = nv;
     if (st.cur) st.cur.tightBox = null;
     flushPreview();
     drawPreview();
