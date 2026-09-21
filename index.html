@@ -614,6 +614,17 @@
     .cu-cut .cu-side { grid-template-columns: 1fr; }
     .cu-cut .cu-side > .cu-grp:last-child { grid-column: auto; }
   }
+  /* ===== 产品抠图：同样「预览占满整行 + 参数在下方」，只是它只有三组（裁剪边距 / 识别参数 /
+     识别方式），中间那组是横铺的滑块，所以中间列留弹性宽度，两侧固定。 */
+  .cu-cut.cu-pd .cu-side { grid-template-columns: 214px minmax(300px, 1fr) 236px; }
+  @media (max-width: 1080px) {
+    .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr 1fr; }
+    .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 720px) {
+    .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr; }
+    .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: auto; }
+  }
   .cu-grp { border: 1px solid var(--border); border-radius: 9px; padding: 6px 9px 7px; background: #fafbfc; }
   .cu-grp-t { font-size: 11px; font-weight: 600; color: var(--text-light); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   /* 调色：横向铺开之后每条能压成**一行**（名称 | − 值 + | 滑轨），比竖着一列矮一大截 */
@@ -7493,6 +7504,502 @@ function renderCut(frontCv, box, o) {
   return out;
 }
 
+// ==================== 产品抠图：主体「外框轮廓」识别 ====================
+// 用户需求原话：「识别产品外框边缘、不要识别产品里的人物」。
+//
+// 和下面 cutPlainBackground（四边泛洪去纯色背景）的三点根本区别：
+//   1) 背景基准不是「四边像素的一个中位数」，而是**四边采样出来的多个颜色簇**。
+//      实拍图里背景常常是墙 + 地板 + 窗户三块完全不同颜色拼起来的，取单个中位数必然失效
+//      （那张圆形镜子的样张就会把整面墙判成前景）。
+//   2) 泛洪时允许**有限累积偏移**（drift）：能顺着渐变吃掉接触阴影和光晕，
+//      又不会一路蔓延到产品上。旧版只认「距基准 ≤ tol」，阴影一进来就断。
+//   3) 出来的是**填过洞的实心掩码**。镜面/玻璃里的反射内容（室内、人物）本来就和背景同色，
+//      靠「连通性」把它们关在产品内部，再统一填洞 → 人物永远不会被当成背景单独抠出来。
+//      这就是「不要识别产品里的人物」的实现方式：不识别里面，直接整体当产品本体。
+//
+// 最后一步把边界**沿外法线吸附到最近的强梯度**上，让轮廓真正压在物理外框的边缘，
+// 而不是停在半路被墙吃掉一截。吸附**只往外走**，所以绝不会失手把产品切掉。
+
+const PD_DS = 1100;        // 正式检测的长边（缩略图）
+const PD_DS_QUICK = 520;   // 拖滑块时的快速档：像素少 4.5 倍，改参数跟手
+// 下面三个常数都是在样张 _DSC1030.JPG（圆形镜子靠在墙边、地上有接触阴影）上扫出来的：
+//   driftK 1.4→1.7：地板上的接触阴影被吃掉（贴合外框），代价是顶部外框吃掉几个像素，
+//                   但那几个像素被下面的「边缘吸附」补回来了 —— 两个参数要一起调。
+//   snapK  0.030  ：吸附半径放到短边的 3%，才能把 drift 吃掉的那 20px 拉回来（实测 notch p95 5.8→3.2）。
+//   smooth 12‰    ：短边 734 时半径 9；再大开始磨掉真特征，再小（<6）地面阴影会留一条几十像素的长刺。
+const PD_DRIFT_K = 1.7;
+const PD_SNAP_K = 0.030;
+const PD_SMOOTH = 12;
+
+// —— 四边采样 → 背景颜色簇 ——
+// 做法：四边像素做 16 级量化直方图（4096 桶）→ 按频次降序取种子（低于占比门槛就停）→
+// 合并彼此太近的种子。和框条抠图里 robustBgRef「取最密簇」是同一个思路，只是这里要多个簇。
+function pdBorderRefs(px, W, H, thr) {
+  const cnt = new Uint32Array(4096);
+  const add = (i) => { cnt[((px[i] >> 4) << 8) | ((px[i + 1] >> 4) << 4) | (px[i + 2] >> 4)]++; };
+  const bw = Math.max(2, Math.round(0.012 * Math.min(W, H)));
+  let total = 0;
+  for (let y = 0; y < bw; y++) {
+    const r0 = y * W * 4, r1 = (H - 1 - y) * W * 4;
+    for (let x = 0; x < W; x++) { add(r0 + x * 4); add(r1 + x * 4); total += 2; }
+  }
+  for (let x = 0; x < bw; x++) {
+    const c0 = x * 4, c1 = (W - 1 - x) * 4;
+    for (let y = bw; y < H - bw; y++) { add(y * W * 4 + c0); add(y * W * 4 + c1); total += 2; }
+  }
+  const idx = [];
+  for (let b = 0; b < 4096; b++) if (cnt[b]) idx.push(b);
+  idx.sort((a, b) => cnt[b] - cnt[a]);
+  const need = Math.max(24, Math.round(total * 0.004));
+  const refs = [];
+  // 最多 10 个簇：再多就是噪声桶，而且逐像素距离是 K 倍开销
+  for (let i = 0; i < idx.length && refs.length < 10; i++) {
+    const b = idx[i];
+    if (cnt[b] < need) break;
+    const c = [((b >> 8) & 15) * 16 + 8, ((b >> 4) & 15) * 16 + 8, (b & 15) * 16 + 8];
+    let ok = true;
+    for (let k = 0; k < refs.length; k++) {
+      if (Math.abs(c[0] - refs[k][0]) + Math.abs(c[1] - refs[k][1]) + Math.abs(c[2] - refs[k][2]) <= thr * 0.8) { ok = false; break; }
+    }
+    if (ok) refs.push(c);
+  }
+  if (!refs.length) {
+    // 极端情况（整张图只有一个颜色桶或全被合并掉）：退回「四边像素均值」当唯一基准
+    let r = 0, g = 0, bl = 0, n = 0;
+    for (let y = 0; y < bw; y++) for (let x = 0; x < W; x++) {
+      let i = (y * W + x) * 4; r += px[i]; g += px[i + 1]; bl += px[i + 2]; n++;
+      i = ((H - 1 - y) * W + x) * 4; r += px[i]; g += px[i + 1]; bl += px[i + 2]; n++;
+    }
+    refs.push([r / n, g / n, bl / n]);
+  }
+  return refs;
+}
+
+// —— 每像素：到最近背景簇的距离 + 归属哪个簇 ——
+// 两个数组都留着下发：归属性决定「泛洪能漂多远」（只在自己那个簇里漂），距离决定「能不能直接收」。
+function pdOwnDist(px, W, H, refs) {
+  const n = W * H, K = refs.length;
+  const own = new Uint8Array(n), dist = new Uint16Array(n);
+  const rf = new Float64Array(K * 3);
+  for (let k = 0; k < K; k++) { rf[k * 3] = refs[k][0]; rf[k * 3 + 1] = refs[k][1]; rf[k * 3 + 2] = refs[k][2]; }
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2];
+    let best = 1e9, bk = 0;
+    for (let k = 0, j = 0; k < K; k++, j += 3) {
+      const d = Math.abs(r - rf[j]) + Math.abs(g - rf[j + 1]) + Math.abs(b - rf[j + 2]);
+      if (d < best) { best = d; bk = k; }
+    }
+    own[p] = bk;
+    dist[p] = best > 65535 ? 65535 : best;
+  }
+  return { own: own, dist: dist };
+}
+
+// —— 从四边泛洪背景（4 邻域） ——
+// 收进来的条件有两个，满足任一即可：
+//   a) 距任一基准簇 ≤ tolG（本来就像背景）；
+//   b) 和当前像素属于同一簇、且距该簇 ≤ drift（顺着同一块颜色的渐变走，吃阴影用）。
+// ⚠️ drift 不能按「和邻居的差」逐段累加 —— 那样 JPEG 噪声会一步步把泛洪带过整张图。
+//    这里始终是「和簇心的绝对距离」，上限就是 drift，所以漂不出去。
+function pdFlood(W, H, own, dist, tolG, drift) {
+  const n = W * H, bg = new Uint8Array(n), q = new Int32Array(n);
+  let qh = 0, qt = 0;
+  const bw = Math.max(2, Math.round(0.012 * Math.min(W, H)));
+  for (let y = 0; y < bw; y++) {
+    const r0 = y * W, r1 = (H - 1 - y) * W;
+    for (let x = 0; x < W; x++) {
+      let p = r0 + x; if (!bg[p] && dist[p] <= tolG) { bg[p] = 1; q[qt++] = p; }
+      p = r1 + x; if (!bg[p] && dist[p] <= tolG) { bg[p] = 1; q[qt++] = p; }
+    }
+  }
+  for (let x = 0; x < bw; x++) for (let y = bw; y < H - bw; y++) {
+    let p = y * W + x; if (!bg[p] && dist[p] <= tolG) { bg[p] = 1; q[qt++] = p; }
+    p = y * W + (W - 1 - x); if (!bg[p] && dist[p] <= tolG) { bg[p] = 1; q[qt++] = p; }
+  }
+  while (qh < qt) {
+    const p = q[qh++], x = p % W, o = own[p], dp = dist[p];
+    if (x > 0) { const m = p - 1; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    if (x < W - 1) { const m = p + 1; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    if (p >= W) { const m = p - W; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    if (p < n - W) { const m = p + W; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+  }
+  return bg;
+}
+
+// —— 8 邻域连通域（两遍并查集） ——
+// 8 邻域而不是 4：对角线只连一点的碎片不该被拆成两块，否则「同一个主体」会被误判成两个。
+function pdLabel8(m, W, H) {
+  const n = W * H, lab = new Int32Array(n), par = [0];
+  const find = (x) => {
+    let r = x;
+    while (par[r] !== r) r = par[r];
+    while (par[x] !== r) { const nx = par[x]; par[x] = r; x = nx; }
+    return r;
+  };
+  const uni = (a, b) => { a = find(a); b = find(b); if (a !== b) par[a < b ? b : a] = a < b ? a : b; };
+  let cnt = 0;
+  for (let y = 0, p = 0; y < H; y++) {
+    for (let x = 0; x < W; x++, p++) {
+      if (!m[p]) continue;
+      let l = 0;
+      if (x > 0 && lab[p - 1]) l = lab[p - 1];
+      if (y > 0) {
+        const u = lab[p - W];
+        if (u) { if (!l) l = u; else uni(l, u); }
+        if (x > 0) { const ul = lab[p - W - 1]; if (ul) { if (!l) l = ul; else uni(l, ul); } }
+        if (x < W - 1) { const ur = lab[p - W + 1]; if (ur) { if (!l) l = ur; else uni(l, ur); } }
+      }
+      if (!l) { l = ++cnt; par[l] = l; }
+      lab[p] = l;
+    }
+  }
+  const size = new Int32Array(cnt + 1);
+  for (let p = 0; p < n; p++) { const l = lab[p]; if (l) { const r = find(l); lab[p] = r; size[r]++; } }
+  return { lab: lab, size: size, count: cnt };
+}
+
+// —— 选主体：丢掉「贴着画面边被裁掉的旁边的样品」和「明显小一圈的场景杂物」——
+// 用户的实际场景：产品照里常常还露出旁边另一件样品的半截，或者背景里有个柜子/纸箱/窗户。
+// 前者一定有一大段轮廓压在画面边框上（被拍裁了）；后者一般比产品小不少。
+// 所以两条判据：① 周长里贴在画面边的比例；② 面积至少要有最大那块的 1/4。
+// 两道都放行 → 保留（这样「一套两件、大小差不多」的产品会一起留下）。
+// ⚠️ 1/4 这个门槛是有取舍的：产品边上放着一件只有它 1/5 大的小配件时会被丢掉。
+//    真遇到这种情况把「容差」调小一点常常能把它并回主体。
+function pdPickBody(m, W, H, bodyFrac) {
+  const n = W * H, r = pdLabel8(m, W, H);
+  const lab = r.lab, size = r.size;
+  let biggest = 0;
+  for (let i = 1; i < size.length; i++) if (size[i] > biggest) biggest = size[i];
+  if (!biggest) return null;
+  const perim = new Int32Array(size.length), onEd = new Int32Array(size.length);
+  for (let y = 0, p = 0; y < H; y++) for (let x = 0; x < W; x++, p++) {
+    const l = lab[p];
+    if (!l) continue;
+    if (!(m[p - 1] && m[p + 1] && m[p - W] && m[p + W])) perim[l]++;   // 四邻里有一个空 → 轮廓像素
+    if (x === 0 || y === 0 || x === W - 1 || y === H - 1) onEd[l]++;
+  }
+  const keepComp = new Uint8Array(size.length);
+  for (let l = 1; l < size.length; l++) {
+    if (!size[l]) continue;
+    if (size[l] < biggest * (bodyFrac == null ? 0.25 : bodyFrac)) continue;
+    const bf = onEd[l] / Math.max(1, perim[l]);
+    if (bf >= 0.34 && size[l] < biggest * 0.75) continue;
+    keepComp[l] = 1;
+  }
+  const out = new Uint8Array(n);
+  for (let p = 0; p < n; p++) if (lab[p] && keepComp[lab[p]]) out[p] = 1;
+  return out;
+}
+
+// —— 填洞：把「被主体包住、又够不到画面边」的背景块补成主体 ——
+// 这一步就是「不要识别产品里的人物」的落点：镜面里反射的室内/人物和背景同色，
+// 泛洪到镜框就被挡住进不去；即便有些地方渗进去了，只要渗进来的是**闭合**区域，这里一律补回主体。
+function pdFillHoles(m, W, H) {
+  const n = W * H, out = m.slice(), seen = new Uint8Array(n), q = new Int32Array(n);
+  let qh = 0, qt = 0;
+  const push = (p) => { if (!out[p] && !seen[p]) { seen[p] = 1; q[qt++] = p; } };
+  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
+  while (qh < qt) {
+    const p = q[qh++], x = p % W;
+    if (x > 0) push(p - 1);
+    if (x < W - 1) push(p + 1);
+    if (p >= W) push(p - W);
+    if (p < n - W) push(p + W);
+  }
+  for (let p = 0; p < n; p++) if (!out[p] && !seen[p]) out[p] = 1;
+  return out;
+}
+
+// —— 分离式箱模糊（掩码 0/1 → 局部前景占比） ——
+// 一次横向 + 一次纵向，每像素固定几次数值运算。比「圆盘膨胀腐蚀各 r 次」快一个数量级。
+function pdBoxBlur(m, W, H, r) {
+  const n = W * H;
+  let a = new Float32Array(n), b = new Float32Array(n);
+  for (let p = 0; p < n; p++) a[p] = m[p] ? 1 : 0;
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    let sum = 0;
+    const hi0 = Math.min(W - 1, r);
+    for (let x = 0; x <= hi0; x++) sum += a[row + x];
+    for (let x = 0; x < W; x++) {
+      if (x > 0) {
+        if (x - 1 - r >= 0) sum -= a[row + x - 1 - r];
+        if (x + r <= W - 1) sum += a[row + x + r];
+      }
+      const lo = x - r < 0 ? 0 : x - r, hi = x + r > W - 1 ? W - 1 : x + r;
+      b[row + x] = sum / (hi - lo + 1);
+    }
+  }
+  const t = a; a = b; b = t;
+  for (let x = 0; x < W; x++) {
+    let sum = 0;
+    const hi0 = Math.min(H - 1, r);
+    for (let y = 0; y <= hi0; y++) sum += a[y * W + x];
+    for (let y = 0; y < H; y++) {
+      if (y > 0) {
+        if (y - 1 - r >= 0) sum -= a[(y - 1 - r) * W + x];
+        if (y + r <= H - 1) sum += a[(y + r) * W + x];
+      }
+      const lo = y - r < 0 ? 0 : y - r, hi = y + r > H - 1 ? H - 1 : y + r;
+      b[y * W + x] = sum / (hi - lo + 1);
+    }
+  }
+  return b;
+}
+
+// —— 平滑：箱模糊 → 过半判定 → 填洞 ——
+// 阈值卡在 0.5（局部过半）有个好处：直线边上不多不少，**不会有系统性的涨缩**，
+// 而比圆盘半径还细的毛刺和锯齿会被磨掉；随后接一次填洞，把磨出来的凹口补回去。
+function pdSmooth(m, W, H, r) {
+  if (r <= 0) return m;
+  const f = pdBoxBlur(m, W, H, r);
+  const out = new Uint8Array(W * H);
+  for (let p = 0; p < out.length; p++) out[p] = f[p] >= 0.5 ? 1 : 0;
+  return pdFillHoles(out, W, H);
+}
+
+// —— 外框边缘吸附 ——
+// 对每个轮廓像素求外法线（用 5×5 窗口里前景像素的质心反方向），沿它往外找最近的强梯度；
+// 找到了就把这条射线上的像素全部点亮（保证不留 1px 缝）。
+// ⚠️ 只往外走 —— 这是安全性的全部保障：结果一定是原掩码的超集，不可能把产品吃掉。
+// ⚠️ 梯度用亮度中心差分（跨距 2px），阈值 45 相当于约 22 个灰阶的台阶，低于它的（噪声、
+//    渐变）不会被误当边缘。
+// ⚠️ **射线遇到「确凿背景」就地打断**（dist ≤ tolG 的像素）：那类像素是四边泛洪直接按 tolG
+//    匹配上的核心背景，不是被 drift 啃掉的那一圈。不加这道闸，射线会直接穿过产品和旁边物体
+//    之间那条背景缝，够到隔壁物体的边缘上 —— 实测会在那一侧拉出一根 15px 的小凸起。
+//    要回收的其实只有「tolG < dist ≤ drift」这一圈（被渐变/阴影啃掉的边），闸门正好放它过去。
+function pdSnapOut(m, W, H, px, K, thr, dist, tolG) {
+  if (K <= 0) return m;
+  const lum = (x, y) => { const i = (y * W + x) * 4; return (px[i] + px[i + 1] + px[i + 2]) / 3; };
+  const add = [];
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+    const p = y * W + x;
+    if (!m[p]) continue;
+    if (m[p - 1] && m[p + 1] && m[p - W] && m[p + W]) continue;    // 不是轮廓像素
+    let mx = 0, my = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      if (m[(y + dy) * W + (x + dx)]) { mx += dx; my += dy; }
+    }
+    let nx = -mx, ny = -my;
+    const len = Math.sqrt(nx * nx + ny * ny);
+    if (len < 1e-6) continue;                                    // 窗口里全是前景（很粗的块）→ 没有法线可言
+    nx /= len; ny /= len;
+    let best = 0, bi = -1;
+    for (let i = 1; i <= K; i++) {
+      const xx = Math.round(x + nx * i), yy = Math.round(y + ny * i);
+      if (xx < 1 || xx >= W - 1 || yy < 1 || yy >= H - 1) break;
+      if (dist && dist[yy * W + xx] <= tolG) break;              // 确凿背景 → 到此为止
+      const g = Math.abs(lum(xx + 1, yy) - lum(xx - 1, yy)) + Math.abs(lum(xx, yy + 1) - lum(xx, yy - 1));
+      if (g > best) { best = g; bi = i; }
+    }
+    if (best < thr || bi < 0) continue;
+    for (let i = 1; i <= bi; i++) {
+      const xx = Math.round(x + nx * i), yy = Math.round(y + ny * i);
+      if (xx >= 0 && xx < W && yy >= 0 && yy < H) add.push(yy * W + xx);
+    }
+  }
+  for (let i = 0; i < add.length; i++) m[add[i]] = 1;
+  return m;
+}
+
+// —— 掩码紧致包围盒 ——
+function pdMaskBox(m, W, H) {
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0, p = 0; y < H; y++) for (let x = 0; x < W; x++, p++) {
+    if (!m[p]) continue;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return x1 < 0 ? null : { x0: x0, y0: y0, x1: x1, y1: y1 };
+}
+
+// —— 主入口：在原图上算出产品掩码 + 原图坐标的紧致框 ——
+// 全程在「长边 ≤ ds」的缩略图上跑，掩码再双线性放大回原图取 alpha（和框条抠图用 900px
+// 掩码网格是同一套路）。原图直接逐像素算距离要十几秒，缩到 1100 只要 200ms 上下。
+function detectProductMask(cv, o) {
+  o = o || {};
+  const tol = Math.max(1, o.tol == null ? 14 : o.tol);
+  const W = cv.width, H = cv.height;
+  if (!W || !H) return null;
+  const ds = o.ds || PD_DS;
+  const k = Math.min(1, ds / Math.max(W, H));
+  const mw = Math.max(16, Math.round(W * k)), mh = Math.max(16, Math.round(H * k));
+  const tmp = document.createElement('canvas');
+  tmp.width = mw; tmp.height = mh;
+  const tc = tmp.getContext('2d');
+  if ('imageSmoothingQuality' in tc) tc.imageSmoothingQuality = 'high';
+  tc.drawImage(cv, 0, 0, mw, mh);
+  const px = tc.getImageData(0, 0, mw, mh).data;
+  tmp.width = 0; tmp.height = 0;
+
+  const tolG = tol * 3;
+  const refs = pdBorderRefs(px, mw, mh, Math.max(20, tolG));
+  const od = pdOwnDist(px, mw, mh, refs);
+  const bg = pdFlood(mw, mh, od.own, od.dist, tolG, Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)));
+  let m = new Uint8Array(mw * mh);
+  for (let p = 0; p < m.length; p++) m[p] = bg[p] ? 0 : 1;
+
+  m = pdPickBody(m, mw, mh, o.bodyFrac);
+  if (!m) return null;
+  m = pdFillHoles(m, mw, mh);
+  // 吸附半径/平滑半径都按「短边的千分比」给，这样换分辨率（快速档 520）结果基本一致，
+  // 不会出现「拖的时候一个样、松手另一个样」的跳动
+  const mn = Math.min(mw, mh);
+  // 顺序：平滑 → 吸附 → 再轻平滑一次。
+  // 吸附是**只往外走**的，本身不会吃掉产品；第一道平滑让吸附的起点干净，
+  // 最后那道轻平滑（半径减半）用来磨掉吸附在个别位置拉出来的毛刺（见 pdSnapOut 的第二个 ⚠️）。
+  const sr = Math.round((o.smooth == null ? PD_SMOOTH : o.smooth) / 1000 * mn);
+  m = pdSmooth(m, mw, mh, sr > 0 ? sr : 0);
+  m = pdSnapOut(m, mw, mh, px, Math.round((o.snapK == null ? PD_SNAP_K : o.snapK) * mn),
+    o.snapThr == null ? 45 : o.snapThr, od.dist, tolG);
+  m = pdSmooth(m, mw, mh, sr > 0 ? Math.max(2, Math.round(sr / 2)) : 0);
+  m = pdFillHoles(m, mw, mh);
+  const mb = pdMaskBox(m, mw, mh);
+  if (!mb) return null;
+
+  const sx = W / mw, sy = H / mh;
+  const box = {
+    x0: Math.max(0, Math.floor(mb.x0 * sx)),
+    y0: Math.max(0, Math.floor(mb.y0 * sy)),
+    x1: Math.min(W - 1, Math.ceil((mb.x1 + 1) * sx) - 1),
+    y1: Math.min(H - 1, Math.ceil((mb.y1 + 1) * sy) - 1),
+  };
+  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr };
+}
+
+// —— 把掩码（0/1）双线性铺到裁剪框上，得到 0~255 的 alpha ——
+// ⚠️ 用双线性而不是最近邻：掩码格在原图上可能有 2~6px，最近邻出来是台阶状的马赛克边。
+//    行/列的权重先算一次（每行每列一份），内层循环只剩 4 次查表 + 3 次乘加。
+// hardBox：手动边距要把某条边「硬切」或「硬补」时用的覆盖规则（见 pdApplyNudge）
+function pdMaskToAlpha(det, src, box, feather, hb) {
+  const m = det.mask, mw = det.mw, mh = det.mh;
+  const W = src.width, H = src.height;
+  const f = Math.max(0, Math.min(8, Math.round(feather || 0)));
+  // 羽化用「往外多算 f 像素再裁回来」实现，比在框内做边界为常数的模糊正确得多
+  // （手动往内切时，框外其实还是产品，边界当 0 会凭空造出一圈渐隐）
+  const gx0 = Math.max(0, box.x0 - f), gy0 = Math.max(0, box.y0 - f);
+  const gx1 = Math.min(W - 1, box.x1 + f), gy1 = Math.min(H - 1, box.y1 + f);
+  const gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
+
+  const pxToM = (v, n, w) => {
+    let u = v * w / n - 0.5;
+    if (u < 0) u = 0;
+    if (u > w - 1) u = w - 1;
+    return u;
+  };
+  const ax = new Float64Array(gw), bx = new Int32Array(gw);
+  for (let i = 0; i < gw; i++) {
+    const u = pxToM(gx0 + i, W, mw);
+    const i0 = Math.floor(u);
+    bx[i] = i0; ax[i] = u - i0;
+  }
+  const ay = new Float64Array(gh), by = new Int32Array(gh);
+  for (let i = 0; i < gh; i++) {
+    const u = pxToM(gy0 + i, H, mh);
+    const i0 = Math.floor(u);
+    by[i] = i0; ay[i] = u - i0;
+  }
+  let a = new Float32Array(gw * gh);
+  for (let y = 0; y < gh; y++) {
+    const r0 = by[y] * mw, r1 = (by[y] + 1 > mh - 1 ? mh - 1 : by[y] + 1) * mw, wy = ay[y], sy = gy0 + y;
+    for (let x = 0; x < gw; x++) {
+      const x0 = bx[x], x1 = x0 + 1 > mw - 1 ? mw - 1 : x0 + 1, wx = ax[x], sx = gx0 + x;
+      let v = m[r0 + x0] * (1 - wx) * (1 - wy) + m[r0 + x1] * wx * (1 - wy) +
+              m[r1 + x0] * (1 - wx) * wy + m[r1 + x1] * wx * wy;
+      // 手动边距的硬覆盖。语义与框条抠图一致：**正数 = 往里切**（这条边以外一律透明）。
+      // 负数 = 往外补：只补「新边 ~ 原掩码边」这一圈，再往外的「留白」仍然是透明留白，
+      // 否则「往外补 + 留白」会互相打架（留白被一起补成不透明，就不再是留白了）。
+      if (hb) {
+        if (hb.nl > 0) { if (sx < hb.bx0 + hb.nl) v = 0; }
+        else if (hb.nl < 0) { if (sx < hb.bx0 && sx >= hb.bx0 + hb.nl) v = 1; }
+        if (hb.nr > 0) { if (sx > hb.bx1 - hb.nr) v = 0; }
+        else if (hb.nr < 0) { if (sx > hb.bx1 && sx <= hb.bx1 - hb.nr) v = 1; }
+        if (hb.nt > 0) { if (sy < hb.by0 + hb.nt) v = 0; }
+        else if (hb.nt < 0) { if (sy < hb.by0 && sy >= hb.by0 + hb.nt) v = 1; }
+        if (hb.nb > 0) { if (sy > hb.by1 - hb.nb) v = 0; }
+        else if (hb.nb < 0) { if (sy > hb.by1 && sy <= hb.by1 - hb.nb) v = 1; }
+      }
+      a[y * gw + x] = v;
+    }
+  }
+  if (f > 0) a = pdBoxBlurF(a, gw, gh, f);
+  const out = new Uint8ClampedArray(gw * gh);
+  for (let i = 0; i < a.length; i++) out[i] = Math.round(Math.max(0, Math.min(1, a[i])) * 255);
+  return { alpha: out, gw: gw, gh: gh, gx0: gx0, gy0: gy0 };
+}
+
+// 与 pdBoxBlur 同构，只是输入已经是 0~1 的浮点（alpha），不做 0/1 化
+function pdBoxBlurF(a, W, H, r) {
+  const n = W * H;
+  let s = new Float32Array(n), b = new Float32Array(n);
+  s.set(a.subarray(0, n));
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    let sum = 0;
+    const hi0 = Math.min(W - 1, r);
+    for (let x = 0; x <= hi0; x++) sum += s[row + x];
+    for (let x = 0; x < W; x++) {
+      if (x > 0) {
+        if (x - 1 - r >= 0) sum -= s[row + x - 1 - r];
+        if (x + r <= W - 1) sum += s[row + x + r];
+      }
+      const lo = x - r < 0 ? 0 : x - r, hi = x + r > W - 1 ? W - 1 : x + r;
+      b[row + x] = sum / (hi - lo + 1);
+    }
+  }
+  const t = s; s = b; b = t;
+  for (let x = 0; x < W; x++) {
+    let sum = 0;
+    const hi0 = Math.min(H - 1, r);
+    for (let y = 0; y <= hi0; y++) sum += s[y * W + x];
+    for (let y = 0; y < H; y++) {
+      if (y > 0) {
+        if (y - 1 - r >= 0) sum -= s[(y - 1 - r) * W + x];
+        if (y + r <= H - 1) sum += s[(y + r) * W + x];
+      }
+      const lo = y - r < 0 ? 0 : y - r, hi = y + r > H - 1 ? H - 1 : y + r;
+      b[y * W + x] = sum / (hi - lo + 1);
+    }
+  }
+  return b;
+}
+
+// —— 产品抠图（轮廓模式）：识别 → 套手动边距/留白 → 出透明底画布 ——
+// 返回值与 cutPlainBackground 对齐（canvas / box / bg），上层 UI 两条路共用一套渲染。
+function cutProductOutline(cv, o) {
+  o = o || {};
+  const W = cv.width, H = cv.height;
+  const det = o.det || detectProductMask(cv, o);
+  if (!det) return null;
+  const base = det.box;
+  const n = o.nudge || { t: 0, b: 0, l: 0, r: 0 };
+  const pad = Math.round(o.pad || 0);
+  const box = {
+    x0: Math.max(0, base.x0 + (n.l | 0) - pad), y0: Math.max(0, base.y0 + (n.t | 0) - pad),
+    x1: Math.min(W - 1, base.x1 - (n.r | 0) + pad), y1: Math.min(H - 1, base.y1 - (n.b | 0) + pad),
+  };
+  if (box.x1 <= box.x0 || box.y1 <= box.y0) return null;
+  const w = box.x1 - box.x0 + 1, h = box.y1 - box.y0 + 1;
+  const al = pdMaskToAlpha(det, cv, box, o.feather,
+    { bx0: base.x0, bx1: base.x1, by0: base.y0, by1: base.y1, nl: n.l | 0, nr: n.r | 0, nt: n.t | 0, nb: n.b | 0 });
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const cx = out.getContext('2d');
+  cx.drawImage(cv, box.x0, box.y0, w, h, 0, 0, w, h);
+  const id = cx.getImageData(0, 0, w, h), od = id.data;
+  const ox = box.x0 - al.gx0, oy = box.y0 - al.gy0;
+  for (let y = 0; y < h; y++) {
+    const base2 = (y + oy) * al.gw + ox;
+    for (let x = 0; x < w; x++) od[(y * w + x) * 4 + 3] = al.alpha[base2 + x];
+  }
+  cx.putImageData(id, 0, 0);
+  const ref0 = det.refs[0] || [255, 255, 255];
+  return { canvas: out, box: box, base: base, bg: ref0, det: det, mask: det.mask };
+}
+
 // —— 产品抠图：从四边泛洪去纯色背景 + 紧致裁切 ——
 function cutPlainBackground(cv, o) {
   const opt = Object.assign({ tol: 14, feather: 1, pad: 0 }, o || {});
@@ -7555,7 +8062,24 @@ function cutPlainBackground(cv, o) {
     }
   }
   cx.putImageData(id, 0, 0);
-  return { canvas: out, box: { x0: x0, y0: y0, x1: x1, y1: y1 }, bg: bg };
+  const res = { canvas: out, box: { x0: x0, y0: y0, x1: x1, y1: y1 }, bg: bg };
+  // rawMask：把「全图前景掩码」一并交出去（1 = 产品）。
+  // 给产品抠图的统一渲染路径用 —— 这样「纯色背景」和「智能轮廓」两种模式走的是同一段
+  // 掩码→alpha 代码，手动边距/留白在两处语义完全一致，不会出现「一种模式能调、另一种不能」。
+  // 直接把 bgMask 就地取反复用，不另开一份全图数组（大图上那是几十 MB）。
+  if (opt.rawMask) {
+    for (let p = 0; p < W * H; p++) bgMask[p] = bgMask[p] ? 0 : 1;
+    res.mask = bgMask; res.mw = W; res.mh = H;
+  }
+  return res;
+}
+
+// 「纯色背景泛洪」模式接进统一管线的适配层：产出的结构与 detectProductMask 对齐
+// （mask / mw / mh / box / refs），好让上面那套 alpha 渲染原样复用。
+function detectPlainMask(cv, o) {
+  const r = cutPlainBackground(cv, { tol: (o && o.tol) == null ? 14 : o.tol, feather: 0, pad: 0, rawMask: true });
+  if (!r || !r.mask) return null;
+  return { mask: r.mask, mw: r.mw, mh: r.mh, box: r.box, refs: [r.bg], plain: true };
 }
 
 // —— ZIP 打包（store 模式：PNG 已是压缩格式，直接原样装进去，不做二次压缩） ——
@@ -8688,49 +9212,162 @@ function buildToolFrameCut() {
 // ================= 工具：产品抠图（通用去纯色背景） =================
 function buildToolProdCut() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🖼️ 产品抠图 <small style="color:var(--text-light);font-weight:400">（去纯色背景 → 透明底 PNG，批量）</small></h4>
+  box.innerHTML = `<h4>🖼️ 产品抠图 <small style="color:var(--text-light);font-weight:400">（认外框轮廓 → 透明底 PNG，批量）</small></h4>
     <div class="cu-drop" id="pdDrop">
       <label class="cc-upload"><span>📁 选择文件夹</span><input type="file" id="pdFolder" webkitdirectory directory multiple style="display:none"></label>
       <label class="cc-upload"><span>🖼️ 选择图片</span><input type="file" id="pdFiles" accept="image/*" multiple style="display:none"></label>
       <span class="drop-tip"><i class="tip-idle">或把图片 / 文件夹拖进来</i><i class="tip-hot">松开鼠标即可</i></span>
     </div>
-    <div class="cu-row" style="margin-top:10px"><span class="cu-empty" id="pdInfo">还没有选择图片</span></div>
+    <div class="cu-row" style="margin-top:10px">
+      <span class="cu-empty" id="pdInfo">还没有选择图片</span>
+      <span class="tip-idle" style="font-size:11.5px;color:var(--text-light)">只认产品的<b>外框边缘</b>：镜子 / 玻璃里反射到的东西（室内、人物）不会被单独抠出来 · 输出文件名 = 源文件名（重名加 -2）· 单张导出会再带裁剪尺寸</span>
+    </div>
 
     <div class="cu-sec" id="pdSec" style="display:none">
-      <div class="cu-2col">
-        <div>
-          <div class="cu-stage cu-checker" id="pdStage"></div>
-          <div class="cu-row" style="margin-top:8px"><span class="cu-badge" id="pdBoxInfo">—</span>
-            <span style="font-size:12px;color:var(--text-light)">背景色 <i id="pdBg" style="display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--border);vertical-align:-2px"></i></span>
-          </div>
-        </div>
-        <div>
-          <div class="cu-sliders">
-            <label class="cu-sl">容差<input type="range" id="pdTol" min="2" max="60" value="14"><b id="pdTolV">14</b></label>
-            <label class="cu-sl">边缘羽化<input type="range" id="pdFeather" min="0" max="5" value="1"><b id="pdFeatherV">1</b></label>
-            <label class="cu-sl">留白<input type="range" id="pdPad" min="0" max="60" value="0"><b id="pdPadV">0</b></label>
-          </div>
-          <div class="cu-row" style="margin-top:10px">
-            <button class="cu-mini" id="pdRun" style="padding:7px 16px;font-size:13px;font-weight:600">开始批量抠图 → 下载 ZIP</button>
-            <button class="cu-mini" id="pdPrevBtn">预览下一张</button>
-          </div>
-          <div class="cu-bar" style="margin-top:8px"><i id="pdBar"></i></div>
-          <div class="cu-log" id="pdLog"></div>
-        </div>
-      </div>
-      <div class="cu-sec">
-        <div class="cu-sec-t">文件清单 <small>文件名沿用原文件名，导出为 PNG（原像素）</small></div>
-        <div style="max-height:230px;overflow:auto"><table class="cu-table">
-          <thead><tr><th>#</th><th>文件</th><th>尺寸</th><th>状态</th></tr></thead><tbody id="pdRows"></tbody></table></div>
+      <div class="cu-sec-t">① 图片清单 <small>点一行切换样张；参数在样张上调好后，批量时自动套用到其余图片</small></div>
+      <div style="max-height:210px;overflow:auto">
+        <table class="cu-table">
+          <thead><tr><th>#</th><th>源文件</th><th>输出文件名</th><th>状态</th></tr></thead>
+          <tbody id="pdRows"></tbody>
+        </table>
       </div>
     </div>
-    <div class="t-tip">适合<b>背景干净（纯色 / 渐变浅底）</b>的产品图：从四边泛洪识别背景色并去掉，自动裁到产品边缘，导出透明底 PNG（原像素、不压缩）。
-      如果背景复杂或产品与背景颜色接近，把<b>容差</b>调小、或告诉我具体需求（比如按主体自动分割、抠出多个产品分别导出），我再按你的场景改。</div>`;
+
+    <div class="cu-sec" id="pdEditSec" style="display:none">
+      <div class="cu-sec-t">② 调参数 <small>「识别参数 / 留白」套用到整批，「裁剪边距」只作用于本张</small></div>
+      <div class="cu-2col cu-cut cu-pd">
+        <div>
+          <div class="cu-stage cu-checker" id="pdStage"><span class="cu-empty">选择图片后这里显示样张</span></div>
+          <div class="cu-row" style="margin-top:8px">
+            <span class="cu-badge" id="pdBoxInfo">裁剪区 —</span>
+            <button class="cu-mini" id="pdEdge" title="在画布上直接拖动四条边，改完点「完成」">✥ 手动调边</button>
+            <button class="cu-mini" id="pdRedetect">重新自动识别</button>
+            <span class="cu-empty" id="pdRefInfo"></span>
+          </div>
+          <div class="cu-row" id="pdEdgeBar" style="display:none;margin-top:7px;font-size:12px;color:var(--text-light)">
+            <span>拖动红框四条边 / 四个角，下面数值会同步变 · <b>只作用于本张</b></span>
+            <button class="cu-mini" id="pdEdgeAll">套用到全部图片</button>
+            <button class="cu-mini" id="pdEdgeClear">清除本张手动边距</button>
+            <button class="cu-mini" id="pdEdgeDone">✓ 完成调边</button>
+          </div>
+        </div>
+        <div class="cu-side">
+          <div class="cu-grp">
+            <div class="cu-grp-t">裁剪边距 <span style="font-weight:400">（+ 多切 / − 补回，px）</span><span class="cu-badge warn" id="pdNgTag" style="display:none">本张已手动</span></div>
+            <div class="cu-ng">
+              <label>上 <button class="cu-step" id="pdTD" title="上边少切 1px（往外补回）">−</button><input class="cu-numv" id="pdT" value="0"><button class="cu-step" id="pdTU" title="上边多切 1px（往里收）">+</button></label>
+              <label>下 <button class="cu-step" id="pdBD" title="下边少切 1px（往外补回）">−</button><input class="cu-numv" id="pdB" value="0"><button class="cu-step" id="pdBU" title="下边多切 1px（往里收）">+</button></label>
+              <label>左 <button class="cu-step" id="pdLD" title="左边少切 1px（往外补回）">−</button><input class="cu-numv" id="pdL" value="0"><button class="cu-step" id="pdLU" title="左边多切 1px（往里收）">+</button></label>
+              <label>右 <button class="cu-step" id="pdRD" title="右边少切 1px（往外补回）">−</button><input class="cu-numv" id="pdR" value="0"><button class="cu-step" id="pdRU" title="右边多切 1px（往里收）">+</button></label>
+            </div>
+            <div class="cu-row" style="margin-top:7px">
+              <label style="font-size:12px;color:var(--text-light)">留白 <button class="cu-step" id="pdPadD">−</button></label>
+              <input class="cu-numv" id="pdPad" value="0" style="width:44px">
+              <button class="cu-step" id="pdPadU">+</button>
+            </div>
+          </div>
+          <div class="cu-grp">
+            <div class="cu-grp-t">识别参数 <span style="font-weight:400">（套用到整批）</span></div>
+            <div class="cu-sls">
+              <div class="cu-sl2"><span>容差</span><span class="cu-nb"><button class="cu-step" id="pdTolD">−</button><input class="cu-numv" id="pdTolV" value="14"><button class="cu-step" id="pdTolU">+</button></span><input type="range" id="pdTol" min="2" max="60" step="1" value="14"></div>
+              <div class="cu-sl2"><span>轮廓平滑</span><span class="cu-nb"><button class="cu-step" id="pdSmoothD">−</button><input class="cu-numv" id="pdSmoothV" value="12"><button class="cu-step" id="pdSmoothU">+</button></span><input type="range" id="pdSmooth" min="0" max="40" step="1" value="12"></div>
+              <div class="cu-sl2"><span>边缘羽化</span><span class="cu-nb"><button class="cu-step" id="pdFeatherD">−</button><input class="cu-numv" id="pdFeatherV" value="1"><button class="cu-step" id="pdFeatherU">+</button></span><input type="range" id="pdFeather" min="0" max="5" step="1" value="1"></div>
+            </div>
+          </div>
+          <div class="cu-grp">
+            <div class="cu-grp-t">识别方式</div>
+            <div class="cu-row">
+              <select id="pdMode" class="cu-mini" style="width:100%">
+                <option value="outline">智能轮廓（推荐 · 实拍场景也能认）</option>
+                <option value="plain">纯色背景泛洪（老办法）</option>
+              </select>
+            </div>
+            <div class="cu-row" style="margin-top:6px">
+              <button class="cu-mini" id="pdReset">重置参数</button>
+              <span class="cu-empty">调好点下面「开始批量」</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cu-sec" id="pdRunSec" style="display:none">
+      <div class="cu-row">
+        <button class="cu-mini" id="pdRun" style="padding:7px 16px;font-size:13px;font-weight:600">开始批量抠图 → 下载 ZIP</button>
+        <button class="cu-mini" id="pdRunOne">只导出当前样张</button>
+        <span class="cu-empty" id="pdProgText"></span>
+      </div>
+      <div class="cu-bar"><i id="pdBar"></i></div>
+      <div class="cu-log" id="pdLog" style="margin-top:8px"></div>
+    </div>
+    <div class="t-tip">把产品当成<b>一整块实心主体</b>来认，只找它的<b>外框边缘</b>：
+      背景基准取画面四边采样出来的多个颜色簇（墙 + 地板 + 窗户各算一块），所以实拍场景也认得出；轮廓最后会<b>吸附到最近的强边缘</b>上。
+      主体内部（镜面 / 玻璃反射到的室内、<b>人物</b>）一律算产品本体，<b>不会被单独抠出来</b>。
+      <b>背景确实是纯色 / 浅色渐变</b>时，把「识别方式」换成「纯色背景泛洪」更省事。
+      <b>轮廓没贴准外框</b>时：先调「轮廓平滑」（0 = 保留原始锯齿；越大越干净，但会磨掉细碎特征）；
+      还有偏差就点「✥ 手动调边」直接拖红框的四条边和四个角，或在下方的「裁剪边距」里用四向 ± / 输入框精确到 px ——
+      <b>+ 是往里多切、− 是往外补回</b>（补回的那一圈按产品处理）——<b>只改这一张</b>，要统一点「套用到全部图片」。
+      输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；整条链路都在本地跑、图片不会上传。</div>`;
 
   const $ = (id) => box.querySelector('#' + id);
-  const st = { files: [], sel: 0, opt: { tol: 14, feather: 1, pad: 0 }, busy: false };
+  const st = {
+    files: [], meta: [], sel: 0, cur: null, busy: false, edge: false,
+    // mode：outline = 智能轮廓（默认）；plain = 老的纯色背景泛洪。
+    // 两种模式走的是同一段「掩码 → alpha」渲染，所以留白/手动边距的语义完全一致。
+    opt: { mode: 'outline', tol: 14, smooth: PD_SMOOTH, feather: 1, pad: 0 },
+  };
+  const NG0 = { t: 0, b: 0, l: 0, r: 0 };
+  const DEFAULTS = { mode: 'outline', tol: 14, smooth: PD_SMOOTH, feather: 1, pad: 0 };
   const log = (s) => { const el = $('pdLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
   const setProg = (i, n) => { $('pdBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
+
+  // —— 逐张的裁剪边距（与框条抠图同一套语义，见那边 applyNudge 上面的长注释）——
+  // ⚠️ 四向统一「正数 = 往里收」。右/下是最小/最大边的差别在 applyNudge 里处理，
+  //    别按「加到哪条边」去存，否则界面自相矛盾。
+  function metaOf(i) { return st.meta[i] || (st.meta[i] = { status: '待处理', cls: '' }); }
+  function nudgeOf(i) { const m = st.meta[i]; return (m && m.nudge) || null; }
+  // 【有没有「真的」手动边距】不能只看 nudge 对象在不在 —— 用户把四个数都调回 0 之后对象还在，
+  // 那颗 ✥ 和「本张已手动」的标签就会一直挂着，看不出「这张其实已经回到全自动了」。
+  function hasNudge(i) { const n = nudgeOf(i); return !!(n && (n.t || n.b || n.l || n.r)); }
+  function ensureNudge(i) {
+    const m = metaOf(i);
+    if (!m.nudge) m.nudge = { t: 0, b: 0, l: 0, r: 0 };
+    return m.nudge;
+  }
+  function clampNudge(base, cv, n) {
+    if (!base || !cv || !n) return;
+    let x0 = base.x0 + (n.l | 0), x1 = base.x1 - (n.r | 0);
+    let y0 = base.y0 + (n.t | 0), y1 = base.y1 - (n.b | 0);
+    x0 = Math.max(0, Math.min(x0, cv.width - 8));
+    x1 = Math.min(cv.width - 1, Math.max(x1, x0 + 7));
+    y0 = Math.max(0, Math.min(y0, cv.height - 8));
+    y1 = Math.min(cv.height - 1, Math.max(y1, y0 + 7));
+    n.l = x0 - base.x0; n.r = base.x1 - x1; n.t = y0 - base.y0; n.b = base.y1 - y1;
+  }
+  // 手动边距的基准 = **自动识别出来的框**（det 的紧致框 / 纯色模式的包围盒）。
+  // 注意不是「已经套过留白的框」—— 留白在 applyNudge 里另外加，两处不能串。
+  function refBox() { const cur = st.cur; return cur ? cur.tightBox : null; }
+  function applyNudge(base, cv, n) {
+    if (!base || !cv) return null;
+    n = n || NG0;
+    const pad = Math.round(st.opt.pad || 0);
+    const x0 = Math.max(0, base.x0 + (n.l | 0) - pad), y0 = Math.max(0, base.y0 + (n.t | 0) - pad);
+    const x1 = Math.min(cv.width - 1, base.x1 - (n.r | 0) + pad), y1 = Math.min(cv.height - 1, base.y1 - (n.b | 0) + pad);
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x0: x0, y0: y0, x1: x1, y1: y1 };
+  }
+  function curBox() {
+    const cur = st.cur;
+    return cur ? applyNudge(refBox(), cur.srcCv, nudgeOf(st.sel)) : null;
+  }
+  function detectFor(cv, o) {
+    return o.mode === 'plain' ? detectPlainMask(cv, o) : detectProductMask(cv, o);
+  }
+  function prodOptions(quick) {
+    const o = { mode: st.opt.mode, tol: st.opt.tol, smooth: st.opt.smooth, feather: st.opt.feather, pad: st.opt.pad };
+    if (quick) o.ds = PD_DS_QUICK;      // 拖滑块时的快速档（掩码分辨率低一档，改参数跟手）
+    return o;
+  }
 
   function renderRows() {
     const tb = $('pdRows');
@@ -8743,121 +9380,427 @@ function buildToolProdCut() {
       //    早前直接 fileRelName(f) 传了包装对象，文件列整列显示 "undefined"（同一个错误
       //    也让下面的 preview 把包装对象当成 File 去 createObjectURL，预览从来没成功过）。
       const rel = fileRelName(info.file);
+      const m = st.meta[i] || {};
       tr.innerHTML = `<td>${i + 1}</td><td><span class="cu-fn" title="${esc(rel)}">${esc(rel)}</span></td>
-        <td>${info.dim || '—'}</td><td><span class="cu-badge ${info.cls || ''}">${esc(info.status || '待处理')}</span></td>`;
-      tr.onclick = () => preview(i);
+        <td><span class="cu-fn" title="${esc(m.outName || '—')}">${esc(m.outName || '—')}</span></td>
+        <td><span class="cu-badge ${m.cls || ''}">${esc((m.status || '待处理') + (hasNudge(i) ? ' ✥' : ''))}</span></td>`;
+      tr.onclick = () => analyze(i, false);
       tb.appendChild(tr);
     });
     $('pdSec').style.display = st.files.length ? '' : 'none';
+    $('pdEditSec').style.display = st.files.length ? '' : 'none';
+    $('pdRunSec').style.display = st.files.length ? '' : 'none';
   }
-  // auto=true：自动往前走（刚读完文件夹 / 上一张坏图跳过 / 点「预览下一张」）。
-  // 手动点某一行时停在这里，让用户看清是哪个文件读不出来。
-  async function preview(i, auto) {
+
+  // —— 读图 + 识别 ——
+  // quick=true 只在拖滑块时用：掩码分辨率降到 PD_DS_QUICK，整条链快 4~5 倍。
+  // 松手（change 事件）后再跑一次全分辨率，最终结果一定是全分辨率那一版。
+  async function analyze(i, quick) {
     st.sel = i; renderRows();
     const item = st.files[i];
     if (!item) return;
+    const prev = st.cur;
     try {
       const cv = await loadImgCanvas(item.file);
-      const r = cutPlainBackground(cv, st.opt);
-      const stage = $('pdStage'); stage.innerHTML = '';
-      if (!r) { stage.innerHTML = '<span class="cu-empty">整张图都被判成背景了，把容差调小试试</span>'; return; }
-      stage.appendChild(r.canvas);
-      item.dim = `${r.canvas.width}×${r.canvas.height}`;
-      item.status = '预览中'; item.cls = '';
+      const o = prodOptions(quick);
+      const det = detectFor(cv, o);
+      if (prev && prev.srcCv) { prev.srcCv.width = 0; prev.srcCv.height = 0; }
+      st.cur = { srcCv: cv, det: det, tightBox: det ? { x0: det.box.x0, y0: det.box.y0, x1: det.box.x1, y1: det.box.y1 } : null, quick: !!quick, why: '' };
+      edgeUI = null;
+      const mm = metaOf(i);
+      mm.status = det ? '预览中' : '未找到主体'; mm.cls = det ? '' : 'err';
       renderRows();
-      $('pdBoxInfo').textContent = `${fileRelName(item.file)} · 输出 ${r.canvas.width}×${r.canvas.height} px`;
-      $('pdBg').style.background = 'rgb(' + r.bg.map(Math.round).join(',') + ')';
-      cv.width = 0; cv.height = 0;
+      drawPreview();
     } catch (e) {
       const why = (e && e.message) || String(e);
       $('pdStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(why) + '</span>';
       // 与框条抠图同一套处理：标红这一行、说出原因、自动跳到下一张还没试过的，
       // 别让一张坏图把整个文件夹卡在第一张上
-      item.status = '读图失败'; item.cls = 'err';
+      const m = metaOf(i);
+      m.status = '读图失败'; m.cls = 'err';
+      const cur0 = st.cur;
+      if (cur0 && cur0.srcCv) { cur0.srcCv.width = 0; cur0.srcCv.height = 0; }
+      st.cur = { srcCv: null, det: null, tightBox: null, why: why };
       const rel = fileRelName(item.file);   // 解码失败的消息里已经带了文件名，别再拼一次
       log((why.indexOf(rel + '：') === 0 ? why : rel + '：' + why) + '（已跳过）');
       const tried = st.tried || (st.tried = {});
       tried[i] = 1;
-      if (auto) {
-        for (let j = 0; j < st.files.length; j++) if (!tried[j]) { renderRows(); return preview(j, true); }
-      }
       renderRows();
+      for (let j = 0; j < st.files.length; j++) if (!tried[j]) { return analyze(j, false); }
     }
   }
   // 与框条抠图共用同一套解码（同样能识别「扩展名写错」与超大图降采样兜底）
   async function loadImgCanvas(file) { return (await decodeToCanvas(file, fileRelName(file))).cv; }
-  ['pdTol|tol', 'pdFeather|feather', 'pdPad|pad'].forEach(s => {
-    const [id, key] = s.split('|');
-    const el = $(id);
-    el.oninput = () => { st.opt[key] = +el.value; $(id + 'V').textContent = el.value; preview(st.sel); };
+
+  // —— 预览的两档 ——
+  // 真识别一次 70~130ms（1920×1281），每个 input 事件都跑会顿；拖动中先按低分辨率出个近似，
+  // 停手 90ms 后再跑全分辨率把结果定下来。最终导出永远用全分辨率。
+  let pvT = 0;
+  function schedule(quick) {
+    if (pvT) clearTimeout(pvT);
+    pvT = setTimeout(() => { pvT = 0; analyze(st.sel, quick); }, quick ? 70 : 0);
+  }
+
+  function syncNudge() {
+    const n = nudgeOf(st.sel) || NG0;
+    const set = (id, v) => { const el = $(id); if (el && el.value !== String(v)) el.value = v; };
+    set('pdT', n.t); set('pdB', n.b); set('pdL', n.l); set('pdR', n.r);
+    const has = hasNudge(st.sel);
+    $('pdNgTag').style.display = has ? '' : 'none';
+  }
+  function syncOpt() {
+    const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+    set('pdTol', st.opt.tol); set('pdTolV', st.opt.tol);
+    set('pdSmooth', st.opt.smooth); set('pdSmoothV', st.opt.smooth);
+    set('pdFeather', st.opt.feather); set('pdFeatherV', st.opt.feather);
+    set('pdPad', st.opt.pad);
+    set('pdMode', st.opt.mode);
+  }
+
+  // ===== 手动调边：整幅原图 + 可拖红框（与框条抠图同一套做法，只是画布是原图不摆正）=====
+  const EH = [['l', 'l'], ['r', 'r'], ['t', 't'], ['b', 'b'], ['tl', 'tl'], ['tr', 'tr'], ['bl', 'bl'], ['br', 'br']];
+  let edgeUI = null;
+  function edgeLayout() {
+    const cur = st.cur;
+    if (!edgeUI || !cur || !cur.srcCv) return null;
+    const b = applyNudge(refBox(), cur.srcCv, nudgeOf(st.sel));
+    if (!b) return null;
+    const k = edgeUI.k, W = cur.srcCv.width * k, H = cur.srcCv.height * k;
+    const x0 = b.x0 * k, x1 = (b.x1 + 1) * k, y0 = b.y0 * k, y1 = (b.y1 + 1) * k;
+    const set = (el, s) => { for (const p in s) el.style[p] = s[p]; };
+    const w = Math.max(0, x1 - x0), h = Math.max(0, y1 - y0);
+    set(edgeUI.dims[0], { left: '0px', top: '0px', width: x0 + 'px', height: H + 'px' });
+    set(edgeUI.dims[1], { left: x1 + 'px', top: '0px', width: Math.max(0, W - x1) + 'px', height: H + 'px' });
+    set(edgeUI.dims[2], { left: x0 + 'px', top: '0px', width: w + 'px', height: y0 + 'px' });
+    set(edgeUI.dims[3], { left: x0 + 'px', top: y1 + 'px', width: w + 'px', height: Math.max(0, H - y1) + 'px' });
+    const hs = edgeUI.hs;
+    set(hs.l, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px' });
+    set(hs.r, { left: (x1 - 6) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px' });
+    set(hs.t, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: (w + 10) + 'px', height: '11px' });
+    set(hs.b, { left: (x0 - 5) + 'px', top: (y1 - 6) + 'px', width: (w + 10) + 'px', height: '11px' });
+    set(hs.tl, { left: (x0 - 6) + 'px', top: (y0 - 6) + 'px' });
+    set(hs.tr, { left: (x1 - 7) + 'px', top: (y0 - 6) + 'px' });
+    set(hs.bl, { left: (x0 - 6) + 'px', top: (y1 - 7) + 'px' });
+    set(hs.br, { left: (x1 - 7) + 'px', top: (y1 - 7) + 'px' });
+    $('pdBoxInfo').textContent = '✥ 调边中 · 裁剪区 ' + b.x0 + ',' + b.y0 + ' → ' + b.x1 + ',' + b.y1
+      + '（' + (b.x1 - b.x0 + 1) + '×' + (b.y1 - b.y0 + 1) + ' px）';
+    return b;
+  }
+  function drawEdgeView() {
+    const stage = $('pdStage'), cur = st.cur;
+    const W = cur.srcCv.width, H = cur.srcCv.height;
+    const key = st.sel + ':' + W + 'x' + H;
+    if (!edgeUI || edgeUI.key !== key) {
+      const avail = Math.max(280, (stage.clientWidth || 820) - 26);
+      let k = Math.min(1, avail / W, 460 / H);
+      if (!(k > 0) || !isFinite(k)) k = 1;
+      stage.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.className = 'cu-edgewrap';
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(W * k));
+      cv.height = Math.max(1, Math.round(H * k));
+      cv.getContext('2d').drawImage(cur.srcCv, 0, 0, cv.width, cv.height);
+      wrap.appendChild(cv);
+      const dims = [];
+      for (let i = 0; i < 4; i++) { const d = document.createElement('div'); d.className = 'cu-edim'; wrap.appendChild(d); dims.push(d); }
+      const hs = {};
+      EH.forEach(([cls, side]) => {
+        const d = document.createElement('div');
+        d.className = 'cu-eh ' + cls;
+        d.addEventListener('pointerdown', (e) => edgeDrag(e, side));
+        wrap.appendChild(d);
+        hs[side] = d;
+      });
+      stage.appendChild(wrap);
+      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs };
+    }
+    edgeLayout();
+  }
+  // 拖动一条边（或一个角）。side 含 'l' 就是左、含 't' 就是上…… 角上两个字母都含（'tl' = 左上）。
+  function edgeDrag(ev, side) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const cur = st.cur, base = refBox();
+    if (!cur || !cur.srcCv || !base || !edgeUI) return;
+    const k = edgeUI.k;
+    const sx = ev.clientX, sy = ev.clientY;
+    const n0 = nudgeOf(st.sel) || NG0;
+    const n = ensureNudge(st.sel);
+    let dirty = false;
+    const move = (e) => {
+      const dx = (e.clientX - sx) / k, dy = (e.clientY - sy) / k;
+      // 记号见 applyNudge 上面那段：正数 = 往里收，所以右/下要取反
+      if (side.indexOf('l') >= 0) n.l = n0.l + Math.round(dx);
+      if (side.indexOf('r') >= 0) n.r = n0.r - Math.round(dx);
+      if (side.indexOf('t') >= 0) n.t = n0.t + Math.round(dy);
+      if (side.indexOf('b') >= 0) n.b = n0.b - Math.round(dy);
+      clampNudge(base, cur.srcCv, n);
+      dirty = true;
+      edgeLayout();
+      syncNudge();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (!dirty) return;
+      renderRows();
+      log(`第 ${st.sel + 1} 张：手动调边 → 上 ${n.t} 下 ${n.b} 左 ${n.l} 右 ${n.r}（只作用于本张）`);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  function setEdgeMode(on) {
+    if (on && (!st.cur || !st.cur.srcCv || !st.cur.tightBox)) { log('当前这张没识别出主体，没法手动调边'); return; }
+    st.edge = !!on;
+    edgeUI = null;
+    $('pdEdge').classList.toggle('on', st.edge);
+    $('pdEdge').textContent = st.edge ? '✓ 完成调边' : '✥ 手动调边';
+    $('pdEdgeBar').style.display = st.edge ? '' : 'none';
+    drawPreview();
+  }
+  // —— 出成品 ——
+  // 两种识别模式走同一段渲染（cutProductOutline 里的掩码 → alpha），
+  // 所以「留白 / 四向裁剪边距」在两种模式下语义完全一致。
+  function drawPreview() {
+    const stage = $('pdStage'), cur = st.cur;
+    syncNudge();
+    if (!cur || !cur.srcCv) {
+      // ⚠️ 选中的是一张读不出来的图时，这块提示必须**留在原地**。
+      //    否则用户随便拨个滑块，drawPreview 就把「读图失败：<原因>」换成
+      //    「选择图片后这里显示样张」—— 用户既不知道是哪张出的问题、也不知道为什么。
+      const m = st.meta && st.meta[st.sel];
+      const why = (m && m.status === '读图失败' && cur && cur.why) ? cur.why : '';
+      if (why) {
+        $('pdStage').innerHTML = '<span class="cu-empty">读图失败：' + esc(why) + '</span>';
+        $('pdBoxInfo').textContent = '读图失败';
+        return;
+      }
+      stage.innerHTML = '<span class="cu-empty">选择图片后这里显示样张</span>';
+      $('pdBoxInfo').textContent = '裁剪区 —';
+      return;
+    }
+    if (st.edge) { drawEdgeView(); return; }
+    edgeUI = null;
+    if (!cur.det) {
+      stage.innerHTML = '<span class="cu-empty">没找到产品主体 —— 背景和产品颜色太接近了，把「容差」调小、或「轮廓平滑」调小再试；也可以把「识别方式」换成纯色背景泛洪。</span>';
+      $('pdBoxInfo').textContent = '未找到主体';
+      $('pdRefInfo').textContent = '';
+      return;
+    }
+    const r = cutProductOutline(cur.srcCv, Object.assign(prodOptions(false), { det: cur.det, nudge: nudgeOf(st.sel), ds: 0 }));
+    stage.innerHTML = '';
+    if (!r) {
+      stage.innerHTML = '<span class="cu-empty">裁剪区域为空 —— 手动边距切过头了，按「清除本张手动边距」或在「裁剪边距」里往回放。</span>';
+      $('pdBoxInfo').textContent = '裁剪区为空';
+      return;
+    }
+    stage.appendChild(r.canvas);
+    cur.out = r;
+    $('pdBoxInfo').textContent = '输出 ' + r.canvas.width + '×' + r.canvas.height + ' px（原像素）· 裁剪自 '
+      + r.box.x0 + ',' + r.box.y0 + ' → ' + r.box.x1 + ',' + r.box.y1;
+    $('pdRefInfo').textContent = cur.det && cur.det.plain
+      ? '纯色背景泛洪 · 背景色 rgb(' + r.bg.map(Math.round).join(',') + ')'
+      : '智能轮廓 · 背景簇 ' + (cur.det ? cur.det.refs.length : 0) + ' 个 · 平滑半径 ' + (cur.det ? cur.det.smoothR : 0) + 'px'
+        + (cur.quick ? '（快速预览，松手后按全分辨率重算）' : '');
+  }
+  $('pdRedetect').onclick = () => {
+    const m = st.meta[st.sel];
+    if (m) delete m.nudge;
+    renderRows(); syncNudge();
+    analyze(st.sel, false);
+    log(`第 ${st.sel + 1} 张：已按当前参数重新自动识别（顺便清掉了本张的手动边距）`);
+  };
+  $('pdEdge').onclick = () => setEdgeMode(!st.edge);
+  $('pdEdgeDone').onclick = () => setEdgeMode(false);
+  $('pdEdgeClear').onclick = () => {
+    const m = st.meta[st.sel];
+    if (m) delete m.nudge;
+    renderRows(); syncNudge();
+    if (st.edge) drawEdgeView(); else drawPreview();
+    log(`第 ${st.sel + 1} 张：已清除手动边距`);
+  };
+  $('pdEdgeAll').onclick = () => {
+    const n = nudgeOf(st.sel);
+    if (!hasNudge(st.sel)) { log('本张没有手动边距，没什么可套用的'); return; }
+    st.files.forEach((f, i) => { if (i !== st.sel) st.meta[i] = Object.assign({}, st.meta[i], { nudge: { t: n.t, b: n.b, l: n.l, r: n.r } }); });
+    renderRows();
+    log(`已把「上 ${n.t} 下 ${n.b} 左 ${n.l} 右 ${n.r}」套用到全部 ${st.files.length} 张`);
+  };
+
+  // —— 四向 ± / 输入框。单击 1 格，按住 380ms 后每 25ms 连发；⚠️ 连发必须在**真开始时**
+  //    往 window 挂 pointerup 兜底，否则指针在窗外抬起会一路爬到顶。
+  function bindStep(btn, num, get, set) {
+    let t = 0, iv = 0;
+    const one = (d) => { set(get() + d); };
+    const stop = () => {
+      if (t) { clearTimeout(t); t = 0; }
+      if (iv) { clearInterval(iv); iv = 0; }
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      one(/D$/.test(btn.id) ? -1 : 1);
+      t = setTimeout(() => {
+        t = 0;
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
+        iv = setInterval(() => one(/D$/.test(btn.id) ? -1 : 1), 25);
+      }, 380);
+    });
+    btn.addEventListener('pointerup', stop);
+    btn.addEventListener('pointerleave', stop);
+    if (num) {
+      num.onchange = () => {
+        const v = parseInt(num.value, 10);
+        set(isNaN(v) ? get() : v);
+      };
+    }
+  }
+  const clampI = (v, lo, hi) => Math.max(lo, Math.min(hi, v | 0));
+  ['T', 'B', 'L', 'R'].forEach((s, k) => {
+    const key = ['t', 'b', 'l', 'r'][k];
+    const num = $('pd' + s);
+    const get = () => (nudgeOf(st.sel) || NG0)[key];
+    const set = (v) => {
+      if (!st.cur || !st.cur.tightBox) return;
+      const n = ensureNudge(st.sel);
+      n[key] = clampI(v, -4000, 4000);
+      clampNudge(refBox(), st.cur.srcCv, n);
+      syncNudge();
+      if (st.edge) drawEdgeView(); else drawPreview();
+      renderRows();
+    };
+    bindStep($('pd' + s + 'D'), num, get, set);
+    bindStep($('pd' + s + 'U'), num, get, set);
   });
-  $('pdPrevBtn').onclick = () => { if (st.files.length) preview((st.sel + 1) % st.files.length, true); };
+  ['pdTol', 'pdSmooth', 'pdFeather'].forEach((id) => {
+    const key = { pdTol: 'tol', pdSmooth: 'smooth', pdFeather: 'feather' }[id];
+    const el = $(id), num = $(id + 'V');
+    const lim = { pdTol: [2, 60], pdSmooth: [0, 40], pdFeather: [0, 5] }[id];
+    const put = (v, quick) => {
+      st.opt[key] = clampI(v, lim[0], lim[1]);
+      syncOpt();
+      schedule(quick);
+    };
+    el.oninput = () => put(+el.value, true);
+    el.addEventListener('change', () => put(+el.value, false));
+    num.value = el.value;
+    num.onchange = () => { const v = parseInt(num.value, 10); put(isNaN(v) ? st.opt[key] : v, false); };
+    bindStep($(id + 'D'), null, () => st.opt[key], (v) => put(v, false));
+    bindStep($(id + 'U'), null, () => st.opt[key], (v) => put(v, false));
+  });
+  // 留白是整批参数 → 直接改 opt 后重渲染（不重新识别，只重算 alpha/裁剪）
+  const putPad = (v) => { st.opt.pad = clampI(v, 0, 600); syncOpt(); if (st.edge) drawEdgeView(); else drawPreview(); };
+  bindStep($('pdPadD'), $('pdPad'), () => st.opt.pad, putPad);
+  bindStep($('pdPadU'), $('pdPad'), () => st.opt.pad, putPad);
+  $('pdPad').onchange = () => { const v = parseInt($('pdPad').value, 10); putPad(isNaN(v) ? 0 : v); };
+  $('pdMode').onchange = () => { st.opt.mode = $('pdMode').value; schedule(false); };
+  $('pdReset').onclick = () => {
+    Object.assign(st.opt, DEFAULTS);
+    st.meta.forEach(m => { if (m) delete m.nudge; });
+    syncOpt(); syncNudge(); renderRows();
+    analyze(st.sel, false);
+    log('已重置参数与全部手动边距');
+  };
+
   function setFiles(list) {
     const pick = pickImgFiles(list);
     const imgs = sortImgFiles(pick.ok);
     const skip = skipSummary(pick.skipped);
     st.files = imgs.map(f => ({ file: f, status: '待处理', cls: '' }));
+    st.meta = imgs.map(() => ({ status: '待处理', cls: '', outName: '' }));
+    st.cur = null; edgeUI = null; st.edge = false;
     st.tried = {};
     if (!imgs.length) {
       $('pdInfo').textContent = '没找到可解码的图片（支持 jpg / png / webp / bmp / gif / avif）' + (skip ? ' · ' + skip : '');
       if (skip) log(skip);
       renderRows(); return;
     }
-    $('pdInfo').textContent = `${imgs.length} 张图片`;
-    log(`已读取 ${imgs.length} 张图片`);
+    $('pdInfo').textContent = imgs.length + ' 张图片';
+    log('已读取 ' + imgs.length + ' 张图片');
     if (skip) log(skip);
+    syncOpt(); syncNudge();
     renderRows();
-    preview(0, true);       // 第一张自己读不出来时继续往后找（auto=true）
+    analyze(0, false);       // 第一张自己读不出来时 analyze 会继续往后找
   }
   $('pdFolder').onchange = () => setFiles($('pdFolder').files);
   $('pdFiles').onchange = () => setFiles($('pdFiles').files);
   bindDropFiles($('pdDrop'), (files) => setFiles(files));
-  $('pdRun').onclick = async () => {
+
+  // —— 单张处理（批量与「只导出当前样张」共用）——
+  // ⚠️ 输出尺寸必须在 canvasToPngBytes 之前存下来：下面会把 canvas 置零释放显存，
+  //    置零后再读 width 就是 0（框条抠图踩过这个坑，单张导出名会变成 xxx_0x0.png）。
+  async function processItem(i, used) {
+    const item = st.files[i];
+    const cv = await loadImgCanvas(item.file);
+    try {
+      const o = prodOptions(false);
+      const det = detectFor(cv, o);
+      if (!det) throw new Error(o.mode === 'plain' ? '整张图都被判成背景（容差过大）' : '没找到产品主体（试试调小「容差」或「轮廓平滑」）');
+      const r = cutProductOutline(cv, Object.assign({}, o, { det: det, nudge: nudgeOf(i), ds: 0 }));
+      if (!r) throw new Error('裁剪区域为空（手动边距过大）');
+      const w = r.canvas.width, h = r.canvas.height;
+      const bytes = await canvasToPngBytes(r.canvas);
+      const name = frameOutName('', fileBaseName(item.file), used);
+      r.canvas.width = 0; r.canvas.height = 0;
+      return { name: name, data: bytes, w: w, h: h };
+    } finally {
+      cv.width = 0; cv.height = 0;
+    }
+  }
+  async function runBatch(one) {
     if (st.busy || !st.files.length) return;
     st.busy = true;
-    const entries = [], used = {};
+    const entries = [], used = {}, idx = one ? [st.sel] : st.files.map((f, i) => i);
     log('开始处理…');
-    for (let i = 0; i < st.files.length; i++) {
-      const item = st.files[i];
-      item.status = '处理中'; item.cls = 'warn'; renderRows();
-      $('pdInfo').textContent = `${i + 1}/${st.files.length} 处理中`;
-      setProg(i, st.files.length);
+    for (let k = 0; k < idx.length; k++) {
+      const i = idx[k], item = st.files[i], m = metaOf(i);
+      m.status = '处理中'; m.cls = 'warn'; renderRows();
+      $('pdProgText').textContent = (k + 1) + '/' + idx.length + ' 处理中';
+      setProg(k, idx.length);
+      await sleep0();      // 让进度条真的刷新出来（不然整批跑完才看到变化）
       let decoded = false;
       try {
-        const cv = await loadImgCanvas(item.file);
+        const r = await processItem(i, used);
         decoded = true;
-        item.dim = cv.width + '×' + cv.height;
-        const r = cutPlainBackground(cv, st.opt);
-        cv.width = 0; cv.height = 0;
-        if (!r) throw new Error('整张图都被判成背景（容差过大）');
-        const bytes = await canvasToPngBytes(r.canvas);
-        const name = frameOutName('', fileBaseName(item.file), used);
-        r.canvas.width = 0; r.canvas.height = 0;
-        entries.push({ name: name, data: bytes });
-        item.status = r.box.x1 - r.box.x0 + 1 + '×' + (r.box.y1 - r.box.y0 + 1); item.cls = 'ok';
-        log(`→ ${name}（${(bytes.length / 1024).toFixed(0)} KB）`);
+        m.outName = r.name;
+        m.status = r.w + '×' + r.h; m.cls = 'ok';
+        entries.push(r);
+        log('→ ' + r.name + '（' + (r.data.length / 1024).toFixed(0) + ' KB）');
       } catch (e) {
         const why = (e && e.message) || String(e);
-        item.status = decoded ? '失败' : '读图失败'; item.cls = 'err';
-        // 解码失败的消息里已经带了文件名（decodeToCanvas 的 who），别再拼一次
+        m.status = decoded ? '失败' : '读图失败'; m.cls = 'err';
         const rel = fileRelName(item.file);
         log((why.indexOf(rel + '：') === 0 ? why : rel + '：' + why) + (decoded ? '' : '（已跳过）'));
       }
-      setProg(i + 1, st.files.length);
+      setProg(k + 1, idx.length);
       renderRows();
       await sleep0();
     }
     st.busy = false;
-    if (!entries.length) { $('pdInfo').textContent = '没有可导出的图片'; return; }
-    if (entries.length === 1) saveBytes(entries[0].data, entries[0].name, 'image/png');
-    else {
+    if (!entries.length) { $('pdProgText').textContent = '没有可导出的图片'; return; }
+    if (entries.length === 1) {
+      // 单张导出名带裁剪尺寸：浏览器不覆盖同名下载（第二次成「x (1).png」，Finder 把 (1)
+      // 排在原名后面）→ 用户点开最前面那个看到的是上一版。详见 tagSize 上面的注释。
+      const nm = tagSize(entries[0].name, entries[0].w, entries[0].h);
+      saveBytes(entries[0].data, nm, 'image/png');
+      log(`已导出 1 张：${nm}（${entries[0].w}×${entries[0].h}px）`);
+    } else {
+      log('正在打包 ZIP…');
       const zip = zipStore(entries);
-      saveBytes(zip, `产品抠图_${new Date().toISOString().slice(0, 10)}_${entries.length}张.zip`, 'application/zip');
+      saveBytes(zip, `产品抠图_${stampNow()}_${entries.length}张.zip`, 'application/zip');
+      log(`已导出 ${entries.length} 张 PNG（打包 ${(zip.length / 1048576).toFixed(1)} MB）`);
     }
-    $('pdInfo').textContent = `完成：导出 ${entries.length} 张`;
-    log(`完成，导出 ${entries.length} 张 PNG`);
-  };
-  $('pdTol').oninput = () => { st.opt.tol = +$('pdTol').value; $('pdTolV').textContent = $('pdTol').value; preview(st.sel); };
+    $('pdProgText').textContent = `完成：导出 ${entries.length} 张`;
+  }
+  $('pdRun').onclick = () => runBatch(false);
+  $('pdRunOne').onclick = () => runBatch(true);
+  syncOpt(); syncNudge();
+  // 只读调试钩子：这几个函数都关在闭包里，无头验收/探针拿不到。
+  // 只挂引用、不改任何状态，界面逻辑完全不读它。
+  box.__dbg = { hasNudge: hasNudge, nudgeOf: nudgeOf, refBox: refBox, NG0: NG0, st: st };
   return box;
 }
 
@@ -9441,6 +10384,9 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
+    detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
+    pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
+    PD_DS, PD_DS_QUICK,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, tagSize, stampNow, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
     sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
