@@ -614,16 +614,15 @@
     .cu-cut .cu-side { grid-template-columns: 1fr; }
     .cu-cut .cu-side > .cu-grp:last-child { grid-column: auto; }
   }
-  /* ===== 产品抠图：同样「预览占满整行 + 参数在下方」，只是它只有三组（裁剪边距 / 识别参数 /
-     识别方式），中间那组是横铺的滑块，所以中间列留弹性宽度，两侧固定。 */
-  .cu-cut.cu-pd .cu-side { grid-template-columns: 214px minmax(300px, 1fr) 236px; }
-  @media (max-width: 1080px) {
+  /* ===== 产品抠图：同样「预览占满整行 + 参数在下方」，四组（裁剪边距 / 识别参数 /
+     识别方式 / 输出），中间那组是横铺的滑块，所以中间列留弹性宽度，两侧固定。 */
+  .cu-cut.cu-pd .cu-side { grid-template-columns: 196px minmax(228px, 1fr) 176px 172px; }
+  @media (max-width: 1220px) {
     .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr 1fr; }
-    .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: 1 / -1; }
+    .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: auto; }
   }
   @media (max-width: 720px) {
     .cu-cut.cu-pd .cu-side { grid-template-columns: 1fr; }
-    .cu-cut.cu-pd .cu-side > .cu-grp:last-child { grid-column: auto; }
   }
   .cu-grp { border: 1px solid var(--border); border-radius: 9px; padding: 6px 9px 7px; background: #fafbfc; }
   .cu-grp-t { font-size: 11px; font-weight: 600; color: var(--text-light); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -7526,10 +7525,17 @@ const PD_DS_QUICK = 520;   // 拖滑块时的快速档：像素少 4.5 倍，改
 //   driftK 1.4→1.7：地板上的接触阴影被吃掉（贴合外框），代价是顶部外框吃掉几个像素，
 //                   但那几个像素被下面的「边缘吸附」补回来了 —— 两个参数要一起调。
 //   snapK  0.030  ：吸附半径放到短边的 3%，才能把 drift 吃掉的那 20px 拉回来（实测 notch p95 5.8→3.2）。
-//   smooth 12‰    ：短边 734 时半径 9；再大开始磨掉真特征，再小（<6）地面阴影会留一条几十像素的长刺。
+//   smooth 16‰    ：短边 734 时半径 12（开 / 闭运算跟着取 11 / 12）。
+//                   扫过 0/8/12/16/20/24/30，用极角扫描量「半径相对滑动中值的偏离」当毛刺指标：
+//                     0‰  → fill 0.7335（差一大截，凹陷还没收完） devP95 10.5 掩码 px
+//                    12‰  → fill 0.7850                              devP95 3.5  devMax 13
+//                    16‰  → fill 0.7858                              devP95 2.5  devMax 9.5  ← 取它
+//                    20‰  → fill 0.7861（开始超出 π/4 = 多吃背景外边）
+//                    30‰  → fill 0.7892（明显多吃背景外边）
+//                   即 16‰ 正好是「fill 最贴近理论值 + 毛刺最小」的交点。**再大就要啃产品外侧了**。
 const PD_DRIFT_K = 1.7;
 const PD_SNAP_K = 0.030;
-const PD_SMOOTH = 12;
+const PD_SMOOTH = 16;
 
 // —— 四边采样 → 背景颜色簇 ——
 // 做法：四边像素做 16 级量化直方图（4096 桶）→ 按频次降序取种子（低于占比门槛就停）→
@@ -7759,6 +7765,83 @@ function pdSmooth(m, W, H, r) {
   return pdFillHoles(out, W, H);
 }
 
+// —— 形态学开运算：治「细窄的外凸」——
+// 场景：产品落在地板上，紧挨着它的瓷砖有一片白色反光。泛洪 / 吸附会把这片高光
+// 当成产品的边，在轮廓上鼓出一小团（实测 `_DSC1030` 左下角约 25px）。这类凸起的特征是
+// **窄**（沿轮廓方向的弧长和径向突出量差不多），而真实的产品凸出（把手、支脚）通常是长条。
+// 开运算（先腐蚀后膨胀）正好只削「比结构元还窄」的凸起，宽凸形状和凹陷都不动 ——
+// 圆镜半径约 300px（掩码尺度）完全无损。
+//
+// ⚠️ 结构元用方形，但**可分离**（横向一遍 + 纵向一遍就等于方形），所以是 O(W·H) 而不是 O(W·H·r²)。
+// ⚠️ 只有「整段长度 ≥ 2r+1」才可能留下腐蚀结果，天然就是按连通段处理的，不用逐像素开窗。
+// ⚠️ **贴着画面边的段要特殊处理**：产品被画面裁断时（实拍很常见），该段起始于 x=0，
+//    标准腐蚀会把最左边 r 个像素也削掉。这里把画面外当作「已经是前景」，贴边侧不削。
+// ⚠️ 它同时也会削掉真实产品上的**细长凸出**（天线、细杆），所以半径跟着「轮廓平滑」走：
+//    用户把平滑拉到 0 就等于把这一步关掉。
+function pdRowMorph(src, W, H, r, dilate) {
+  const out = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    let s = -1;
+    for (let x = 0; x <= W; x++) {
+      const v = x < W ? src[row + x] : 0;
+      if (v && s < 0) s = x;
+      else if (!v && s >= 0) {
+        const e = x - 1;
+        if (dilate) { for (let k = Math.max(0, s - r); k <= Math.min(W - 1, e + r); k++) out[row + k] = 1; }
+        else if (e - s + 1 >= 2 * r + 1) {
+          const lo = s === 0 ? 0 : s + r, hi = e === W - 1 ? W - 1 : e - r;
+          for (let k = lo; k <= hi; k++) out[row + k] = 1;
+        }
+        s = -1;
+      }
+    }
+  }
+  return out;
+}
+function pdColMorph(src, W, H, r, dilate) {
+  const out = new Uint8Array(W * H);
+  for (let x = 0; x < W; x++) {
+    let s = -1;
+    for (let y = 0; y <= H; y++) {
+      const v = y < H ? src[y * W + x] : 0;
+      if (v && s < 0) s = y;
+      else if (!v && s >= 0) {
+        const e = y - 1;
+        if (dilate) { for (let k = Math.max(0, s - r); k <= Math.min(H - 1, e + r); k++) out[k * W + x] = 1; }
+        else if (e - s + 1 >= 2 * r + 1) {
+          const lo = s === 0 ? 0 : s + r, hi = e === H - 1 ? H - 1 : e - r;
+          for (let k = lo; k <= hi; k++) out[k * W + x] = 1;
+        }
+        s = -1;
+      }
+    }
+  }
+  return out;
+}
+function pdOpen(m, W, H, r) {
+  if (!(r > 0)) return m;
+  let a = pdRowMorph(m, W, H, r, false);
+  a = pdColMorph(a, W, H, r, false);
+  a = pdRowMorph(a, W, H, r, true);
+  a = pdColMorph(a, W, H, r, true);
+  return a;
+}
+// 闭运算（先膨胀后腐蚀）—— 开运算的镜像，专治「细窄的内凹」。
+// 场景：镜框落在地板上的那一小段外缘被接触阴影染暗、颜色接近地板，泛洪就把这一小段
+// 当成背景吃掉了，轮廓只能贴着更内侧的花纹走 —— 表现成「镜框缺了一块」。
+// 对抠图来说，闭运算（多保留）比开运算（少保留）安全得多：填平的凹陷顶多是多带一点背景，
+// 而开运算削过头会把产品切掉。所以两者半径可以分开给，闭运算给得更大方。
+// ⚠️ 代价是产品上真实存在的**窄凹槽**会被填平（相框的凹线之类），同样跟着「轮廓平滑」走。
+function pdClose(m, W, H, r) {
+  if (!(r > 0)) return m;
+  let a = pdRowMorph(m, W, H, r, true);
+  a = pdColMorph(a, W, H, r, true);
+  a = pdRowMorph(a, W, H, r, false);
+  a = pdColMorph(a, W, H, r, false);
+  return a;
+}
+
 // —— 外框边缘吸附 ——
 // 对每个轮廓像素求外法线（用 5×5 窗口里前景像素的质心反方向），沿它往外找最近的强梯度；
 // 找到了就把这条射线上的像素全部点亮（保证不留 1px 缝）。
@@ -7856,6 +7939,22 @@ function detectProductMask(cv, o) {
   m = pdSnapOut(m, mw, mh, px, Math.round((o.snapK == null ? PD_SNAP_K : o.snapK) * mn),
     o.snapThr == null ? 45 : o.snapThr, od.dist, tolG);
   m = pdSmooth(m, mw, mh, sr > 0 ? Math.max(2, Math.round(sr / 2)) : 0);
+  // 开运算必须放在**吸附之后**：那一小团凸起多半就是吸附拉到地板高光上形成的。
+  // 半径 0.9×sr（默认 8px @ 短边 734）：能削掉宽度 16px（掩码尺度）以下的凸起，
+  // 圆镜半径约 300px 完全无损。
+  // 紧接着闭运算治反向的毛病（泛洪把一小段镜框当背景吃掉 → 轮廓往里凹）。
+  // 半径给得更宽（1.2×sr）：填平凹陷是「多保留」，比开运算削凸起安全。
+  // ⚠️ 两个半径都跟着「轮廓平滑」走 —— 用户把平滑拉到 0 就等于把形态学规整整段关掉；
+  //    产品之间挨得很近（中间只有一条窄缝）时，也该调小平滑，别让闭运算把缝填上、
+  //    把两件产品连成一块。
+  // openK / closeK 只为内部与探针留的系数覆盖口（界面不暴露），0 = 关掉那一步。
+  // 闭运算系数给 1.0（不是 1.2）：实测 1.0 与 2.0 在样张上结果**完全一样**（0.7850），
+  // 那就取小的 —— 半径越大越可能把两件挨着的产品之间的窄缝填上，把它们连成一块。
+  const ok = o.openK == null ? 0.9 : o.openK;
+  const ck = o.closeK == null ? 1.0 : o.closeK;
+  m = pdOpen(m, mw, mh, sr > 0 && ok > 0 ? Math.max(2, Math.round(sr * ok)) : 0);
+  m = pdClose(m, mw, mh, sr > 0 && ck > 0 ? Math.max(2, Math.round(sr * ck)) : 0);
+  // 填洞放在形态学之后：开运算可能把细的桥切断、造出新的小孔，让这一步一起收掉。
   m = pdFillHoles(m, mw, mh);
   const mb = pdMaskBox(m, mw, mh);
   if (!mb) return null;
@@ -7997,7 +8096,18 @@ function cutProductOutline(cv, o) {
   }
   cx.putImageData(id, 0, 0);
   const ref0 = det.refs[0] || [255, 255, 255];
-  return { canvas: out, box: box, base: base, bg: ref0, det: det, mask: det.mask };
+  // 白底：把裁好的透明图合成到纯白上。放在这里（而不是导出侧）是为了**预览即所得** ——
+  // 白底比棋盘底严格得多，边缘残留的灰边 / 半透明边只有在白底上才看得出来。
+  let canvas = out;
+  if (o.bg === 'white') {
+    canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const c2 = canvas.getContext('2d');
+    c2.fillStyle = '#ffffff';
+    c2.fillRect(0, 0, w, h);
+    c2.drawImage(out, 0, 0);
+  }
+  return { canvas: canvas, box: box, base: base, bg: ref0, det: det, mask: det.mask };
 }
 
 // —— 产品抠图：从四边泛洪去纯色背景 + 紧致裁切 ——
@@ -8285,6 +8395,32 @@ function canvasToPngBytes(cv) {
   });
 }
 const sleep0 = () => new Promise(r => setTimeout(r, 0));
+
+// —— 按长边缩放到目标像素（PNG 落盘前的最后一步）——
+// ⚠️ **只缩不放**：原图长边已经 ≤ 目标值时原样返回原 canvas。用户选「1024」的意思是
+//    「别超过 1024」，不是「必须等于 1024」；放大不增加任何信息，只会把边缘插值糊掉。
+// ⚠️ 缩放必须作用在**裁剪成品**上（不是在检测缩略图上），且用 high 质量插值 ——
+//    在缩略图上缩放等于先把掩码分辨率降一级再放大，alpha 边缘会发毛。
+// ⚠️ 面板读数与真正落盘的尺寸必须**同一套取整**，否则会差 1px（用户会以为导出错了）。
+//    所以尺寸计算单独抽成 outSizeOf，两处都调它，别各算各的。
+function outSizeOf(W, H, target) {
+  const t = Math.round(target || 0);
+  const L = Math.max(W, H);
+  if (!t || L <= t) return { w: W, h: H, k: 1, t: t };
+  const k = t / L;
+  return { w: Math.max(1, Math.round(W * k)), h: Math.max(1, Math.round(H * k)), k: k, t: t };
+}
+function scaleToLongSide(cv, target) {
+  const s = outSizeOf(cv.width, cv.height, target);
+  if (s.k === 1) return cv;
+  const out = document.createElement('canvas');
+  out.width = s.w; out.height = s.h;
+  const g = out.getContext('2d');
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(cv, 0, 0, s.w, s.h);
+  return out;
+}
 
 // ================= 工具：框条抠图 =================
 function buildToolFrameCut() {
@@ -9269,22 +9405,36 @@ function buildToolProdCut() {
           <div class="cu-grp">
             <div class="cu-grp-t">识别参数 <span style="font-weight:400">（套用到整批）</span></div>
             <div class="cu-sls">
-              <div class="cu-sl2"><span>容差</span><span class="cu-nb"><button class="cu-step" id="pdTolD">−</button><input class="cu-numv" id="pdTolV" value="14"><button class="cu-step" id="pdTolU">+</button></span><input type="range" id="pdTol" min="2" max="60" step="1" value="14"></div>
-              <div class="cu-sl2"><span>轮廓平滑</span><span class="cu-nb"><button class="cu-step" id="pdSmoothD">−</button><input class="cu-numv" id="pdSmoothV" value="12"><button class="cu-step" id="pdSmoothU">+</button></span><input type="range" id="pdSmooth" min="0" max="40" step="1" value="12"></div>
+              <div class="cu-sl2"><span>容差</span><span class="cu-nb"><button class="cu-step" id="pdTolD">−</button><input class="cu-numv" id="pdTolV" value="10"><button class="cu-step" id="pdTolU">+</button></span><input type="range" id="pdTol" min="2" max="60" step="1" value="10"></div>
+              <div class="cu-sl2"><span>轮廓平滑</span><span class="cu-nb"><button class="cu-step" id="pdSmoothD">−</button><input class="cu-numv" id="pdSmoothV" value="16"><button class="cu-step" id="pdSmoothU">+</button></span><input type="range" id="pdSmooth" min="0" max="40" step="1" value="16"></div>
               <div class="cu-sl2"><span>边缘羽化</span><span class="cu-nb"><button class="cu-step" id="pdFeatherD">−</button><input class="cu-numv" id="pdFeatherV" value="1"><button class="cu-step" id="pdFeatherU">+</button></span><input type="range" id="pdFeather" min="0" max="5" step="1" value="1"></div>
             </div>
           </div>
           <div class="cu-grp">
             <div class="cu-grp-t">识别方式</div>
             <div class="cu-row">
-              <select id="pdMode" class="cu-mini" style="width:100%">
-                <option value="outline">智能轮廓（推荐 · 实拍场景也能认）</option>
-                <option value="plain">纯色背景泛洪（老办法）</option>
+              <select id="pdMode" class="cu-mini" style="width:100%" title="智能轮廓：背景基准取画面四边采样出的多个颜色簇，实拍场景（白墙 + 地板 + 窗户）也认得出。纯色背景泛洪：只有背景确实纯色 / 浅渐变时才用。">
+                <option value="outline">智能轮廓（推荐）</option>
+                <option value="plain">纯色背景泛洪</option>
               </select>
             </div>
             <div class="cu-row" style="margin-top:6px">
               <button class="cu-mini" id="pdReset">重置参数</button>
-              <span class="cu-empty">调好点下面「开始批量」</span>
+            </div>
+          </div>
+          <div class="cu-grp">
+            <div class="cu-grp-t">输出 <span style="font-weight:400">（套用到整批）</span></div>
+            <div class="cu-row">
+              <select id="pdSize" class="cu-mini" style="width:100%" title="按长边缩放。原图长边已经小于所选值时保持原尺寸 —— 放大不增加任何信息，只会变糊。">
+                <option value="0">原像素 · 高清无损</option>
+                <option value="2048">长边 2048 px</option>
+                <option value="1024">长边 1024 px</option>
+              </select>
+            </div>
+            <div class="cu-row" style="margin-top:6px">
+              <span style="font-size:12px;color:var(--text-light)">背景</span>
+              <button class="cu-mini on" id="pdBgT" title="透明底 PNG，可直接叠到任何底色上">透明</button>
+              <button class="cu-mini" id="pdBgW" title="合成为纯白底，输出的 PNG 不带透明通道">白底</button>
             </div>
           </div>
         </div>
@@ -9307,17 +9457,22 @@ function buildToolProdCut() {
       <b>轮廓没贴准外框</b>时：先调「轮廓平滑」（0 = 保留原始锯齿；越大越干净，但会磨掉细碎特征）；
       还有偏差就点「✥ 手动调边」直接拖红框的四条边和四个角，或在下方的「裁剪边距」里用四向 ± / 输入框精确到 px ——
       <b>+ 是往里多切、− 是往外补回</b>（补回的那一圈按产品处理）——<b>只改这一张</b>，要统一点「套用到全部图片」。
-      输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；整条链路都在本地跑、图片不会上传。</div>`;
+      输出在右侧「输出」组里选：<b>透明底</b>或<b>白底</b>，尺寸可选 <b>原像素</b>／长边 2048／长边 1024
+      （<b>只缩不放</b>：原图比目标还小就保持原尺寸）——<b>PNG 无损，全程不做有损压缩</b>；
+      整条链路都在本地跑、图片不会上传。</div>`;
 
   const $ = (id) => box.querySelector('#' + id);
   const st = {
     files: [], meta: [], sel: 0, cur: null, busy: false, edge: false,
     // mode：outline = 智能轮廓（默认）；plain = 老的纯色背景泛洪。
     // 两种模式走的是同一段「掩码 → alpha」渲染，所以留白/手动边距的语义完全一致。
-    opt: { mode: 'outline', tol: 14, smooth: PD_SMOOTH, feather: 1, pad: 0 },
+    // size：输出长边（0 = 原像素不缩放）。bg：'transparent' = 透明底 PNG；'white' = 合成白底。
+    // ⚠️ 容差默认 10（不是 14）：用样张扫出来的甜点 —— 圆镜填充率 0.7850 几乎正好等于 π/4 = 0.7854。
+    //    14 时是 0.7762（镜框左下那段浅色外缘被泛洪吃掉），9 时是 0.7890（反过来多吃背景）。
+    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: 0, size: 0, bg: 'transparent' },
   };
   const NG0 = { t: 0, b: 0, l: 0, r: 0 };
-  const DEFAULTS = { mode: 'outline', tol: 14, smooth: PD_SMOOTH, feather: 1, pad: 0 };
+  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: 0, size: 0, bg: 'transparent' };
   const log = (s) => { const el = $('pdLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
   const setProg = (i, n) => { $('pdBar').style.width = (n ? Math.round(i / n * 100) : 0) + '%'; };
 
@@ -9364,7 +9519,7 @@ function buildToolProdCut() {
     return o.mode === 'plain' ? detectPlainMask(cv, o) : detectProductMask(cv, o);
   }
   function prodOptions(quick) {
-    const o = { mode: st.opt.mode, tol: st.opt.tol, smooth: st.opt.smooth, feather: st.opt.feather, pad: st.opt.pad };
+    const o = { mode: st.opt.mode, tol: st.opt.tol, smooth: st.opt.smooth, feather: st.opt.feather, pad: st.opt.pad, bg: st.opt.bg };
     if (quick) o.ds = PD_DS_QUICK;      // 拖滑块时的快速档（掩码分辨率低一档，改参数跟手）
     return o;
   }
@@ -9455,6 +9610,10 @@ function buildToolProdCut() {
     set('pdFeather', st.opt.feather); set('pdFeatherV', st.opt.feather);
     set('pdPad', st.opt.pad);
     set('pdMode', st.opt.mode);
+    set('pdSize', String(st.opt.size || 0));
+    const wt = st.opt.bg === 'white';
+    if ($('pdBgT')) $('pdBgT').classList.toggle('on', !wt);
+    if ($('pdBgW')) $('pdBgW').classList.toggle('on', wt);
   }
 
   // ===== 手动调边：整幅原图 + 可拖红框（与框条抠图同一套做法，只是画布是原图不摆正）=====
@@ -9597,7 +9756,12 @@ function buildToolProdCut() {
     }
     stage.appendChild(r.canvas);
     cur.out = r;
-    $('pdBoxInfo').textContent = '输出 ' + r.canvas.width + '×' + r.canvas.height + ' px（原像素）· 裁剪自 '
+    // 读数 = **最终导出尺寸**（不是裁剪尺寸）：选了「长边 2048 / 1024」或白底之后，
+    // 预览画布还是裁剪尺寸，用户必须能从这行读出真正会落盘的像素数。
+    // ⚠️ 验收脚本用 /(\d+)×(\d+) px/ 抓这一行比对落盘 PNG，所以「输出 W×H px」要留在最前面。
+    const fsz = outSizeOf(r.canvas.width, r.canvas.height, st.opt.size);
+    $('pdBoxInfo').textContent = '输出 ' + fsz.w + '×' + fsz.h + ' px（'
+      + (fsz.k === 1 ? '原像素' : '长边缩到 ' + fsz.t) + ' · ' + (st.opt.bg === 'white' ? '白底' : '透明底') + '）· 裁剪自 '
       + r.box.x0 + ',' + r.box.y0 + ' → ' + r.box.x1 + ',' + r.box.y1;
     $('pdRefInfo').textContent = cur.det && cur.det.plain
       ? '纯色背景泛洪 · 背景色 rgb(' + r.bg.map(Math.round).join(',') + ')'
@@ -9697,6 +9861,13 @@ function buildToolProdCut() {
   bindStep($('pdPadU'), $('pdPad'), () => st.opt.pad, putPad);
   $('pdPad').onchange = () => { const v = parseInt($('pdPad').value, 10); putPad(isNaN(v) ? 0 : v); };
   $('pdMode').onchange = () => { st.opt.mode = $('pdMode').value; schedule(false); };
+  // 输出尺寸 / 背景都是「整批」参数，不参与识别 → 改完只重渲染预览（不重跑检测，很快）。
+  // 背景改了预览也要跟着变：透明模式看棋盘底，白底模式直接看成品效果（白底更严格，
+  // 边缘残留的灰边只有白底上才看得出来）。
+  $('pdSize').onchange = () => { st.opt.size = parseInt($('pdSize').value, 10) || 0; syncOpt(); drawPreview(); };
+  const putBg = (v) => { st.opt.bg = v; syncOpt(); drawPreview(); };
+  $('pdBgT').onclick = () => putBg('transparent');
+  $('pdBgW').onclick = () => putBg('white');
   $('pdReset').onclick = () => {
     Object.assign(st.opt, DEFAULTS);
     st.meta.forEach(m => { if (m) delete m.nudge; });
@@ -9741,9 +9912,12 @@ function buildToolProdCut() {
       if (!det) throw new Error(o.mode === 'plain' ? '整张图都被判成背景（容差过大）' : '没找到产品主体（试试调小「容差」或「轮廓平滑」）');
       const r = cutProductOutline(cv, Object.assign({}, o, { det: det, nudge: nudgeOf(i), ds: 0 }));
       if (!r) throw new Error('裁剪区域为空（手动边距过大）');
-      const w = r.canvas.width, h = r.canvas.height;
-      const bytes = await canvasToPngBytes(r.canvas);
+      // 输出收尾：按「输出尺寸」缩长边（0 = 不缩）。只缩不放，白底已在 cutProductOutline 里合好。
+      const fin = scaleToLongSide(r.canvas, st.opt.size);
+      const w = fin.width, h = fin.height;
+      const bytes = await canvasToPngBytes(fin);
       const name = frameOutName('', fileBaseName(item.file), used);
+      if (fin !== r.canvas) { fin.width = 0; fin.height = 0; }
       r.canvas.width = 0; r.canvas.height = 0;
       return { name: name, data: bytes, w: w, h: h };
     } finally {
@@ -10386,7 +10560,8 @@ if (typeof globalThis !== 'undefined') {
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
     pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
-    PD_DS, PD_DS_QUICK,
+    pdOpen, pdClose, pdRowMorph, pdColMorph,
+    PD_DS, PD_DS_QUICK, outSizeOf, scaleToLongSide,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, tagSize, stampNow, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
     sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
