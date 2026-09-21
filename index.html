@@ -449,6 +449,7 @@
     padding: 14px 16px; box-shadow: var(--shadow);
   }
   .tool-panel h4 { margin: 0 0 10px; font-size: 13.5px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+  .tool-panel h4 .h4ico { width: 20px; height: 20px; display: block; flex: 0 0 auto; }
   .tool-panel .t-tip { font-size: 11.5px; color: var(--text-light); margin-top: 8px; }
   .tool-panel input, .tool-panel select, .tool-panel textarea, .tool-panel button {
     font-family: inherit; font-size: 13px; border: 1px solid #d4dae0; border-radius: 6px;
@@ -1126,6 +1127,20 @@
       <rect x="38.4" y="37.5" width="6.6" height="5" rx="1.5"/>
     </g>
     <rect x="19" y="45" width="26" height="4.6" rx="1.5" fill="#fff" opacity=".55"/>
+  </symbol>
+  <!-- ⓝ 框条抠图：真实样张缩略图（条带端头 + 蓝色选框角点 + 红箭头）
+       这张不是手绘矢量，而是用户样张的方形特写（源图 1696×818，裁 40,240→340,540，160×160 JPEG，内联 base64 ≈5.4KB）。
+       为了让它在 54px 里还看得清，特意**紧裁到条带端头**：整条全景按比例缩到 54px 时条带只有 ~4px 高，等于一根线。 -->
+  <symbol id="ic-framecut" viewBox="0 0 64 64">
+    <defs>
+      <clipPath id="fcIcoClip"><rect x="6" y="6" width="52" height="52" rx="12"/></clipPath>
+    </defs>
+    <rect x="6" y="8.6" width="52" height="52" rx="12" fill="#0d1b2a" opacity=".16"/>
+    <g clip-path="url(#fcIcoClip)">
+      <image href="data:image/jpeg;base64,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" x="6" y="6" width="52" height="52" preserveAspectRatio="xMidYMid slice"/>
+      <rect x="6" y="6" width="52" height="52" fill="url(#gHiSoft)" opacity=".42"/>
+    </g>
+    <rect x="6.9" y="6.9" width="50.2" height="50.2" rx="11.3" fill="none" stroke="#fff" stroke-width="1.7" opacity=".85"/>
   </symbol>
 </svg>
 
@@ -7727,7 +7742,7 @@ const sleep0 = () => new Promise(r => setTimeout(r, 0));
 // ================= 工具：框条抠图 =================
 function buildToolFrameCut() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>✂️ 框条抠图 <small style="color:var(--text-light);font-weight:400">（只传正面 → 自动去背景 → 原像素透明 PNG）</small></h4>
+  box.innerHTML = `<h4><svg class="h4ico" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#ic-framecut"/></svg>框条抠图 <small style="color:var(--text-light);font-weight:400">（只传正面 → 自动去背景 → 原像素透明 PNG）</small></h4>
     <div class="cu-drop" id="fcDrop">
       <label class="cc-upload"><span>📁 选择文件夹</span><input type="file" id="fcFolder" webkitdirectory directory multiple style="display:none"></label>
       <label class="cc-upload" style="margin-left:6px"><span>🖼️ 选择图片</span><input type="file" id="fcFiles" accept="image/*" multiple style="display:none"></label>
@@ -8819,6 +8834,7 @@ function buildToolProdCut() {
 
 // ================= 抠图区块（在「实用功能中心」上方，同级） =================
 const CUTS = [
+  // icon 只在 sprite 里没有对应 symbol 时兜底；框条抠图已有 ic-framecut（真实样张缩略图）所以走 SVG
   { id: 'framecut', name: '框条抠图', icon: '✂️', desc: '正面去背景 · 原像素 PNG', build: buildToolFrameCut },
   { id: 'prodcut', name: '产品抠图', icon: '🖼️', desc: '去背景 · 批量透明 PNG', build: buildToolProdCut },
 ];
