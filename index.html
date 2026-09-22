@@ -5418,7 +5418,11 @@ function textureBandMask(u8, L, aw, ah) {
   }
   return { y0: bs, y1: be, x0: c0, x1: c1 };
 }
-function bandMaskCol(L, S, aw, ah, o, band, hint) {
+// sOut（可选）：把「**只用饱和度通道**判出来的前景」单独带出去（同一套背景锚点、同一个 tS）。
+//   给 detectStripBox 的收窄步骤用（见 narrowByStrongS）：产品是有色的、背景是中性的时候，
+//   它比「亮度 ∪ 饱和度」这个并集干净得多 —— 亮度那一支在柔和的阴影上照样越阈值。
+//   不传就完全不影响原来的行为。
+function bandMaskCol(L, S, aw, ah, o, band, hint, sOut) {
   const u8 = new Uint8Array(aw * ah);
   const tl = [], ts = [];
   if (band && band.y1 - band.y0 >= 2) {
@@ -5447,17 +5451,19 @@ function bandMaskCol(L, S, aw, ah, o, band, hint) {
       const hh = Math.max(1, band.y1 - band.y0);
       for (let y = 0; y < ah; y++) {
         const fy = y <= band.y0 ? 0 : (y >= band.y1 ? 1 : (y - band.y0) / hh);
-        for (let x = 0; x < aw; x++) {
-          const p = y * aw + x;
-          const bgL = upL[x] + (dnL[x] - upL[x]) * fy;
-          const bgS = upS[x] + (dnS[x] - upS[x]) * fy;
-          if (Math.abs(L[p] - bgL) > o.tL || (S[p] - bgS) > o.tS) u8[p] = 255;
-        }
+      for (let x = 0; x < aw; x++) {
+        const p = y * aw + x;
+        const bgL = upL[x] + (dnL[x] - upL[x]) * fy;
+        const bgS = upS[x] + (dnS[x] - upS[x]) * fy;
+        const sOk = (S[p] - bgS) > o.tS;
+        if (Math.abs(L[p] - bgL) > o.tL || sOk) u8[p] = 255;
+        if (sOut && sOk) sOut[p] = 255;
       }
-      // ⚠️ 白底白产品不在这里补行 —— 补了会污染检测本身（见 textureBandMask 的注释），
-      //    改由 detectStripBox 里的「纹理带通道」独立处理。
-      return u8;
     }
+    // ⚠️ 白底白产品不在这里补行 —— 补了会污染检测本身（见 textureBandMask 的注释），
+    //    改由 detectStripBox 里的「纹理带通道」独立处理。
+    return u8;
+  }
   }
   const cb = Math.max(2, Math.round(ah * 0.12));
   const tlL = new Float32Array(aw), tbL = new Float32Array(aw);
@@ -5509,7 +5515,9 @@ function bandMaskCol(L, S, aw, ah, o, band, hint) {
       const p = y * aw + x;
       const bgL = tlL[x] + (tbL[x] - tlL[x]) * fy;
       const bgS = tlS[x] + (tbS[x] - tlS[x]) * fy;
-      if (Math.abs(L[p] - bgL) > o.tL || (S[p] - bgS) > o.tS) u8[p] = 255;
+      const sOk = (S[p] - bgS) > o.tS;
+      if (Math.abs(L[p] - bgL) > o.tL || sOk) u8[p] = 255;
+      if (sOut && sOk) sOut[p] = 255;
     }
   }
   // ⚠️ 同上：白底白产品交给 textureBandMask 这条独立通道，不在这里补行。
@@ -5955,6 +5963,110 @@ function bestBody(raw, mw, mh, o) {
 function trustBody(b) {
   return !!b && b.edge >= 1 && b.asp >= 2.5 && b.fill >= 0.35;
 }
+// —— 用「饱和度通道」把候选框再收一遍 ——
+// 【为什么 / 用户第八次报障：8202-ZA-772「这款没有识别到产品边缘，边缘相对清晰，为什么没识别」】
+//   那张图里，白盒正面（L≈0.83）与台面（0.74）之间横着一条**贯满全宽的柔和阴影带**（L 0.65~0.73）。
+//   逐列背景锚点插值出来的背景（≈0.80）被这条带超出 0.10~0.15 → 阴影整片成了「前景」，
+//   而产品（金条，L≈0.48~0.62）正好贴在这片伪前景的下沿。后果正是用户看到的两点：
+//     · 竖直：检测框上沿落在**阴影带正中间**（阈值跨越的位置，不是任何真实边缘）——
+//       真产品 y 2268..2944（高 677），框却是 y 1789..2991（高 1203），上面多包 479px 阴影；
+//       导出后产品上方挂着一大条灰，边界还是一条斜的锯齿 —— 这就是「边缘没识别到」。
+//     · 横向：行带被阴影撑到 148 行后，「列覆盖 ≥0.7」是按阴影定的口径，
+//       而产品两端那两截**台阶状的端头**覆盖率只有 0.15~0.45 → 左右各被切掉 ~180px。
+//   亮度通道救不了：产品暗面的 |ΔL| 低到 0.056，阴影最高到 0.133，两个区间是重叠的。
+//   **饱和度**却分得极干净：产品行 92% 的像素 dS>0.13，阴影行 0%（金条 S≈0.40，中性桌面/白盒 S≈0.01）。
+// 所以：单独按饱和度算一遍行带 + 列段，**只在它确实给出可信的一条长带时**才把框收过去。
+// ⚠️ 通篇是「不通过就原样返回」的守卫。白底白产品这条路什么也切不出来（S 两边都≈0），
+//    必须原样放行 —— 绝不能因为它把原来好用的亮度/纹理通道比下去。
+// ⚠️ 掩码要一起换：导出的 alpha 来自掩码，只换框不改掩码等于白做（阴影照旧被留下）。
+function narrowByStrongS(c, sU8, aw, ah, o) {
+  const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
+  if (!sU8 || bw < 8 || bh < 6) return c;
+  const minRow = Math.max(4, Math.round(bw * 0.05));
+  // 1) 候选框内逐行的饱和列数 → 取「含峰值的连通行段」
+  const cnt = new Int32Array(ah);
+  for (let y = c.y0; y <= c.y1; y++) {
+    let n = 0;
+    for (let x = c.x0; x <= c.x1; x++) if (sU8[y * aw + x]) n++;
+    cnt[y] = n;
+  }
+  let rs = -1, re = -1, st = -1, bestSum = 0;
+  for (let y = c.y0; y <= c.y1 + 1; y++) {
+    const on = y <= c.y1 && cnt[y] >= minRow;
+    if (on) { if (st < 0) st = y; }
+    else if (st >= 0) {
+      let sum = 0;
+      for (let k = st; k < y; k++) sum += cnt[k];
+      if (sum > bestSum) { bestSum = sum; rs = st; re = y - 1; }
+      st = -1;
+    }
+  }
+  if (rs < 0) return c;
+  const rh = re - rs + 1;
+  // 2) 守卫：这一带要够厚、要横贯、要**明显比原框紧**
+  if (rh < Math.max(4, Math.round(bh * 0.25))) return c;
+  if (rh > Math.round(bh * 0.92)) return c;
+  let mx = 0;
+  for (let y = rs; y <= re; y++) if (cnt[y] > mx) mx = cnt[y];
+  if (mx < Math.round(bw * 0.5)) return c;
+  if (bestSum < aw * ah * 0.0015) return c;
+  // 3) 带内逐列覆盖率 → 骨架列段（≥0.7）+ 迟滞扩边（把两端台阶状的端头收回来）
+  const colc = new Float32Array(aw);
+  for (let x = 0; x < aw; x++) {
+    let n = 0;
+    for (let y = rs; y <= re; y++) if (sU8[y * aw + x]) n++;
+    colc[x] = n / rh;
+  }
+  let cs = -1, ce = -1, cx = -1;
+  for (let x = 0; x <= aw; x++) {
+    const on = x < aw && colc[x] >= 0.7;
+    if (on) { if (cx < 0) cx = x; }
+    else if (cx >= 0) { if (x - cx > ce - cs) { cs = cx; ce = x - 1; } cx = -1; }
+  }
+  if (cs < 0) return c;
+  const coreW = ce - cs + 1;
+  if (coreW < Math.round(bw * 0.5)) return c;
+  // 迟滞下限取 0.12：端头覆盖率实测 0.15~0.45，带外背景列是 0.00~0.04，中间是空的，
+  // 阈值落在这段空档里的任何位置都稳（相对值只用来在覆盖率低的图上再压低一点）。
+  const lo = Math.min(0.5, Math.max(0.12, Math.max(colc[cs], colc[ce]) * 0.2));
+  const cap = Math.max(8, Math.round(coreW * 0.2));   // 单侧最多扩这么多，防止一路爬到远处的物体
+  let nx0 = cs, nx1 = ce;
+  while (nx0 > 0 && cs - nx0 < cap && colc[nx0 - 1] >= lo) nx0--;
+  while (nx1 < aw - 1 && nx1 - ce < cap && colc[nx1 + 1] >= lo) nx1++;
+  // 4) 守卫：收窄后的框要**大部分仍落在原框里** —— 否则不是「收紧」，是跳到别的物体上了
+  const ix0 = Math.max(nx0, c.x0), ix1 = Math.min(nx1, c.x1);
+  const iy0 = Math.max(rs, c.y0), iy1 = Math.min(re, c.y1);
+  const nw0 = nx1 - nx0 + 1, nh0 = re - rs + 1;
+  const inter = (ix1 >= ix0 && iy1 >= iy0) ? (ix1 - ix0 + 1) * (iy1 - iy0 + 1) : 0;
+  if (inter < nw0 * nh0 * 0.5) return c;
+  // 5) 落地：新掩码 = 「原掩码 ∪ 饱和掩码」限制在收窄后的框内。
+  //    ∪ 是必需的：端头只有饱和掩码有（连通域那一步把它当成覆盖不足的零碎丢了），
+  //    而产品内部有些低饱和的亮面只有原掩码有 —— 少哪一边都会在产品上留缺口。
+  const u8 = new Uint8Array(aw * ah);
+  for (let y = rs; y <= re; y++) {
+    const b = y * aw;
+    for (let x = nx0; x <= nx1; x++) if (c.u8[b + x] || sU8[b + x]) u8[b + x] = 255;
+  }
+  let n = 0, bx0 = aw, by0 = ah, bx1 = -1, by1 = -1;
+  for (let y = rs; y <= re; y++) {
+    const b = y * aw;
+    for (let x = nx0; x <= nx1; x++) if (u8[b + x]) {
+      n++;
+      if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+      if (y < by0) by0 = y; if (y > by1) by1 = y;
+    }
+  }
+  if (bx1 < 0) return c;
+  const nw = bx1 - bx0 + 1, nh = by1 - by0 + 1;
+  const asp = Math.max(nw, nh) / Math.max(1, Math.min(nw, nh));
+  if (asp < 2.5) return c;                            // 收完不像长条 → 不敢用
+  return {
+    x0: bx0, y0: by0, x1: bx1, y1: by1, u8: u8, angle: c.angle,
+    score: c.score, edge: c.edge, asp: asp,
+    longFrac: Math.max(nw / aw, nh / ah),
+    fill: n / (nw * nh), norm: (nw * nh) / (aw * ah),
+  };
+}
 // 检测主入口：按正常方向跑一遍「逐列」模型；竖着拍的照片把采样图转置后再跑同一套模型，
 // 两个方向的候选一起比（打分用的占比 / 实心度 / 长宽比都与方向无关，可比）。
 function detectStripBox(cv, opt) {
@@ -5968,18 +6080,25 @@ function detectStripBox(cv, opt) {
   // 两个方向各跑一遍，取更可信的那一个。抽成函数是为了能用**第二个背景假设**整体重跑。
   const scanBoth = (hint) => {
     // 掩码 = L/S 通道 ∪ 纹理带通道。白底白产品只有后一条能定位到（见 textureBandMask 的注释）
-    const raw0 = bandMaskCol(ls.L, ls.S, aw, ah, o, null, hint);
+    const sM0 = new Uint8Array(N);
+    const raw0 = bandMaskCol(ls.L, ls.S, aw, ah, o, null, hint, sM0);
     textureBandMask(raw0, ls.L, aw, ah);
-    const c0 = bestBody(raw0, aw, ah, o);
+    let c0 = bestBody(raw0, aw, ah, o);
     // 已经明显是一条长条时就不必再试竖向了（省一次连通域分析，批量时差近一倍时间）
+    // ⚠️ 用**收窄前**的 c0 判：收窄只可能在「产品确实有色」时发生，用它当「已经看准了」的
+    //    依据会把「有色 + 竖向」的照片错判成横向（省掉的那一次扫描正是它需要的）。
     const sure = c0 && c0.asp >= 3.5 && c0.longFrac >= 0.5;
-    let c1 = null;
+    let c1 = null, sM1 = null;
     if (!sure) {
       const LT = transposeArr(ls.L, aw, ah), ST = transposeArr(ls.S, aw, ah);
-      const rawT = bandMaskCol(LT, ST, ah, aw, o, null, hint);
+      sM1 = new Uint8Array(N);
+      const rawT = bandMaskCol(LT, ST, ah, aw, o, null, hint, sM1);
       textureBandMask(rawT, LT, ah, aw);
       c1 = bestBody(rawT, ah, aw, o);
     }
+    // 用饱和度通道各收一次（都是在各自的朝向上做，用的是同一次调用算出来的饱和掩码）
+    if (c0) c0 = narrowByStrongS(c0, sM0, aw, ah, o);
+    if (c1) c1 = narrowByStrongS(c1, sM1, ah, aw, o);
     const s1 = c1 ? c1.score * 0.97 : -1;    // 横着拍才是默认，分数接近时优先正常方向
     if (!c0 && !c1) return null;
     if (!c1 || c0.score >= s1) return { c: c0, u8: c0.u8, angle: c0.angle, x: c0.x0, y: c0.y0, X: c0.x1, Y: c0.y1 };
