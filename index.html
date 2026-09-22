@@ -6930,7 +6930,12 @@ function snapProfileAt(prof, lo, hi, outer, basePos, win, minG) {
   return NaN;
 }
 // 一维边沿曲线的稳健平滑：先中值去毛刺，再均值让台阶变斜线。NaN = 该处无效，不参与。
-function smoothEdgeCurve(v, mWin, aWin) {
+// `lim`：平滑结果相对原值的**最大偏移**（传 0/undefined = 不限）。
+// 【为什么需要它 / 用户第七次报】上一版没有限幅，于是「左边一列 26、右边 119」这种**真实阶跃**
+//   被均值窗拉成一条跨 6 列的假斜坡（每列跳 14px）—— 用户看到的「锯齿」正是它：
+//   不是掩码格子，而是**平滑把阶跃抹出来的斜边**。量化台阶只有一格（≈cell），
+//   所以把偏移限在 2×cell 之内：台阶照样被拉斜，真实阶跃原样保留。
+function smoothEdgeCurve(v, mWin, aWin, lim) {
   const n = v.length;
   const med = new Float64Array(n).fill(NaN), out = new Float64Array(n).fill(NaN);
   const buf = [];
@@ -6942,9 +6947,22 @@ function smoothEdgeCurve(v, mWin, aWin) {
   for (let i = 0; i < n; i++) {
     let s = 0, c = 0;
     for (let k = Math.max(0, i - aWin); k <= Math.min(n - 1, i + aWin); k++) if (!isNaN(med[k])) { s += med[k]; c++; }
-    if (c >= 2) out[i] = s / c;
+    if (c < 2) continue;
+    const avg = s / c;
+    out[i] = (lim > 0 && !isNaN(v[i]))
+      ? Math.max(v[i] - lim, Math.min(v[i] + lim, avg))
+      : avg;
   }
   return out;
+}
+// 环里「整段没有梯度」时的兜底 —— 只可能是两种：产品一路顶到框边，或者产品边就落在环的里端
+//（外放出来的这一圈全是背景）。用**亮度**分辨：框边内侧最外 3 个采样点的平均亮度
+// 若与「自动框内部（产品）参考亮度」接近，说明框边那里已经是产品 → 取 outerEnd（顶到框边）；
+// 否则说明环里整段是背景 → 取 innerEnd（= 自动框的那条边）。
+// ⚠️ 白框条 + 白背景时两者本来就分不开（第六轮 DSC08584 的已知残留），这里会判成「顶到框边」=
+//    **倾向保留**：宁可多留一圈，也不要错切产品。
+function ringNoEdgePick(edgeLum, prodLum, outerEnd, innerEnd) {
+  return Math.abs(edgeLum - prodLum) < 0.12 ? outerEnd : innerEnd;
 }
 // 上/下环：yTopEnd 之上是上环（不含 yTopEnd 行），yBotStart 之下是下环（含 yBotStart 行）
 function refineRingEdgeTB(a, lum, w, h, yTopEnd, yBotStart, cell) {
@@ -6954,14 +6972,40 @@ function refineRingEdgeTB(a, lum, w, h, yTopEnd, yBotStart, cell) {
     for (let x = 0; x < w; x++) {
       let t0 = -1;
       for (let y = 0; y < yTopEnd; y++) if (a[y * w + x]) { t0 = y; break; }
-      if (t0 <= 0) continue;                   // 无前景 / 已顶到框边：这一列没有待细化的边
-      const s = snapProfileAt((j) => lum[j * w + x], 0, h - 1, 1, t0, win, 0.05);
-      e[x] = isNaN(s) ? t0 : Math.max(0, Math.min(yTopEnd, s));
+      if (t0 < 0) continue;                    // 环里整列都没有前景：没有待细化的边
+      // ⚠️ 这里原本是 `t0 <= 0` 就 continue —— 后果是「掩码说产品从框边(第 0 行)开始」的整列
+      //    **一个像素都不细化**。而掩码超调时恰恰常常就是从第 0 行开始（它认为整圈都是产品）：
+      //    实测 _DSC5664 上外放 120px 时有 6768 列里的一大半 t0=0，全部绕过细化、把白背景留下
+      //    （成品不透明 82.4%、保留像素亮度中位 0.617 = 背景色）。改成只跳过「整列无前景」。
+      // 【用户第七次报】「右上角、左下角手动调节后出现锯齿缺陷」—— 窗口只看 t0±win 不够：
+      //   掩码可能**整段超调**。实测 _DSC5664（上外放 119px、摆正 -1.05°）：掩码说上沿在
+      //   t0=22，而该列 y=0..118 的亮度全是 0.64（均匀白桌面），真实产品上沿在 **119**，
+      //   也就是 yTopEnd —— 超调 97px。t0±15 窗口里梯度≈0 → 返回 NaN → 旧代码退回 t0，
+      //   于是掩码的粗网格留下来，再被平滑窗抹成一条每列跳 14px 的假斜坡（就是用户看到的锯齿）。
+      //   两级搜索：① 老窗口；② 整个环内从外往里再找一遍。
+      //   两级都拿不到梯度 = 环里全是均匀背景 = **产品边就在环的里端** →
+      //   直接用 yTopEnd（自动收边框的上边，收边链在原像素上算的，比掩码准得多），
+      //   而不是退回掩码值。这条先验很硬：用户外放的那一圈本来就贴在自动框外面。
+      let s = snapProfileAt((j) => lum[j * w + x], 0, yTopEnd, 1, t0, win, 0.05);
+      if (isNaN(s)) s = snapProfileAt((j) => lum[j * w + x], 0, yTopEnd, 1, yTopEnd, yTopEnd, 0.05);
+      if (isNaN(s)) {
+        // 环里整段没有边（要么全是产品，要么全是背景）→ 用亮度分辨（见 ringNoEdgePick）。
+        // ⚠️ 产品参考必须取**自动框深处**（高的 30%~50% 处）：自动框自己超调时，
+        //    它靠上那十几行也是背景，拿那里当参考会让判据整体失效（实测 DSC08584：
+        //    参考取 +3..+12 时采到背景 0.55，于是把 52% 的背景判成「产品顶到框边」留下；
+        //    取深处后参考是 0.115 的真产品色，立刻分辨出来）。
+        const a0 = yTopEnd + Math.round((h - yTopEnd) * 0.3), a1 = yTopEnd + Math.round((h - yTopEnd) * 0.5);
+        let lp = 0, c = 0;
+        for (let y = a0; y <= a1 && y < h; y += 3) { lp += lum[y * w + x]; c++; }
+        const l0 = (lum[x] + lum[w + x] + lum[2 * w + x]) / 3;
+        s = ringNoEdgePick(l0, c ? lp / c : l0, 0, yTopEnd);
+      }
+      e[x] = Math.max(0, Math.min(yTopEnd, s));
     }
-    const es = smoothEdgeCurve(e, 2, 3);
+    const es = smoothEdgeCurve(e, 2, 3, cell * 2);
     for (let x = 0; x < w; x++) {
       if (isNaN(es[x])) continue;
-      const y0 = Math.max(0, Math.min(yTopEnd - 1, Math.round(es[x])));
+      const y0 = Math.max(0, Math.min(yTopEnd, Math.round(es[x])));   // 允许 y0=yTopEnd → 环内全透明
       for (let y = 0; y < y0; y++) a[y * w + x] = 0;
       for (let y = y0; y < yTopEnd; y++) a[y * w + x] = 255;
     }
@@ -6971,14 +7015,24 @@ function refineRingEdgeTB(a, lum, w, h, yTopEnd, yBotStart, cell) {
     for (let x = 0; x < w; x++) {
       let b0 = -1;
       for (let y = h - 1; y >= yBotStart; y--) if (a[y * w + x]) { b0 = y; break; }
-      if (b0 < 0 || b0 >= h - 1) continue;
-      const s = snapProfileAt((j) => lum[j * w + x], 0, h - 1, -1, b0, win, 0.05);
-      e[x] = isNaN(s) ? b0 : Math.max(yBotStart, Math.min(h - 1, s));
+      if (b0 < 0) continue;                    // 同上面：只有「整列无前景」才跳过（顶到框边也要细化）
+      // 同上面那段：两级搜索，兜底用 yBotStart（自动框下边）而不是掩码值
+      let s = snapProfileAt((j) => lum[j * w + x], yBotStart, h - 1, -1, b0, win, 0.05);
+      if (isNaN(s)) s = snapProfileAt((j) => lum[j * w + x], yBotStart, h - 1, -1, yBotStart, h - yBotStart, 0.05);
+      if (isNaN(s)) {
+        // 产品参考取自动框高处（从下边往上 30%~50%），理由同上面 TB 上环那处
+        const a0 = Math.max(0, yBotStart - Math.round(yBotStart * 0.5)), a1 = yBotStart - Math.round(yBotStart * 0.3);
+        let lp = 0, c = 0;
+        for (let y = a0; y <= a1; y += 3) { lp += lum[y * w + x]; c++; }
+        const l0 = (lum[(h - 1) * w + x] + lum[(h - 2) * w + x] + lum[(h - 3) * w + x]) / 3;
+        s = ringNoEdgePick(l0, c ? lp / c : l0, h - 1, yBotStart);
+      }
+      e[x] = Math.max(yBotStart, Math.min(h - 1, s));
     }
-    const es = smoothEdgeCurve(e, 2, 3);
+    const es = smoothEdgeCurve(e, 2, 3, cell * 2);
     for (let x = 0; x < w; x++) {
       if (isNaN(es[x])) continue;
-      const y1 = Math.max(yBotStart, Math.min(h - 1, Math.round(es[x])));
+      const y1 = Math.max(yBotStart - 1, Math.min(h - 1, Math.round(es[x])));  // 允许 y1<yBotStart → 环内全透明
       for (let y = yBotStart; y <= y1; y++) a[y * w + x] = 255;
       for (let y = y1 + 1; y < h; y++) a[y * w + x] = 0;
     }
@@ -6992,14 +7046,23 @@ function refineRingEdgeLR(a, lum, w, h, xLeftEnd, xRightStart, cell) {
     for (let y = 0; y < h; y++) {
       let l0 = -1;
       for (let x = 0; x < xLeftEnd; x++) if (a[y * w + x]) { l0 = x; break; }
-      if (l0 <= 0) continue;
-      const s = snapProfileAt((j) => lum[y * w + j], 0, w - 1, 1, l0, win, 0.05);
-      e[y] = isNaN(s) ? l0 : Math.max(0, Math.min(xLeftEnd, s));
+      if (l0 < 0) continue;                    // 同 TB：只有「整行无前景」才跳过（顶到框边也要细化）
+      // 两级搜索 + 兜底用 xLeftEnd（自动框左边），理由同 TB —— 掩码在左/右环同样会整段超调
+      let s = snapProfileAt((j) => lum[y * w + j], 0, xLeftEnd, 1, l0, win, 0.05);
+      if (isNaN(s)) s = snapProfileAt((j) => lum[y * w + j], 0, xLeftEnd, 1, xLeftEnd, xLeftEnd, 0.05);
+      if (isNaN(s)) {
+        const a0 = xLeftEnd + Math.round((w - xLeftEnd) * 0.3), a1 = xLeftEnd + Math.round((w - xLeftEnd) * 0.5);
+        let lp = 0, c = 0;
+        for (let x = a0; x <= a1 && x < w; x += 3) { lp += lum[y * w + x]; c++; }
+        const lv = (lum[y * w] + lum[y * w + 1] + lum[y * w + 2]) / 3;
+        s = ringNoEdgePick(lv, c ? lp / c : lv, 0, xLeftEnd);
+      }
+      e[y] = Math.max(0, Math.min(xLeftEnd, s));
     }
-    const es = smoothEdgeCurve(e, 2, 3);
+    const es = smoothEdgeCurve(e, 2, 3, cell * 2);
     for (let y = 0; y < h; y++) {
       if (isNaN(es[y])) continue;
-      const x0 = Math.max(0, Math.min(xLeftEnd - 1, Math.round(es[y])));
+      const x0 = Math.max(0, Math.min(xLeftEnd, Math.round(es[y])));
       for (let x = 0; x < x0; x++) a[y * w + x] = 0;
       for (let x = x0; x < xLeftEnd; x++) a[y * w + x] = 255;
     }
@@ -7009,11 +7072,20 @@ function refineRingEdgeLR(a, lum, w, h, xLeftEnd, xRightStart, cell) {
     for (let y = 0; y < h; y++) {
       let r0 = -1;
       for (let x = w - 1; x >= xRightStart; x--) if (a[y * w + x]) { r0 = x; break; }
-      if (r0 < 0 || r0 >= w - 1) continue;
-      const s = snapProfileAt((j) => lum[y * w + j], 0, w - 1, -1, r0, win, 0.05);
-      e[y] = isNaN(s) ? r0 : Math.max(xRightStart, Math.min(w - 1, s));
+      if (r0 < 0) continue;                    // 同 TB：只有「整行无前景」才跳过
+      // 两级搜索 + 兜底用 xRightStart（自动框右边）
+      let s = snapProfileAt((j) => lum[y * w + j], xRightStart, w - 1, -1, r0, win, 0.05);
+      if (isNaN(s)) s = snapProfileAt((j) => lum[y * w + j], xRightStart, w - 1, -1, xRightStart, w - xRightStart, 0.05);
+      if (isNaN(s)) {
+        const a0 = Math.max(0, xRightStart - Math.round(xRightStart * 0.5)), a1 = xRightStart - Math.round(xRightStart * 0.3);
+        let lp = 0, c = 0;
+        for (let x = a0; x <= a1; x += 3) { lp += lum[y * w + x]; c++; }
+        const rv = (lum[y * w + w - 1] + lum[y * w + w - 2] + lum[y * w + w - 3]) / 3;
+        s = ringNoEdgePick(rv, c ? lp / c : rv, w - 1, xRightStart);
+      }
+      e[y] = Math.max(xRightStart, Math.min(w - 1, s));
     }
-    const es = smoothEdgeCurve(e, 2, 3);
+    const es = smoothEdgeCurve(e, 2, 3, cell * 2);
     for (let y = 0; y < h; y++) {
       if (isNaN(es[y])) continue;
       const x1 = Math.max(xRightStart, Math.min(w - 1, Math.round(es[y])));
