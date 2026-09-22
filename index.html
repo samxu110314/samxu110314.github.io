@@ -6895,6 +6895,134 @@ function featherAlpha(a, w, h, r) {
   return out;
 }
 
+// —— 手动外放环的边界细化（治「锯齿状残缺」）——
+// 【用户报障 2026-09-22 第六次】「现在可以保存了，但是会出现这种锯齿状残缺」。
+// 环里的 alpha 取自「掩码逐像素判定」，而掩码是**分析尺度的粗网格**：
+//   _DSC5671 实测 900×147 覆盖 6989×1138 的检测框 → 一格 ≈ 7.7×7.7 原像素。
+// 产品那条斜的/弯的边于是被量化成等宽台阶（实测台阶高正好 8px = 一格），
+// 放大看就是锯齿。实测上沿剖面：x=0..1200 是 86/94，x=6200.. 是 86/102 ——
+//   条带在照片里是**弓形**（中间比两端高约 90px，广角/镜头畸变），台阶就出现在这些跳变处。
+// 收边链里那两个几何步骤都救不了这种形状，因为它们都是**直线**判据：
+//   snapAlphaBand 的残差门（`mad > tol` 就 return a）会把弓形边整个挡掉；
+//   straightenBand 的「长段偏差一律保留」同样放过它（它只治短的缺口/高光斑）。
+// 这里的做法：在掩码给的那条边附近 ±win 内，沿**从外往里**的方向找最外面的强亮度梯度
+//（产品物理边缘就是一个亮度台阶），取亚像素位置（抛物线插值）→ 得到一条跟着真实边走的曲线，
+// 再沿边做中值 + 均值平滑（去掉单列毛刺），最后按曲线重铺环里那一条带。
+// 拿不到梯度（白底白、边太软）的位置退回掩码值 —— 不会比现在更差。
+// ⚠️ 涂抹范围严格夹在环内，绝不碰自动框内部。
+// ⚠️ 顺序：必须在 fillAlphaRuns/fillAlphaCols **之前** —— 重铺可能带出 1~2px 的小缝，交给它们补。
+function snapProfileAt(prof, lo, hi, outer, basePos, win, minG) {
+  const j0 = Math.max(lo + 1, basePos - win), j1 = Math.min(hi - 1, basePos + win);
+  if (j1 - j0 < 3) return NaN;
+  const g = (j) => (j > lo && j < hi) ? Math.abs(prof(j + 1) - prof(j - 1)) : 0;
+  let mx = 0;
+  for (let j = j0; j <= j1; j++) { const v = g(j); if (v > mx) mx = v; }
+  if (mx < minG) return NaN;                 // 这一段没有可用的边（软过渡/白底白）
+  const lim = mx * 0.6;
+  for (let k = 0; k <= j1 - j0; k++) {
+    const j = outer > 0 ? j0 + k : j1 - k;   // 从「外面」那一端往产品里扫，第一个强梯度就是物理边缘
+    if (g(j) >= lim) {
+      const ga = g(j - 1), gb = g(j + 1), den = ga - 2 * g(j) + gb;
+      const off = Math.abs(den) > 1e-9 ? Math.max(-1, Math.min(1, 0.5 * (ga - gb) / den)) : 0;
+      return j + off;                        // 亚像素
+    }
+  }
+  return NaN;
+}
+// 一维边沿曲线的稳健平滑：先中值去毛刺，再均值让台阶变斜线。NaN = 该处无效，不参与。
+function smoothEdgeCurve(v, mWin, aWin) {
+  const n = v.length;
+  const med = new Float64Array(n).fill(NaN), out = new Float64Array(n).fill(NaN);
+  const buf = [];
+  for (let i = 0; i < n; i++) {
+    buf.length = 0;
+    for (let k = Math.max(0, i - mWin); k <= Math.min(n - 1, i + mWin); k++) if (!isNaN(v[k])) buf.push(v[k]);
+    if (buf.length >= 3) { buf.sort((p, q) => p - q); med[i] = buf[buf.length >> 1]; }
+  }
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let k = Math.max(0, i - aWin); k <= Math.min(n - 1, i + aWin); k++) if (!isNaN(med[k])) { s += med[k]; c++; }
+    if (c >= 2) out[i] = s / c;
+  }
+  return out;
+}
+// 上/下环：yTopEnd 之上是上环（不含 yTopEnd 行），yBotStart 之下是下环（含 yBotStart 行）
+function refineRingEdgeTB(a, lum, w, h, yTopEnd, yBotStart, cell) {
+  const win = Math.max(6, Math.round(cell * 2));
+  if (yTopEnd > 1) {
+    const e = new Float64Array(w).fill(NaN);
+    for (let x = 0; x < w; x++) {
+      let t0 = -1;
+      for (let y = 0; y < yTopEnd; y++) if (a[y * w + x]) { t0 = y; break; }
+      if (t0 <= 0) continue;                   // 无前景 / 已顶到框边：这一列没有待细化的边
+      const s = snapProfileAt((j) => lum[j * w + x], 0, h - 1, 1, t0, win, 0.05);
+      e[x] = isNaN(s) ? t0 : Math.max(0, Math.min(yTopEnd, s));
+    }
+    const es = smoothEdgeCurve(e, 2, 3);
+    for (let x = 0; x < w; x++) {
+      if (isNaN(es[x])) continue;
+      const y0 = Math.max(0, Math.min(yTopEnd - 1, Math.round(es[x])));
+      for (let y = 0; y < y0; y++) a[y * w + x] = 0;
+      for (let y = y0; y < yTopEnd; y++) a[y * w + x] = 255;
+    }
+  }
+  if (yBotStart < h - 1) {
+    const e = new Float64Array(w).fill(NaN);
+    for (let x = 0; x < w; x++) {
+      let b0 = -1;
+      for (let y = h - 1; y >= yBotStart; y--) if (a[y * w + x]) { b0 = y; break; }
+      if (b0 < 0 || b0 >= h - 1) continue;
+      const s = snapProfileAt((j) => lum[j * w + x], 0, h - 1, -1, b0, win, 0.05);
+      e[x] = isNaN(s) ? b0 : Math.max(yBotStart, Math.min(h - 1, s));
+    }
+    const es = smoothEdgeCurve(e, 2, 3);
+    for (let x = 0; x < w; x++) {
+      if (isNaN(es[x])) continue;
+      const y1 = Math.max(yBotStart, Math.min(h - 1, Math.round(es[x])));
+      for (let y = yBotStart; y <= y1; y++) a[y * w + x] = 255;
+      for (let y = y1 + 1; y < h; y++) a[y * w + x] = 0;
+    }
+  }
+}
+// 左/右环：同 TB，只是换成逐行扫列
+function refineRingEdgeLR(a, lum, w, h, xLeftEnd, xRightStart, cell) {
+  const win = Math.max(6, Math.round(cell * 2));
+  if (xLeftEnd > 1) {
+    const e = new Float64Array(h).fill(NaN);
+    for (let y = 0; y < h; y++) {
+      let l0 = -1;
+      for (let x = 0; x < xLeftEnd; x++) if (a[y * w + x]) { l0 = x; break; }
+      if (l0 <= 0) continue;
+      const s = snapProfileAt((j) => lum[y * w + j], 0, w - 1, 1, l0, win, 0.05);
+      e[y] = isNaN(s) ? l0 : Math.max(0, Math.min(xLeftEnd, s));
+    }
+    const es = smoothEdgeCurve(e, 2, 3);
+    for (let y = 0; y < h; y++) {
+      if (isNaN(es[y])) continue;
+      const x0 = Math.max(0, Math.min(xLeftEnd - 1, Math.round(es[y])));
+      for (let x = 0; x < x0; x++) a[y * w + x] = 0;
+      for (let x = x0; x < xLeftEnd; x++) a[y * w + x] = 255;
+    }
+  }
+  if (xRightStart < w - 1) {
+    const e = new Float64Array(h).fill(NaN);
+    for (let y = 0; y < h; y++) {
+      let r0 = -1;
+      for (let x = w - 1; x >= xRightStart; x--) if (a[y * w + x]) { r0 = x; break; }
+      if (r0 < 0 || r0 >= w - 1) continue;
+      const s = snapProfileAt((j) => lum[y * w + j], 0, w - 1, -1, r0, win, 0.05);
+      e[y] = isNaN(s) ? r0 : Math.max(xRightStart, Math.min(w - 1, s));
+    }
+    const es = smoothEdgeCurve(e, 2, 3);
+    for (let y = 0; y < h; y++) {
+      if (isNaN(es[y])) continue;
+      const x1 = Math.max(xRightStart, Math.min(w - 1, Math.round(es[y])));
+      for (let x = xRightStart; x <= x1; x++) a[y * w + x] = 255;
+      for (let x = x1 + 1; x < w; x++) a[y * w + x] = 0;
+    }
+  }
+}
+
 // —— 背面文字定位 + 型号识别（tesseract.js，按需从 CDN 加载） ——
 function findTextBlocks(backCv, box) {
   const bw = box.x1 - box.x0 + 1, bh = box.y1 - box.y0 + 1;
@@ -7517,6 +7645,17 @@ function renderCut(frontCv, box, o) {
           if (outY || cx < rb.x0 || cx > rb.x1) a[y * w + x] = rawA[y * w + x];
         }
       }
+      // 掩码是粗网格，直接拿它逐像素判定 → 斜边/弯边会被量化成一排等宽台阶
+      //（实测台阶高正好等于一格 7.7px，用户看到的就是「锯齿状残缺」）。
+      // 所以按亮度梯度把环里那四条边细化到亚像素并沿边平滑一遍 —— 详见上面 refineRingEdge* 的注释。
+      const ms = box.mask;
+      const cell = ms ? Math.max(2, Math.max(ms.fullW / ms.aw, ms.fullH / ms.ah)) : 8;
+      refineRingEdgeLR(a, lum, w, h,
+        Math.max(0, Math.min(w, rb.x0 - box.x0)),
+        Math.max(0, Math.min(w, rb.x1 - box.x0 + 1)), cell);
+      refineRingEdgeTB(a, lum, w, h,
+        Math.max(0, Math.min(h, rb.y0 - box.y0)),
+        Math.max(0, Math.min(h, rb.y1 - box.y0 + 1)), cell);
       // 环里掩码的碎洞按同一套规则补一下（横向间隙 / 纵向间隙），再柔化一圈边，
       // 否则环里会撒着 0/255 的麻点（掩码在阴影区本来就是斑驳的）。
       fillAlphaRuns(a, w, h);
