@@ -3356,13 +3356,21 @@ function ctScene(rects, colors, counts) {
   let cut = false;
   for (let bi = 0; bi < rects.length; bi++) {
     const r = rects[bi], c = colors[r.i];
-    let left = meta[bi].u;
+    // ⚠️ 出面判据必须看「这一格实际画没画」，不能看理论格数（nx/ny/nz）。
+    //    nz 是**整柜装得下的层数**；不满一柜 / 限重截断时，填充序（kc→jb→ia，由下往上）只走到中间某层，
+    //    老的 `kc === r.nz - 1` 永远不成立 → **顶面一个都不生成**，堆垛变成没盖的空壳，
+    //    侧墙孤零零立着，看上去就是「一片薄片」，单产品尤其明显（混装按层分块，nz 恰好等于实画层数）。
+    //    填充序里「第 idx 箱存在」= idx < fill，六向统一用它。
+    const fill = meta[bi].u;
+    const perLayer = Math.max(1, r.nx * r.ny);
+    const has = (kk, jj, ii) => kk >= 0 && kk < r.nz && jj >= 0 && jj < r.ny && ii >= 0 && ii < r.nx
+      && (kk * perLayer + jj * r.nx + ii) < fill;
+    let left = fill;
     for (let kc = 0; kc < r.nz && left > 0 && !cut; kc++) {
       for (let jb = 0; jb < r.ny && left > 0 && !cut; jb++) {
         for (let ia = 0; ia < r.nx && left > 0 && !cut; ia++, left--) {
           const x0 = r.x + ia * r.dx, y0 = r.y + jb * r.dy, z0 = r.z + kc * r.dz;
           const x1 = x0 + r.dx, y1 = y0 + r.dy, z1 = z0 + r.dz;
-          const ix = ia > 0 && ia < r.nx - 1, iy = jb > 0 && jb < r.ny - 1, iz = kc > 0 && kc < r.nz - 1;
           const b = { x0, x1, y0, y1, z0, z1 };
           const put = (dir, q, col) => {
             if (faces.length >= CT_MAX_FACES) { cut = true; return; }
@@ -3370,12 +3378,12 @@ function ctScene(rects, colors, counts) {
             q[12] = col;
             faces.push(q);
           };
-          if (!iz && kc === r.nz - 1) put(4, [x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1], c.pz);
-          if (!iz && kc === 0) put(5, [x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0], c.nz);
-          if (!iy && jb === r.ny - 1) put(2, [x1, y1, z0, x0, y1, z0, x0, y1, z1, x1, y1, z1], c.py);
-          if (!iy && jb === 0) put(3, [x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1], c.ny);
-          if (!ix && ia === r.nx - 1) put(0, [x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1], c.px);
-          if (!ix && ia === 0) put(1, [x0, y1, z0, x0, y0, z0, x0, y0, z1, x0, y1, z1], c.nx);
+          if (!has(kc + 1, jb, ia)) put(4, [x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1], c.pz);
+          if (!has(kc - 1, jb, ia)) put(5, [x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0], c.nz);
+          if (!has(kc, jb + 1, ia)) put(2, [x1, y1, z0, x0, y1, z0, x0, y1, z1, x1, y1, z1], c.py);
+          if (!has(kc, jb - 1, ia)) put(3, [x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1], c.ny);
+          if (!has(kc, jb, ia + 1)) put(0, [x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1], c.px);
+          if (!has(kc, jb, ia - 1)) put(1, [x0, y1, z0, x0, y0, z0, x0, y0, z1, x0, y1, z1], c.nx);
         }
       }
     }
@@ -3507,9 +3515,28 @@ function ctDrawInner(cvs, st, scene) {
     list.push([(p0[2] + p1[2] + p2[2] + p3[2]) / 4, p0, p1, p2, p3, f[12], (wpx > 5 * dpr && hpx > 5 * dpr)]);
   }
   list.sort((a, b) => b[0] - a[0]);
-  const lw = Math.max(0.5, 0.55 * dpr);
+  const lw = Math.max(0.5, 0.6 * dpr);
   ctx.lineJoin = 'round';
-  for (const it of list) poly([it[1], it[2], it[3], it[4]], it[5], it[6] ? 'rgba(20,40,60,.16)' : null, lw);
+  // ⚠️ 密堆时一眼看过去是「一面带格子的墙」（用户报的「有点像薄片」）。除了补齐顶面，
+  //    再给每个可见面加一条上亮棱 + 下暗棱：单箱在屏幕上有 10px 高就足以读出「一格一箱」。
+  //    只对够大的面做（小面加棱纯属花屏 + 白拖一半帧），也不改颜色，不影响「不同产品不同色」。
+  const hlw = Math.max(1, 0.85 * dpr);
+  for (const it of list) {
+    poly([it[1], it[2], it[3], it[4]], it[5], it[6] ? 'rgba(20,40,60,.26)' : null, lw);
+    if (!it[6]) continue;
+    const pts = [[it[1][0], it[1][1]], [it[2][0], it[2][1]], [it[3][0], it[3][1]], [it[4][0], it[4][1]]];
+    const ord = [0, 1, 2, 3].sort((a, b) => pts[a][1] - pts[b][1]);
+    const hi = pts[ord[0]], hi2 = pts[ord[1]];
+    const lo = pts[ord[2]], lo2 = pts[ord[3]];
+    if (Math.abs(hi2[0] - hi[0]) > 2 * dpr) {
+      ctx.beginPath(); ctx.moveTo(hi[0], hi[1]); ctx.lineTo(hi2[0], hi2[1]);
+      ctx.strokeStyle = 'rgba(255,255,255,.30)'; ctx.lineWidth = hlw; ctx.stroke();
+    }
+    if (Math.abs(lo2[0] - lo[0]) > 2 * dpr) {
+      ctx.beginPath(); ctx.moveTo(lo[0], lo[1]); ctx.lineTo(lo2[0], lo2[1]);
+      ctx.strokeStyle = 'rgba(15,25,40,.18)'; ctx.lineWidth = hlw; ctx.stroke();
+    }
+  }
   // 柜体 12 条棱（罩在箱堆外面，玻璃笼的感觉）
   // 顶点编号 idx = (i*2 + j)*2 + k（i→柜长 x，j→柜宽 y，k→柜高 z）
   const c8 = [];
@@ -3806,6 +3833,14 @@ function buildToolContainer() {
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('resize', onResize);
     ctState.cleanup.push(() => { try { window.removeEventListener('resize', onResize); } catch (_) { } });
+  }
+  // ⚠️ `fitCanvas()` 里 `wrap.clientWidth || 420`：面板刚建好时还没布局，clientWidth = 0
+  //    → 画布被钉死在兜底的 420×250（糊成一团），除非用户手动改窗口大小才重算。
+  //    用 ResizeObserver 盯着外层，尺寸一到就重新量 + 重画（顺带处理 880px 断点变单列）。
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => { fitCanvas(); draw(); });
+    ro.observe(wrap);
+    ctState.cleanup.push(() => { try { ro.disconnect(); } catch (_) { } });
   }
   renderRows();
   renderModes();
