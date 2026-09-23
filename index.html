@@ -6813,12 +6813,14 @@ function snapAlphaBand(a, lum, w, h) {
   if (!lum || w < 16 || h < 8) return a;
   const top = new Int32Array(w).fill(-1), bot = new Int32Array(w).fill(-1);
   let vx0 = -1, vx1 = -1, cnt = 0;
+  const tv = [], bv = [];
   for (let x = 0; x < w; x++) {
     for (let y = 0; y < h; y++) if (a[y * w + x]) { top[x] = y; break; }
     for (let y = h - 1; y >= 0; y--) if (a[y * w + x]) { bot[x] = y; break; }
-    if (top[x] >= 0) { cnt++; if (vx0 < 0) vx0 = x; vx1 = x; }
+    if (top[x] >= 0) { cnt++; if (vx0 < 0) vx0 = x; vx1 = x; tv.push(top[x]); bv.push(bot[x]); }
   }
   if (cnt < w * 0.25 || vx1 <= vx0) return a;
+  const medTop0 = medianArr(tv), medBot0 = medianArr(bv);   // 收紧前的上下沿（给位移守卫用）
   const ths = [];
   for (let x = vx0; x <= vx1; x++) if (top[x] >= 0) ths.push(bot[x] - top[x] + 1);
   const T = medianArr(ths);
@@ -6854,9 +6856,34 @@ function snapAlphaBand(a, lum, w, h) {
   const mid = (vx0 + vx1) / 2;
   const th2 = (a2 - a1) + (s2 - s1) * mid;
   if (!(th2 > T * 0.4) || !(th2 < T * 2.0)) return a;    // 收得过头或反而变厚 → 不敢动
+  // ⚠️ 位移守卫：**本函数只该「微调」上下沿，不该把边整段挪进产品里**。
+  //    【用户第十一次报：6217-051GT 暗木+金线】「这个产品边缘很明显，并不是金色边是边缘，
+  //     金色边也属于产品的一部分，是要识别产品和背景才能完全提取产品部分」
+  //    根因不是「没找到边」，而是**判据选错了物理量**：本函数找「窗口内最大的瞬时梯度」，
+  //    而产品内部那条金色装饰线是 1~2px 的硬边（实测梯度 0.230），产品与背景的交界却因景深
+  //    是 2~3px 的过渡（实测 0.104）—— 斜率天生奖励更陡的内部装饰线。
+  //    阈值「0.6 × 窗口内最大梯度」被金线抬到 0.27，真实上沿 0.104 被判成「不够强」而整条跳过，
+  //    上沿从 45 一跳到 296，条带上半段那截深色木纹整块丢掉，只剩「金线 → 下沿」。
+  //    要根治得换判据（见「边外是不是背景」），但那会把**产品下方的接触阴影**误判成产品内部
+  //    （实测 _DSC5671 下沿：外面是 0.215 的阴影、原边外 0.646 的背景，差 0.431，
+  //     比 6217 的 0.537 只小一点，分不开），所以这里先用位移量卡住：
+  //    本函数的本职只是收掉紧贴产品的接触阴影，那种位移实测只占带厚的 1%~13%
+  //    （19 张里最大 DSC08578 上沿 36/293、_DSC5667 下沿 122/1128），
+  //    而「跳到内部装饰线」是 251/658 = 38%。取 25% 为界，两边都有三倍余量。
+  //    超限的那条边**整条不采用**，退回 tightenBand 给出的逐列沿（掩码判的，通常更准），
+  //    另一条边照常 —— 上下沿各判各的，不因一边超限就整块放弃。
+  const ntV = [], nbV = [];
+  for (let x = vx0; x <= vx1; x++) if (top[x] >= 0) { ntV.push(a1 + s1 * x); nbV.push(a2 + s2 * x); }
+  if (!ntV.length) return a;
+  const mvLim = T * 0.25;
+  const okTop = Math.abs(medianArr(ntV) - medTop0) <= mvLim;
+  const okBot = Math.abs(medianArr(nbV) - medBot0) <= mvLim;
+  if (!okTop && !okBot) return a;
   const out = new Uint8Array(w * h);
   for (let x = vx0; x <= vx1; x++) {
-    let t0 = Math.round(a1 + s1 * x), t1 = Math.round(a2 + s2 * x);
+    if (top[x] < 0 && !okTop) continue;
+    let t0 = okTop ? Math.round(a1 + s1 * x) : top[x];
+    let t1 = okBot ? Math.round(a2 + s2 * x) : bot[x];
     if (t0 < 0) t0 = 0;
     if (t1 > h - 1) t1 = h - 1;
     if (!(t1 >= t0)) continue;
@@ -11688,7 +11715,7 @@ if (typeof globalThis !== 'undefined') {
     renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut,
     detectStripBox, detectStripBoxRobust, detectByMaskBBox, prepareFrame, deskewCut,
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
-    bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg,
+    bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg, narrowByStrongS,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
     fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
