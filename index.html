@@ -502,6 +502,10 @@
   .ct-seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 12px; background: #fff; color: var(--text-light); }
   .ct-seg button + button { border-left: 1px solid #e3eaf0; }
   .ct-seg button.on { background: var(--c-sales, #3498db); color: #fff; font-weight: 600; }
+  .ct-modes { flex-wrap: wrap; margin-top: 8px; }
+  .ct-modes button { padding: 5px 12px; }
+  .ct-mdesc { margin-top: 6px; font-size: 11.5px; color: #8a99a5; line-height: 1.7; }
+  .ct-mdesc b { color: var(--text); font-weight: 600; }
   .ct-idx { font-size: 11.5px; color: var(--text-light); font-variant-numeric: tabular-nums; }
   .ct-mini { padding: 3px 8px; font-size: 11.5px; border-radius: 7px; }
   .ct-mini.on { background: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); color: #fff; }
@@ -3074,10 +3078,20 @@ const CT_MAX_SIM = 60;      // 最多数到多少柜（只前 CT_KEEP 柜留布�
 const CT_KEEP = 24;
 const CT_MAX_FACES = 11000; // 单帧面数上限（超出即截断，避免超大数量卡死）
 const CT_FACE_K = { pz: 1.26, nz: 0.5, px: 0.95, nx: 0.87, py: 0.70, ny: 0.79 };
+// 可选的堆叠方式。upright 与前三者的关系是「方向约束」，所以它是独立的一档而不是开关：
+// 真要既 Layer 又 upright 时再正交拆成两个控件，现在四个够用了。
+// ⚠️ tbl 是结果表「堆叠方式」列的文案，auto 必须保持原样「分层混装」（回归断言里有)。
+const CT_MODES = [
+  { id: 'auto', label: '自动混装', tbl: '分层混装', desc: '逐层铺排 · 同层分区，自动取装得最多的摆放方向，空间利用率最高' },
+  { id: 'layer', label: '每层同款', tbl: '每层同款', desc: '一层只放一种产品，不同层可换款 —— 现场点数、码垛最简单' },
+  { id: 'zone', label: '分区堆放', tbl: '分区堆放', desc: '沿柜长分段，每款独占一段 —— 目的港分拣方便，但段与段之间空隙略多' },
+  { id: 'upright', label: '只许正放', tbl: '正放（不许侧倒）', desc: '全部「长 × 宽」落地、高朝上，不许侧倒或竖放 —— 有方向标记 / 怕压的产品用' },
+];
+function ctMode(id) { return CT_MODES.find(m => m.id === id) || CT_MODES[0]; }
 
 const ctState = {
   products: [{ L: 40, W: 30, H: 20, qty: 1000, kg: 0, color: CT_COLORS[0] }],
-  viewCont: '40HQ', viewIdx: 0,
+  mode: 'auto', viewCont: '40HQ', viewIdx: 0,
   yaw: -0.46, pitch: 0.30, zoom: 1, auto: false,
   raf: 0, autoRaf: 0, cleanup: [],
 };
@@ -3090,8 +3104,10 @@ function ctDispose() {
   ctState.cleanup = [];
 }
 
-function ctOris(l, w, h) {
-  return [[l, w, h], [l, h, w], [w, l, h], [w, h, l], [h, l, w], [h, w, l]];
+// 六个摆放方向；up = 只许正放（底面必须是 长×宽，高朝上）—— 即只能 [l,w,h] / [w,l,h]
+function ctOris(l, w, h, up) {
+  return up ? [[l, w, h], [w, l, h]]
+    : [[l, w, h], [l, h, w], [w, l, h], [w, h, l], [h, l, w], [h, w, l]];
 }
 function ctFan(hex) {
   const out = {};
@@ -3104,9 +3120,10 @@ function ctShade(hex, k) {
   return 'rgb(' + f(c.r) + ',' + f(c.g) + ',' + f(c.b) + ')';
 }
 // 单产品最优摆放方向（与 containerEstimate 同一判据：perLayer × layers 最大）
-function ctBestOri(cont, pr) {
+// ⚠️ up=true 时只允许「长 × 宽」落地、高朝上两种（正放 / 转 90°），不许侧倒、不许竖起来。
+function ctBestOri(cont, pr, up) {
   let best = null;
-  for (const o of ctOris(pr.L, pr.W, pr.H)) {
+  for (const o of ctOris(pr.L, pr.W, pr.H, up)) {
     const perLayer = Math.floor(cont.L / o[0]) * Math.floor(cont.W / o[1]);
     const layers = Math.floor(cont.H / o[2]);
     const per = perLayer * layers;
@@ -3115,8 +3132,8 @@ function ctBestOri(cont, pr) {
   return best;
 }
 // 单产品：一块完整栅格（cap 用于「不满一柜」时只画前 cap 箱）
-function ctPlanSingle(cont, pr, idx, nProd) {
-  const best = ctBestOri(cont, pr);
+function ctPlanSingle(cont, pr, idx, nProd, up) {
+  const best = ctBestOri(cont, pr, up);
   const counts = new Array(nProd).fill(0);
   if (!best) return { rects: [], counts, total: 0, perLayer: 0, layers: 0 };
   const [dx, dy, dz] = best.o;
@@ -3124,20 +3141,25 @@ function ctPlanSingle(cont, pr, idx, nProd) {
   counts[idx] = nx * ny * nz;
   return { rects: [{ i: idx, x: 0, y: 0, z: 0, dx, dy, dz, nx, ny, nz }], counts, total: counts[idx], perLayer: best.perLayer, layers: nz };
 }
-function ctRectFits(fr, prods, counts, avail, dz) {
+function ctRectFits(fr, prods, counts, avail, dz, up, onlyI) {
   for (let i = 0; i < prods.length; i++) {
     if (counts[i] >= avail[i]) continue;
-    for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H)) if (o[2] === dz && o[0] <= fr.L && o[1] <= fr.W) return true;
+    if (onlyI >= 0 && i !== onlyI) continue;
+    for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H, up)) if (o[2] === dz && o[0] <= fr.L && o[1] <= fr.W) return true;
   }
   return false;
 }
 // 混装：逐层铺排。prods = [{L,W,H}]，avail = 各产品剩余需求
-function ctPlanMixed(cont, prods, avail) {
+// ⚠️ opt.mode 见 CT_MODES。zone 走独立实现（ctPlanZones），其余三条共用下面的主循环。
+function ctPlanMixed(cont, prods, avail, opt) {
+  const mode = (opt && opt.mode) || 'auto';
+  const up = mode === 'upright';
   const n = prods.length;
   const counts = new Array(n).fill(0);
   let tot = 0;
   for (let i = 0; i < n; i++) tot += Math.max(0, avail[i]);
-  if (tot <= 0) return { rects: [], counts, total: 0, mixed: true };
+  if (tot <= 0) return { rects: [], counts, total: 0, mixed: true, mode };
+  if (mode === 'zone') return ctPlanZones(cont, prods, avail, up, mode);
   const share = prods.map((p, i) => Math.max(0, avail[i]) / tot);
   const layers = [];
   let placed = 0, z = 0, guard = 0;
@@ -3145,18 +3167,20 @@ function ctPlanMixed(cont, prods, avail) {
   // 只有在零散边角里它塞不下时，才退而求其次用转 90° 的方向去填缝。
   // ⚠️ 没有这条加分时，第一排会被「单次填充率」更高的矮胖方向抢走（40×30 的箱子被摆成 30×40，
   //    每层只能摆 200 而不是 210，还会因为两种方向混用导致后续无法合并成大块）。
-  const canon = prods.map(p => { const b = ctBestOri(cont, p); return b ? b.o : null; });
+  const canon = prods.map(p => { const b = ctBestOri(cont, p, up); return b ? b.o : null; });
   while (guard++ < 400) {
     // ① 定这一层的层高：欠得最多、且塞得进剩余高度的那个产品的箱高
-    let dz = 0, bestKey = -Infinity;
+    let dz = 0, bestKey = -Infinity, bi = -1;
     for (let i = 0; i < n; i++) {
       if (counts[i] >= avail[i]) continue;
       const o0 = canon[i];
       if (!o0 || z + o0[2] > cont.H) continue;
       const key = (share[i] * placed - counts[i]) * 1000 + (placed === 0 ? share[i] : 0);
-      if (key > bestKey) { bestKey = key; dz = o0[2]; }
+      if (key > bestKey) { bestKey = key; dz = o0[2]; bi = i; }
     }
     if (!dz) break;
+    // 「每层同款」：整层只允许这一款进（onlyI），其它款等下一层
+    const onlyI = mode === 'layer' ? bi : -1;
     // ② 铺这一层：二维自由矩形，每次放「一整行」
     const strips = [];
     const free = [{ x: 0, y: 0, L: cont.L, W: cont.W }];
@@ -3167,7 +3191,8 @@ function ctPlanMixed(cont, prods, avail) {
         const fr = free[fi];
         for (let i = 0; i < n; i++) {
           if (counts[i] >= avail[i]) continue;
-          for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H)) {
+          if (onlyI >= 0 && i !== onlyI) continue;
+          for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H, up)) {
             if (o[2] !== dz || o[1] > fr.W) continue;
             const k = Math.min(Math.floor(fr.L / o[0]), avail[i] - counts[i]);
             if (k < 1) continue;
@@ -3189,7 +3214,7 @@ function ctPlanMixed(cont, prods, avail) {
       const ux = k * o[0], uy = o[1];
       if (fr.L - ux > 0) free.push({ x: fr.x + ux, y: fr.y, L: fr.L - ux, W: uy });
       if (fr.W - uy > 0) free.push({ x: fr.x, y: fr.y + uy, L: fr.L, W: fr.W - uy });
-      for (let q = free.length - 1; q >= 0; q--) if (!ctRectFits(free[q], prods, counts, avail, dz)) free.splice(q, 1);
+      for (let q = free.length - 1; q >= 0; q--) if (!ctRectFits(free[q], prods, counts, avail, dz, up, onlyI)) free.splice(q, 1);
     }
     if (!strips.length) break;
     layers.push({ z, dz, strips });
@@ -3197,7 +3222,62 @@ function ctPlanMixed(cont, prods, avail) {
   }
   let total = 0;
   for (let i = 0; i < n; i++) total += counts[i];
-  return { rects: ctMergeLayers(layers), counts, total, mixed: true };
+  return { rects: ctMergeLayers(layers), counts, total, mixed: true, mode };
+}
+// 分区堆放：沿柜长给每款切一段，段内各自从地面堆到顶。
+// 段长按「还差几列 × 每列占多少长度」摊分，不够就等比压缩，剩下的零头再分一轮。
+// ⚠️ 每款在柜里只占一段（段位独占），没分到长度或没装完的等下一柜 —— 这是它比 auto 少装的原因，不是 bug。
+function ctPlanZones(cont, prods, avail, up, mode) {
+  const n = prods.length;
+  const counts = new Array(n).fill(0);
+  const fin = r => ({ rects: r, counts, total: r.length ? counts.reduce((a, b) => a + b, 0) : 0, mixed: true, mode: mode || 'zone' });
+  let any = false;
+  for (let i = 0; i < n; i++) if (Math.max(0, avail[i]) > 0) any = true;
+  if (!any) return fin([]);
+  // 每款的正选方向 + 「一列」能装多少（一列 = 沿柜长只占 dx，铺满宽 × 高）
+  const info = prods.map((p, i) => {
+    const b = ctBestOri(cont, p, up);
+    if (!b || Math.max(0, avail[i]) <= 0) return null;
+    const perRow = Math.floor(cont.W / b.o[1]) * Math.floor(cont.H / b.o[2]);
+    return perRow > 0 ? { o: b.o, perRow, colW: b.o[0] } : null;
+  });
+  const lens = new Array(n).fill(0), got = new Array(n).fill(0);
+  for (let pass = 0; pass < 3; pass++) {
+    let freeL = cont.L;
+    for (let i = 0; i < n; i++) freeL -= lens[i];
+    if (freeL <= 0) break;
+    let need = 0;
+    const row = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      if (!info[i] || got[i] >= Math.max(0, avail[i])) continue;
+      row[i] = Math.ceil((Math.max(0, avail[i]) - got[i]) / info[i].perRow);
+      need += row[i] * info[i].colW;
+    }
+    if (need <= 0) break;
+    const sc = need <= freeL ? 1 : freeL / need;
+    for (let i = 0; i < n; i++) {
+      if (!row[i]) continue;
+      // 保底：首轮哪怕分不满也要先给一列，否则这一段直接作废、那一款永远装不进去
+      const nr = Math.floor(row[i] * sc) || (pass === 0 ? 1 : 0);
+      const add = Math.min(nr, Math.floor(freeL / info[i].colW));
+      if (add <= 0) continue;
+      lens[i] += add * info[i].colW;
+      freeL -= add * info[i].colW;
+      got[i] += add * info[i].perRow;
+    }
+  }
+  const rects = [];
+  let x = 0;
+  for (let i = 0; i < n; i++) {
+    if (lens[i] <= 0 || !info[i]) continue;
+    const o = info[i].o;
+    const nx = Math.floor(lens[i] / o[0]), ny = Math.floor(cont.W / o[1]), nz = Math.floor(cont.H / o[2]);
+    if (nx <= 0 || ny <= 0 || nz <= 0) continue;
+    counts[i] += Math.max(0, Math.min(nx * ny * nz, Math.max(0, avail[i])));
+    rects.push({ i, x, y: 0, z: 0, dx: o[0], dy: o[1], dz: o[2], nx, ny, nz });
+    x += lens[i];
+  }
+  return fin(rects);
 }
 // 同行同产品的连续行并成矩形，再跨层往上并成块
 function ctMergeLayers(layers) {
@@ -3303,7 +3383,9 @@ function ctScene(rects, colors, counts) {
   return { faces, cut };
 }
 // 一个柜型的完整模拟：逐柜排布 + 扣减需求 + 限重收敛
-function ctSimulate(cont, items, perHint) {
+function ctSimulate(cont, items, perHint, opt) {
+  const mode = (opt && opt.mode) || 'auto';
+  const up = mode === 'upright';
   const n = items.length;
   const avail = items.map(it => Math.max(0, Math.round(it.qty)));
   let active = 0;
@@ -3316,7 +3398,7 @@ function ctSimulate(cont, items, perHint) {
     const list = [];
     for (let j = 0; j < Math.min(nd, CT_KEEP); j++) {
       const cap = Math.max(0, Math.min(per, avail[i0] - j * per));
-      const plan = ctPlanSingle(cont, items[i0], i0, n);
+      const plan = ctPlanSingle(cont, items[i0], i0, n, up);
       plan.counts[i0] = cap;
       plan.total = cap;
       list.push({ plan, counts: plan.counts, total: cap, volRate: Math.round(cap * (items[i0].L * items[i0].W * items[i0].H / 1e6) / cont.cbm * 100), kg: cap * (items[i0].kg || 0), wlimited: false });
@@ -3327,7 +3409,7 @@ function ctSimulate(cont, items, perHint) {
   let count = 0;
   while (count < CT_MAX_SIM) {
     if (!avail.some(v => v > 0)) break;
-    const plan = ctPlanMixed(cont, items, avail);
+    const plan = ctPlanMixed(cont, items, avail, opt);
     if (!plan.total) break;
     let wsum = 0, hasW = false;
     for (let i = 0; i < n; i++) { if (items[i].kg > 0) hasW = true; wsum += plan.counts[i] * (items[i].kg || 0); }
@@ -3461,6 +3543,9 @@ function buildToolContainer() {
         <div class="ct-sec"><b>产品规格</b><span class="ct-single">多款可混装（不同色块 = 不同产品）</span></div>
         <div class="ct-prods" id="ctProds"></div>
         <button class="ct-add" id="ctAdd">＋ 添加产品</button>
+        <div class="ct-sec" style="margin-top:12px"><b>堆叠方式</b><span class="ct-single">换方式即时重算 · 结果同步到 3D</span></div>
+        <div class="ct-seg ct-modes" id="ctModes"></div>
+        <div class="ct-mdesc" id="ctModeDesc"></div>
         <div class="ct-sum" id="ctSum"></div>
       </div>
       <div class="ct-right">
@@ -3477,13 +3562,14 @@ function buildToolContainer() {
       </div>
     </div>
     <div id="ctResult"></div>
-    <div class="t-tip">单产品沿用整数堆叠公式（自动尝试 6 种摆放方向取最优）；多产品按「逐层铺排 · 同层分区」估算混装。柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、绑扎与码头限重</div>`;
+    <div class="t-tip">单产品沿用整数堆叠公式（自动尝试 6 种摆放方向取最优）；多产品可切换堆叠方式：自动混装（逐层铺排 · 同层分区）/ 每层同款 / 分区堆放 / 只许正放，每一种都会即时重算并同步到 3D。柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、绑扎与码头限重</div>`;
   const P = ctState.products;
   const prodsEl = box.querySelector('#ctProds'), sumEl = box.querySelector('#ctSum'), resEl = box.querySelector('#ctResult');
   const cvs = box.querySelector('#ctCv'), wrap = box.querySelector('.ct-cvwrap'), legendEl = box.querySelector('#ctLegend');
   const segEl = box.querySelector('#ctSeg'), idxEl = box.querySelector('#ctIdx');
   const btnPrev = box.querySelector('#ctPrev'), btnNext = box.querySelector('#ctNext');
   const btnAuto = box.querySelector('#ctAuto'), btnReset = box.querySelector('#ctReset'), btnAdd = box.querySelector('#ctAdd');
+  const modesEl = box.querySelector('#ctModes'), modeDescEl = box.querySelector('#ctModeDesc');
   let last = null, drag = null, nIdx = 1;
   const letter = i => CT_LETTERS[i] || ('P' + (i + 1));
   const fId = (i, k) => (i === 0 ? 'ct' + k : 'ct' + k + i);
@@ -3521,6 +3607,14 @@ function buildToolContainer() {
       };
     });
     btnAdd.disabled = P.length >= CT_LETTERS.length;
+  }
+  function renderModes() {
+    const cur = ctMode(ctState.mode);
+    modesEl.innerHTML = CT_MODES.map(m => `<button data-m="${m.id}" class="${m.id === cur.id ? 'on' : ''}">${m.label}</button>`).join('');
+    modesEl.querySelectorAll('button').forEach(b => {
+      b.onclick = () => { ctState.mode = b.dataset.m; ctState.viewIdx = 0; renderModes(); schedule(); };
+    });
+    modeDescEl.innerHTML = `<b>${cur.label}</b> · ${cur.desc}`;
   }
   function sync() {
     P.forEach((p, i) => {
@@ -3568,7 +3662,28 @@ function buildToolContainer() {
     }
     const live = items.filter(it => it.qty > 0);
     const single = live.length === 1;
+    const mode = ctMode(ctState.mode).id;
+    const opt = { mode };
+    const up = mode === 'upright';
     const est = single ? containerEstimate(live[0].L, live[0].W, live[0].H, live[0].qty, live[0].kg) : null;
+    // 单产品 + 只许正放：containerEstimate 固定试 6 向，这里改用受限口径重算 per / 层数
+    // ⚠️ 非 upright 时一字不改地沿用 containerEstimate，保证 1078/2310/2730 与 5/3/2 不变
+    const singlePer = (c, k, it) => {
+      if (!up) {
+        const r = est[k];
+        const wl = r.weightLimit && r.weightLimit.weightFirst;
+        return { per: wl ? r.weightLimit.perByWeight : r.per, perLayer: r.perLayer, layers: r.layers, volRate: r.volRate, wl: !!wl };
+      }
+      const b = ctBestOri(c, it, true);
+      let per = b ? b.per : 0;
+      const perByWeight = it.kg > 0 ? Math.floor(c.payload / it.kg) : 0;
+      const wl = perByWeight > 0 && perByWeight < per;
+      if (wl) per = perByWeight;
+      return {
+        per, perLayer: b ? b.perLayer : 0, layers: b ? b.layers : 0, wl,
+        volRate: per ? Math.round(per * volOf(it) / c.cbm * 100) : 0,
+      };
+    };
     // ---------- 结果表 ----------
     const hasMixCol = !single;
     let html = `<table class="ct-table"><tr><th>柜型</th><th>每柜可装</th>${hasMixCol ? '<th>每柜构成</th>' : ''}<th>堆叠方式</th><th>需柜数</th><th>体积利用率</th></tr>`;
@@ -3576,18 +3691,17 @@ function buildToolContainer() {
     let anyWeight = false;
     CONTAINERS.forEach((c, k) => {
       const on = c.id === ctState.viewCont;
-      const sim = single ? ctSimulate(c, live, est[k].per) : ctSimulate(c, live);
+      const r = single ? singlePer(c, k, live[0]) : null;
+      const sim = single ? ctSimulate(c, live, r.per, opt) : ctSimulate(c, live, 0, opt);
       sims.push(sim);
       const badge = on ? '<span class="ct-badge">3D</span>' : '';
       if (single) {
-        const r = est[k];
-        const wl = r.weightLimit && r.weightLimit.weightFirst;
-        const per = wl ? r.weightLimit.perByWeight : r.per;
-        const need = per ? Math.ceil(live[0].qty / per) : 0;
+        const wl = r.wl;
+        const need = r.per ? Math.ceil(live[0].qty / r.per) : 0;
         if (wl) anyWeight = true;
         html += `<tr data-ct="${c.id}" class="${on ? 'ct-on' : ''}"><td><b>${c.id}</b>${badge}</td>
-          <td>${wl ? `<span class="ct-num">${per}</span> <span class="ct-warn">(限重)</span>` : `<span class="ct-num">${r.per}</span>`} 箱</td>
-          <td style="color:var(--text-light)">每层 ${r.perLayer} × ${r.layers} 层</td>
+          <td>${wl ? `<span class="ct-num">${r.per}</span> <span class="ct-warn">(限重)</span>` : `<span class="ct-num">${r.per}</span>`} 箱</td>
+          <td style="color:var(--text-light)">每层 ${r.perLayer} × ${r.layers} 层${up ? ' · 正放' : ''}</td>
           <td>${need} 柜</td><td>${r.volRate}%</td></tr>`;
       } else {
         const cur0 = sim.list[0];
@@ -3600,7 +3714,7 @@ function buildToolContainer() {
         html += `<tr data-ct="${c.id}" class="${on ? 'ct-on' : ''}"><td><b>${c.id}</b>${badge}</td>
           <td><span class="ct-num">${cur0.total}</span> 箱${cur0.wlimited ? ' <span class="ct-warn">(限重)</span>' : ''}</td>
           <td class="ct-comp">${comp}${cur0.kg ? `<br><small style="color:var(--text-light)">约 ${(cur0.kg / 1000).toFixed(1)} t</small>` : ''}</td>
-          <td style="color:var(--text-light)">分层混装</td>
+          <td style="color:var(--text-light)">${ctMode(mode).tbl}</td>
           <td>${sim.need}${sim.capped ? ' +' : ''} 柜</td><td>${cur0.volRate}%</td></tr>`;
       }
     });
@@ -3694,6 +3808,7 @@ function buildToolContainer() {
     ctState.cleanup.push(() => { try { window.removeEventListener('resize', onResize); } catch (_) { } });
   }
   renderRows();
+  renderModes();
   fitCanvas();
   compute();
   return box;
@@ -12374,7 +12489,7 @@ if (typeof globalThis !== 'undefined') {
     drawWatermarkOn, wmPos, bindDropImage, isFileDrag,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
-    ctState, ctPlanSingle, ctPlanMixed, ctSimulate, ctScene, ctDraw, ctMergeLayers, ctBestOri, ctDispose,
+    ctState, ctPlanSingle, ctPlanMixed, ctPlanZones, ctSimulate, ctScene, ctDraw, ctMergeLayers, ctBestOri, ctDispose, CT_MODES, ctMode,
     hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
     HUE_ANCHORS, buildSchemes, padPalette, pickBaseColor, sheetTextColor, renderPaletteSheet, evaluatePalette, contrastRatio,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
