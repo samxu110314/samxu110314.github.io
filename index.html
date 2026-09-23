@@ -473,6 +473,51 @@
   .ct-table tr:last-child td { border-bottom: none; }
   .ct-table .ct-num { font-weight: 700; color: var(--c-sales, #3498db); }
   .ct-warn { color: #e67e22; font-weight: 600; }
+  /* ===== 装柜估算：左「产品规格」/ 右「3D 实时预演」 =====
+     ⚠️ 两侧都用 minmax(0,…)：3D 列里有 canvas，写死 px 会把它顶出面板（抠图面板踩过同一个坑）。 */
+  .ct-2col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 1.04fr); gap: 16px; align-items: start; margin-top: 2px; }
+  @media (max-width: 880px) { .ct-2col { grid-template-columns: minmax(0, 1fr); } }
+  .ct-sec { font-size: 11.5px; color: var(--text-light); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
+  .ct-sec b { font-size: 12.5px; color: var(--text); font-weight: 600; }
+  .ct-sec .ct-single { font-size: 11px; color: #8a99a5; }
+  .ct-prods { display: flex; flex-direction: column; gap: 8px; }
+  .ct-prod { border: 1px solid var(--border); border-radius: 10px; padding: 8px 9px 9px; background: #fcfdfe; }
+  .ct-pline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .ct-pline + .ct-pline { margin-top: 7px; }
+  .ct-tag { width: 21px; height: 21px; border-radius: 6px; color: #fff; font-size: 11.5px; font-weight: 700; line-height: 21px; text-align: center; flex: 0 0 auto; box-shadow: inset 0 -7px 11px -7px rgba(0,0,0,.5); }
+  .ct-lb { font-size: 11.5px; color: var(--text-light); }
+  .ct-prod input[type=number] { width: 56px; padding: 4px 6px; font-size: 12.5px; }
+  .ct-prod input.ct-n { width: 72px; }
+  .ct-prod input.ct-kg { width: 62px; }
+  .ct-col { width: 24px; height: 24px; padding: 0; border: 1px solid #cfd8e0; border-radius: 6px; background: #fff; cursor: pointer; flex: 0 0 auto; }
+  .ct-del { margin-left: auto; width: 22px; height: 22px; line-height: 1; padding: 0; font-size: 14px; color: #b0bcc6; border-radius: 6px; }
+  .ct-del:hover { color: #e05252; border-color: #f0bcbc; background: #fff6f6; }
+  .ct-add { margin-top: 8px; font-size: 12.5px; padding: 5px 12px; border-radius: 8px; }
+  .ct-sum { margin-top: 10px; font-size: 12.5px; color: var(--text); font-weight: 600; line-height: 1.75; }
+  .ct-sum small { color: var(--text-light); font-weight: 400; }
+  /* 右侧 3D 画布 */
+  .ct-right { border: 1px solid var(--border); border-radius: 10px; background: linear-gradient(180deg, #fbfdff, #f1f6fa); padding: 9px 10px 10px; }
+  .ct-vbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .ct-seg { display: inline-flex; border: 1px solid #cfdae3; border-radius: 8px; overflow: hidden; background: #fff; }
+  .ct-seg button { border: 0; border-radius: 0; padding: 4px 10px; font-size: 12px; background: #fff; color: var(--text-light); }
+  .ct-seg button + button { border-left: 1px solid #e3eaf0; }
+  .ct-seg button.on { background: var(--c-sales, #3498db); color: #fff; font-weight: 600; }
+  .ct-idx { font-size: 11.5px; color: var(--text-light); font-variant-numeric: tabular-nums; }
+  .ct-mini { padding: 3px 8px; font-size: 11.5px; border-radius: 7px; }
+  .ct-mini.on { background: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); color: #fff; }
+  .ct-mini[disabled] { opacity: .4; cursor: default; }
+  .ct-table td.ct-comp { white-space: normal; min-width: 150px; line-height: 1.75; }
+  .ct-cvwrap { position: relative; width: 100%; height: clamp(236px, 27vw, 322px); }
+  .ct-cvwrap canvas { display: block; width: 100%; height: 100%; border-radius: 8px; cursor: grab; touch-action: none; }
+  .ct-cvwrap canvas:active { cursor: grabbing; }
+  .ct-legend { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 8px; font-size: 11.5px; color: var(--text-light); }
+  .ct-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .ct-legend b { color: var(--text); font-weight: 600; }
+  .ct-chip { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: 1px; }
+  .ct-table tr[data-ct] { cursor: pointer; }
+  .ct-table tr[data-ct]:hover td { background: #f7fbff; }
+  .ct-table tr.ct-on td { background: #f1f8ff; }
+  .ct-badge { display: inline-block; font-size: 9.5px; padding: 1px 5px; border-radius: 5px; background: #e8f3fc; color: var(--c-sales, #3498db); font-weight: 700; margin-left: 5px; vertical-align: 1px; }
   /* 全球时差 */
   .tz-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 2px; border-bottom: 1px dashed #e4e9ee; font-size: 13px; flex-wrap: wrap; }
   .tz-row:last-child { border-bottom: none; }
@@ -3018,47 +3063,639 @@ function containerEstimate(bL, bW, bH, qty, unitKg) {
     return { c, per: best.per, perLayer: best.perLayer, layers: best.layers, ori: best.ori, volRate, need, boxVol, weightLimit };
   });
 }
+// ---- 6b) 装柜 3D 预演：混装分层铺排 → 块合并 → 正交投影渲染 ----
+// 只做「估算 + 示意」，不追求真实装箱器的精度：单产品沿用整数堆叠公式（与 containerEstimate 同口径，
+// 保证 1078 / 2310 / 2730 这些既有数字不变）；多产品走「逐层铺排」——每层选一个层高（由「欠得最多」
+// 的产品决定，同高的产品可共层），层内用二维自由矩形 + 整行摆放，最后把同一产品的连续行合并成块
+// （合并后才谈得上「面剔除」，否则 2730 箱 × 3 面 ≈ 8000 个面直接把画布拖垮）。
+const CT_COLORS = ['#E4572E', '#2E7DD1', '#16A34A', '#F0A202', '#7C3AED', '#0EA5A4'];
+const CT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+const CT_MAX_SIM = 60;      // 最多数到多少柜（只前 CT_KEEP 柜留布置给 3D 翻看）
+const CT_KEEP = 24;
+const CT_MAX_FACES = 11000; // 单帧面数上限（超出即截断，避免超大数量卡死）
+const CT_FACE_K = { pz: 1.26, nz: 0.5, px: 0.95, nx: 0.87, py: 0.70, ny: 0.79 };
+
+const ctState = {
+  products: [{ L: 40, W: 30, H: 20, qty: 1000, kg: 0, color: CT_COLORS[0] }],
+  viewCont: '40HQ', viewIdx: 0,
+  yaw: -0.46, pitch: 0.30, zoom: 1, auto: false,
+  raf: 0, autoRaf: 0, cleanup: [],
+};
+// 面板重建前必须收尾：rAF 循环与 window 监听都挂在旧画布上
+function ctDispose() {
+  if (ctState.raf) { cancelAnimationFrame(ctState.raf); ctState.raf = 0; }
+  if (ctState.autoRaf) { cancelAnimationFrame(ctState.autoRaf); ctState.autoRaf = 0; }
+  ctState.auto = false;
+  ctState.cleanup.forEach(f => { try { f(); } catch (_) { } });
+  ctState.cleanup = [];
+}
+
+function ctOris(l, w, h) {
+  return [[l, w, h], [l, h, w], [w, l, h], [w, h, l], [h, l, w], [h, w, l]];
+}
+function ctFan(hex) {
+  const out = {};
+  for (const k in CT_FACE_K) out[k] = ctShade(hex, CT_FACE_K[k]);
+  return out;
+}
+function ctShade(hex, k) {
+  const c = hexToRgb(hex);
+  const f = v => Math.max(0, Math.min(255, Math.round(k >= 1 ? v + (255 - v) * (k - 1) : v * k)));
+  return 'rgb(' + f(c.r) + ',' + f(c.g) + ',' + f(c.b) + ')';
+}
+// 单产品最优摆放方向（与 containerEstimate 同一判据：perLayer × layers 最大）
+function ctBestOri(cont, pr) {
+  let best = null;
+  for (const o of ctOris(pr.L, pr.W, pr.H)) {
+    const perLayer = Math.floor(cont.L / o[0]) * Math.floor(cont.W / o[1]);
+    const layers = Math.floor(cont.H / o[2]);
+    const per = perLayer * layers;
+    if (per > 0 && (!best || per > best.per)) best = { per, perLayer, layers, o };
+  }
+  return best;
+}
+// 单产品：一块完整栅格（cap 用于「不满一柜」时只画前 cap 箱）
+function ctPlanSingle(cont, pr, idx, nProd) {
+  const best = ctBestOri(cont, pr);
+  const counts = new Array(nProd).fill(0);
+  if (!best) return { rects: [], counts, total: 0, perLayer: 0, layers: 0 };
+  const [dx, dy, dz] = best.o;
+  const nx = Math.floor(cont.L / dx), ny = Math.floor(cont.W / dy), nz = best.layers;
+  counts[idx] = nx * ny * nz;
+  return { rects: [{ i: idx, x: 0, y: 0, z: 0, dx, dy, dz, nx, ny, nz }], counts, total: counts[idx], perLayer: best.perLayer, layers: nz };
+}
+function ctRectFits(fr, prods, counts, avail, dz) {
+  for (let i = 0; i < prods.length; i++) {
+    if (counts[i] >= avail[i]) continue;
+    for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H)) if (o[2] === dz && o[0] <= fr.L && o[1] <= fr.W) return true;
+  }
+  return false;
+}
+// 混装：逐层铺排。prods = [{L,W,H}]，avail = 各产品剩余需求
+function ctPlanMixed(cont, prods, avail) {
+  const n = prods.length;
+  const counts = new Array(n).fill(0);
+  let tot = 0;
+  for (let i = 0; i < n; i++) tot += Math.max(0, avail[i]);
+  if (tot <= 0) return { rects: [], counts, total: 0, mixed: true };
+  const share = prods.map((p, i) => Math.max(0, avail[i]) / tot);
+  const layers = [];
+  let placed = 0, z = 0, guard = 0;
+  // 每个产品的「正选方向」= 整柜最优（perLayer × layers 最大）。铺行时优先用它；
+  // 只有在零散边角里它塞不下时，才退而求其次用转 90° 的方向去填缝。
+  // ⚠️ 没有这条加分时，第一排会被「单次填充率」更高的矮胖方向抢走（40×30 的箱子被摆成 30×40，
+  //    每层只能摆 200 而不是 210，还会因为两种方向混用导致后续无法合并成大块）。
+  const canon = prods.map(p => { const b = ctBestOri(cont, p); return b ? b.o : null; });
+  while (guard++ < 400) {
+    // ① 定这一层的层高：欠得最多、且塞得进剩余高度的那个产品的箱高
+    let dz = 0, bestKey = -Infinity;
+    for (let i = 0; i < n; i++) {
+      if (counts[i] >= avail[i]) continue;
+      const o0 = canon[i];
+      if (!o0 || z + o0[2] > cont.H) continue;
+      const key = (share[i] * placed - counts[i]) * 1000 + (placed === 0 ? share[i] : 0);
+      if (key > bestKey) { bestKey = key; dz = o0[2]; }
+    }
+    if (!dz) break;
+    // ② 铺这一层：二维自由矩形，每次放「一整行」
+    const strips = [];
+    const free = [{ x: 0, y: 0, L: cont.L, W: cont.W }];
+    let g2 = 0;
+    while (free.length && g2++ < 400) {
+      let best = null;
+      for (let fi = 0; fi < free.length; fi++) {
+        const fr = free[fi];
+        for (let i = 0; i < n; i++) {
+          if (counts[i] >= avail[i]) continue;
+          for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H)) {
+            if (o[2] !== dz || o[1] > fr.W) continue;
+            const k = Math.min(Math.floor(fr.L / o[0]), avail[i] - counts[i]);
+            if (k < 1) continue;
+            // 主序 = 谁欠得多（分档 0.01 箱）；同档再比「是否正选方向」「填得满」「靠外」
+            const isCanon = !!canon[i] && o[0] === canon[i][0] && o[1] === canon[i][1] && o[2] === canon[i][2];
+            const score = Math.round((share[i] * placed - counts[i]) * 100) * 1000
+              + (isCanon ? 120 : 0)
+              + (k * o[0] * o[1]) / (fr.L * fr.W) * 100 - fr.y * 0.02 - fr.x * 0.002;
+            if (!best || score > best.score) best = { score, fi, i, o, k };
+          }
+        }
+      }
+      if (!best) break;
+      const fr = free[best.fi];
+      free.splice(best.fi, 1);
+      const o = best.o, i = best.i, k = best.k;
+      strips.push({ i, x: fr.x, y: fr.y, dx: o[0], dy: o[1], n: k });
+      counts[i] += k; placed += k;
+      const ux = k * o[0], uy = o[1];
+      if (fr.L - ux > 0) free.push({ x: fr.x + ux, y: fr.y, L: fr.L - ux, W: uy });
+      if (fr.W - uy > 0) free.push({ x: fr.x, y: fr.y + uy, L: fr.L, W: fr.W - uy });
+      for (let q = free.length - 1; q >= 0; q--) if (!ctRectFits(free[q], prods, counts, avail, dz)) free.splice(q, 1);
+    }
+    if (!strips.length) break;
+    layers.push({ z, dz, strips });
+    z += dz;
+  }
+  let total = 0;
+  for (let i = 0; i < n; i++) total += counts[i];
+  return { rects: ctMergeLayers(layers), counts, total, mixed: true };
+}
+// 同行同产品的连续行并成矩形，再跨层往上并成块
+function ctMergeLayers(layers) {
+  const out = [], stack = new Map();
+  for (const L of layers) {
+    const strips = L.strips.slice().sort((a, b) =>
+      (a.i - b.i) || (a.x - b.x) || (a.n - b.n) || (b.dy - a.dy) || (a.y - b.y));
+    const rowMap = new Map(), rects = [];
+    for (const s of strips) {
+      const k = s.i + '|' + s.x + '|' + s.n + '|' + s.dx + '|' + s.dy;
+      const cur = rowMap.get(k);
+      if (cur && cur.y + cur.dy === s.y) cur.ny++;
+      else { const r = { i: s.i, x: s.x, y: s.y, dx: s.dx, dy: s.dy, nx: s.n, ny: 1 }; rowMap.set(k, r); rects.push(r); }
+    }
+    for (const r of rects) {
+      const k = r.i + '|' + r.x + '|' + r.y + '|' + r.dx + '|' + r.dy + '|' + r.nx + '|' + r.ny;
+      const prev = stack.get(k);
+      if (prev && prev.dz === L.dz && prev.z + prev.nz * prev.dz === L.z) { prev.nz++; continue; }
+      const blk = { i: r.i, x: r.x, y: r.y, z: L.z, dx: r.dx, dy: r.dy, dz: L.dz, nx: r.nx, ny: r.ny, nz: 1 };
+      stack.set(k, blk); out.push(blk);
+    }
+  }
+  return out;
+}
+// 矩形减法：拿 s 把待判区切成最多 4 块；切没了就说明这一面被完全盖住
+function ctCut(list, s) {
+  const out = [];
+  for (const r of list) {
+    if (s[1] <= r[0] || s[0] >= r[1] || s[3] <= r[2] || s[2] >= r[3]) { out.push(r); continue; }
+    if (s[0] > r[0]) out.push([r[0], Math.min(s[0], r[1]), r[2], r[3]]);
+    if (s[1] < r[1]) out.push([Math.max(s[1], r[0]), r[1], r[2], r[3]]);
+    const u0 = Math.max(r[0], s[0]), u1 = Math.min(r[1], s[1]);
+    if (s[2] > r[2]) out.push([u0, u1, r[2], Math.min(s[2], r[3])]);
+    if (s[3] < r[3]) out.push([u0, u1, Math.max(s[3], r[2]), r[3]]);
+    if (out.length > 256) return out;
+  }
+  return out;
+}
+// 块 → 可见面。
+// 两层剔除：① 同块内被左右/上下邻居盖住的面不生成；② 与其它块交界、被完整盖住的面再剔一轮。
+// ⚠️ 第②步必须有：混装时同层交替排布会产生几十个小块，每块自带一圈外壳，
+//    交界面被画两遍，实测能把面数顶到 1.1 万（达到上限反而残缺）→ 剔除后只剩货堆真正的外表面（约 1/7）。
+function ctScene(rects, colors, counts) {
+  const n = counts.length;
+  const used = new Array(n).fill(0);
+  const meta = rects.map(r => {
+    const cap = r.nx * r.ny * r.nz;
+    const u = Math.max(0, Math.min(cap, (counts[r.i] || 0) - used[r.i]));
+    used[r.i] += u;
+    return { u, full: u >= cap };
+  });
+  // 块的世界坐标包围盒；被截断（限重）的块不参与遮盖判定，宁可多画也不漏画
+  const bbox = rects.map(r => ({
+    x0: r.x, x1: r.x + r.nx * r.dx, y0: r.y, y1: r.y + r.ny * r.dy, z0: r.z, z1: r.z + r.nz * r.dz,
+  }));
+  const EPS = 0.02;
+  const covered = (bi, dir, b) => {
+    let list = null;
+    for (let k = 0; k < bbox.length; k++) {
+      if (k === bi || !meta[k].full) continue;
+      const s = bbox[k];
+      let u0, u1, v0, v1, P;
+      if (dir === 0) { if (Math.abs(s.x0 - b.x1) > EPS) continue; u0 = s.y0; u1 = s.y1; v0 = s.z0; v1 = s.z1; P = [b.y0, b.y1, b.z0, b.z1]; }
+      else if (dir === 1) { if (Math.abs(s.x1 - b.x0) > EPS) continue; u0 = s.y0; u1 = s.y1; v0 = s.z0; v1 = s.z1; P = [b.y0, b.y1, b.z0, b.z1]; }
+      else if (dir === 2) { if (Math.abs(s.y0 - b.y1) > EPS) continue; u0 = s.x0; u1 = s.x1; v0 = s.z0; v1 = s.z1; P = [b.x0, b.x1, b.z0, b.z1]; }
+      else if (dir === 3) { if (Math.abs(s.y1 - b.y0) > EPS) continue; u0 = s.x0; u1 = s.x1; v0 = s.z0; v1 = s.z1; P = [b.x0, b.x1, b.z0, b.z1]; }
+      else if (dir === 4) { if (Math.abs(s.z0 - b.z1) > EPS) continue; u0 = s.x0; u1 = s.x1; v0 = s.y0; v1 = s.y1; P = [b.x0, b.x1, b.y0, b.y1]; }
+      else { if (Math.abs(s.z1 - b.z0) > EPS) continue; u0 = s.x0; u1 = s.x1; v0 = s.y0; v1 = s.y1; P = [b.x0, b.x1, b.y0, b.y1]; }
+      list = list || [P];
+      list = ctCut(list, [u0, u1, v0, v1]);
+      if (!list.length) return true;
+    }
+    return false;
+  };
+  const faces = [];
+  let cut = false;
+  for (let bi = 0; bi < rects.length; bi++) {
+    const r = rects[bi], c = colors[r.i];
+    let left = meta[bi].u;
+    for (let kc = 0; kc < r.nz && left > 0 && !cut; kc++) {
+      for (let jb = 0; jb < r.ny && left > 0 && !cut; jb++) {
+        for (let ia = 0; ia < r.nx && left > 0 && !cut; ia++, left--) {
+          const x0 = r.x + ia * r.dx, y0 = r.y + jb * r.dy, z0 = r.z + kc * r.dz;
+          const x1 = x0 + r.dx, y1 = y0 + r.dy, z1 = z0 + r.dz;
+          const ix = ia > 0 && ia < r.nx - 1, iy = jb > 0 && jb < r.ny - 1, iz = kc > 0 && kc < r.nz - 1;
+          const b = { x0, x1, y0, y1, z0, z1 };
+          const put = (dir, q, col) => {
+            if (faces.length >= CT_MAX_FACES) { cut = true; return; }
+            if (covered(bi, dir, b)) return;
+            q[12] = col;
+            faces.push(q);
+          };
+          if (!iz && kc === r.nz - 1) put(4, [x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1], c.pz);
+          if (!iz && kc === 0) put(5, [x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0], c.nz);
+          if (!iy && jb === r.ny - 1) put(2, [x1, y1, z0, x0, y1, z0, x0, y1, z1, x1, y1, z1], c.py);
+          if (!iy && jb === 0) put(3, [x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1], c.ny);
+          if (!ix && ia === r.nx - 1) put(0, [x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1], c.px);
+          if (!ix && ia === 0) put(1, [x0, y1, z0, x0, y0, z0, x0, y0, z1, x0, y1, z1], c.nx);
+        }
+      }
+    }
+  }
+  return { faces, cut };
+}
+// 一个柜型的完整模拟：逐柜排布 + 扣减需求 + 限重收敛
+function ctSimulate(cont, items, perHint) {
+  const n = items.length;
+  const avail = items.map(it => Math.max(0, Math.round(it.qty)));
+  let active = 0;
+  for (let i = 0; i < n; i++) if (avail[i] > 0) active++;
+  if (!active) return { list: [], need: 0, capped: false };
+  if (active === 1) {
+    const i0 = avail.findIndex(v => v > 0);
+    const per = perHint || 0;
+    const nd = per > 0 ? Math.ceil(avail[i0] / per) : 0;
+    const list = [];
+    for (let j = 0; j < Math.min(nd, CT_KEEP); j++) {
+      const cap = Math.max(0, Math.min(per, avail[i0] - j * per));
+      const plan = ctPlanSingle(cont, items[i0], i0, n);
+      plan.counts[i0] = cap;
+      plan.total = cap;
+      list.push({ plan, counts: plan.counts, total: cap, volRate: Math.round(cap * (items[i0].L * items[i0].W * items[i0].H / 1e6) / cont.cbm * 100), kg: cap * (items[i0].kg || 0), wlimited: false });
+    }
+    return { list, need: nd, capped: nd > CT_KEEP };
+  }
+  const list = [];
+  let count = 0;
+  while (count < CT_MAX_SIM) {
+    if (!avail.some(v => v > 0)) break;
+    const plan = ctPlanMixed(cont, items, avail);
+    if (!plan.total) break;
+    let wsum = 0, hasW = false;
+    for (let i = 0; i < n; i++) { if (items[i].kg > 0) hasW = true; wsum += plan.counts[i] * (items[i].kg || 0); }
+    let wlimited = false;
+    if (hasW && wsum > cont.payload) {
+      wlimited = true;
+      const sc = cont.payload / wsum;
+      let after = 0;
+      for (let i = 0; i < n; i++) { plan.counts[i] = Math.floor(plan.counts[i] * sc); after += plan.counts[i]; }
+      if (!after) break;
+      plan.total = 0;
+      for (let i = 0; i < n; i++) plan.total += plan.counts[i];
+      wsum = cont.payload;
+    }
+    let used = 0;
+    for (let i = 0; i < n; i++) { avail[i] = Math.max(0, avail[i] - plan.counts[i]); used += plan.counts[i]; }
+    if (!used) break;
+    let boxVol = 0;
+    for (let i = 0; i < n; i++) boxVol += plan.counts[i] * (items[i].L * items[i].W * items[i].H / 1e6);
+    count++;
+    // 只有前 CT_KEEP 柜留布置（供 3D 翻看），但柜数一直数到底
+    if (list.length < CT_KEEP) list.push({ plan, counts: plan.counts, total: plan.total, volRate: Math.round(boxVol / cont.cbm * 100), kg: wsum, wlimited });
+  }
+  return { list, need: count, capped: avail.some(v => v > 0) };
+}
+// 正交投影 + 画家算法；柜体画成半透明玻璃笼，背墙/地板打底
+function ctDraw(cvs, st, scene) {
+  // 回归测试跑在无画布的 vm 里（假 canvas 只有部分 2D API）→ 绘制失败不该拖垮整个工具
+  try { ctDrawInner(cvs, st, scene); } catch (e) {
+    if (!ctState.drawWarned) {
+      ctState.drawWarned = 1;
+      try { console.warn('[装柜3D] 绘制失败：', e && e.message); } catch (_) { }
+    }
+  }
+}
+function ctDrawInner(cvs, st, scene) {
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  const dpr = st.dpr || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#fbfdff'); bg.addColorStop(1, '#eaf1f7');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  const cont = scene.cont;
+  const cx = cont.L / 2, cy = cont.W / 2, cz = cont.H / 2;
+  const ca = Math.cos(st.yaw), sa = Math.sin(st.yaw);
+  const cb = Math.cos(st.pitch), sb = Math.sin(st.pitch);
+  const prj = (x, y, z) => {
+    const X = x - cx, Y = y - cy, Z = z - cz;
+    const X1 = X * ca - Y * sa, Y1 = X * sa + Y * ca;
+    return [X1, Y1 * sb + Z * cb, Y1 * cb - Z * sb];
+  };
+  // 自动取景：把柜体八角的投影包住
+  let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
+  for (const X of [0, cont.L]) for (const Y of [0, cont.W]) for (const Z of [0, cont.H]) {
+    const p = prj(X, Y, Z);
+    if (p[0] < mnx) mnx = p[0]; if (p[0] > mxx) mxx = p[0];
+    if (p[1] < mny) mny = p[1]; if (p[1] > mxy) mxy = p[1];
+  }
+  const pad = 18 * dpr, hud = 20 * dpr;
+  const s = Math.min((W - pad * 2) / Math.max(1e-6, mxx - mnx), (H - pad * 2 - hud) / Math.max(1e-6, mxy - mny)) * st.zoom;
+  const ox = W / 2 - ((mnx + mxx) / 2) * s, oy = H / 2 + hud * 0.5 - ((mny + mxy) / 2) * s;
+  const sp = (x, y, z) => { const p = prj(x, y, z); return [ox + p[0] * s, oy - p[1] * s, p[2]]; };
+  const poly = (pts, fill, stroke, lw) => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+  };
+  // 地板（俯视时可见）+ 地格
+  const fq = [[0, 0, 0], [cont.L, 0, 0], [cont.L, cont.W, 0], [0, cont.W, 0]].map(p => sp(p[0], p[1], p[2]));
+  poly(fq, '#e7eff6', null);
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(fq[0][0], fq[0][1]); for (let i = 1; i < 4; i++) ctx.lineTo(fq[i][0], fq[i][1]); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle = 'rgba(150,175,195,.45)'; ctx.lineWidth = Math.max(1, 1 * dpr);
+  for (let x = 100; x < cont.L; x += 100) { const a = sp(x, 0, 0), b = sp(x, cont.W, 0); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+  for (let y = 100; y < cont.W; y += 100) { const a = sp(0, y, 0), b = sp(cont.L, y, 0); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+  ctx.restore();
+  // 远端两面墙（从里侧看到的那两面）
+  const wallTint = 'rgba(228,239,247,.92)';
+  if (ca > 0) poly([[0, cont.W, 0], [cont.L, cont.W, 0], [cont.L, cont.W, cont.H], [0, cont.W, cont.H]].map(p => sp(p[0], p[1], p[2])), wallTint, null);
+  else poly([[0, 0, 0], [cont.L, 0, 0], [cont.L, 0, cont.H], [0, 0, cont.H]].map(p => sp(p[0], p[1], p[2])), wallTint, null);
+  if (sa > 0) poly([[0, 0, 0], [0, cont.W, 0], [0, cont.W, cont.H], [0, 0, cont.H]].map(p => sp(p[0], p[1], p[2])), wallTint, null);
+  else poly([[cont.L, 0, 0], [cont.L, cont.W, 0], [cont.L, cont.W, cont.H], [cont.L, 0, cont.H]].map(p => sp(p[0], p[1], p[2])), wallTint, null);
+  if (sb < 0) poly([[0, 0, cont.H], [cont.L, 0, cont.H], [cont.L, cont.W, cont.H], [0, cont.W, cont.H]].map(p => sp(p[0], p[1], p[2])), '#e2ebf3', null);
+  // 箱体（画家算法：按面心深度从远到近）
+  const list = [];
+  for (const f of scene.faces) {
+    const p0 = sp(f[0], f[1], f[2]), p1 = sp(f[3], f[4], f[5]), p2 = sp(f[6], f[7], f[8]), p3 = sp(f[9], f[10], f[11]);
+    // 只有画得出来的面才描边：密集堆垛时小面描边纯属花屏 + 拖慢一半
+    const wpx = Math.max(p0[0], p1[0], p2[0], p3[0]) - Math.min(p0[0], p1[0], p2[0], p3[0]);
+    const hpx = Math.max(p0[1], p1[1], p2[1], p3[1]) - Math.min(p0[1], p1[1], p2[1], p3[1]);
+    list.push([(p0[2] + p1[2] + p2[2] + p3[2]) / 4, p0, p1, p2, p3, f[12], (wpx > 5 * dpr && hpx > 5 * dpr)]);
+  }
+  list.sort((a, b) => b[0] - a[0]);
+  const lw = Math.max(0.5, 0.55 * dpr);
+  ctx.lineJoin = 'round';
+  for (const it of list) poly([it[1], it[2], it[3], it[4]], it[5], it[6] ? 'rgba(20,40,60,.16)' : null, lw);
+  // 柜体 12 条棱（罩在箱堆外面，玻璃笼的感觉）
+  // 顶点编号 idx = (i*2 + j)*2 + k（i→柜长 x，j→柜宽 y，k→柜高 z）
+  const c8 = [];
+  for (const X of [0, cont.L]) for (const Y of [0, cont.W]) for (const Z of [0, cont.H]) {
+    const q = sp(X, Y, Z);
+    c8.push([q[0], q[1]]);
+  }
+  // 12 条棱：只在一位上不同的顶点对
+  const E = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+  ctx.strokeStyle = 'rgba(96,138,168,.82)'; ctx.lineWidth = Math.max(1, 1.1 * dpr);
+  ctx.beginPath();
+  for (const [a, b] of E) { ctx.moveTo(c8[a][0], c8[a][1]); ctx.lineTo(c8[b][0], c8[b][1]); }
+  ctx.stroke();
+  // HUD
+  const fs = Math.round(11.5 * dpr);
+  ctx.font = '600 ' + fs + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#31556e';
+  ctx.fillText(scene.hudL, pad * 0.72, pad * 0.5);
+  if (scene.hudR) { ctx.textAlign = 'right'; ctx.fillText(scene.hudR, W - pad * 0.72, pad * 0.5); ctx.textAlign = 'left'; }
+  ctx.fillStyle = 'rgba(90,120,145,.85)';
+  ctx.font = Math.round(10.5 * dpr) + 'px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
+  ctx.fillText(scene.hudB || '', pad * 0.72, H - pad * 0.5 - 10.5 * dpr);
+}
+
 function buildToolContainer() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🚢 装柜估算（20GP / 40GP / 40HQ）</h4>
-    <div class="tool-row">
-      <span style="color:var(--text-light);font-size:12px">纸箱 长</span><input id="ctL" type="number" value="40" min="1" style="width:70px">
-      <span style="color:var(--text-light);font-size:12px">宽</span><input id="ctW" type="number" value="30" min="1" style="width:70px">
-      <span style="color:var(--text-light);font-size:12px">高 cm</span><input id="ctH" type="number" value="20" min="1" style="width:70px">
-      <span style="color:var(--text-light);font-size:12px">数量</span><input id="ctN" type="number" value="1000" min="0" style="width:80px">
-      <span style="color:var(--text-light);font-size:12px">单箱毛重 kg（选填）</span><input id="ctKg" type="number" min="0" step="0.1" style="width:70px">
+    <div class="ct-2col">
+      <div class="ct-left">
+        <div class="ct-sec"><b>产品规格</b><span class="ct-single">多款可混装（不同色块 = 不同产品）</span></div>
+        <div class="ct-prods" id="ctProds"></div>
+        <button class="ct-add" id="ctAdd">＋ 添加产品</button>
+        <div class="ct-sum" id="ctSum"></div>
+      </div>
+      <div class="ct-right">
+        <div class="ct-vbar">
+          <div class="ct-seg" id="ctSeg"></div>
+          <button class="ct-mini" id="ctPrev" title="上一柜">◀</button>
+          <span class="ct-idx" id="ctIdx">第 1 / 1 柜</span>
+          <button class="ct-mini" id="ctNext" title="下一柜">▶</button>
+          <button class="ct-mini" id="ctAuto">自动旋转</button>
+          <button class="ct-mini" id="ctReset">复位视角</button>
+        </div>
+        <div class="ct-cvwrap"><canvas id="ctCv"></canvas></div>
+        <div class="ct-legend" id="ctLegend"></div>
+      </div>
     </div>
     <div id="ctResult"></div>
-    <div class="t-tip">按纸箱整数堆叠估算（自动尝试 6 种摆放方向取最优）；柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、混装与码头限重</div>`;
-  const L = box.querySelector('#ctL'), W = box.querySelector('#ctW'), H = box.querySelector('#ctH'), N = box.querySelector('#ctN'), KG = box.querySelector('#ctKg');
-  const res = box.querySelector('#ctResult');
-  const run = () => {
-    const l = parseFloat(L.value), w = parseFloat(W.value), h = parseFloat(H.value);
-    const qty = parseInt(N.value, 10) || 0, kg = parseFloat(KG.value) || 0;
-    if (!l || !w || !h || l <= 0 || w <= 0 || h <= 0) { res.innerHTML = '<div class="t-tip">请填写纸箱长宽高</div>'; return; }
-    const rows = containerEstimate(l, w, h, qty, kg);
-    const boxVol = rows[0].boxVol;
-    let html = `<div class="tool-out" style="margin-top:10px">单箱体积 ${boxVol.toFixed(3)} m³</div>
-      <table class="ct-table"><tr><th>柜型</th><th>每柜可装</th><th>堆叠方式</th><th>需柜数</th><th>体积利用率</th></tr>`;
-    rows.forEach(r => {
-      const per = r.weightLimit && r.weightLimit.weightFirst ? r.weightLimit.perByWeight : r.per;
-      const perTxt = r.weightLimit && r.weightLimit.weightFirst
-        ? `<span class="ct-num">${per}</span> <span class="ct-warn">(限重)</span>`
-        : `<span class="ct-num">${r.per}</span>`;
-      const need = per ? Math.ceil(qty / per) : '—';
-      html += `<tr><td><b>${r.c.id}</b></td><td>${perTxt} 箱</td>
-        <td style="color:var(--text-light)">每层 ${r.perLayer} × ${r.layers} 层</td>
-        <td>${need} 柜</td>
-        <td>${r.volRate}%</td></tr>`;
+    <div class="t-tip">单产品沿用整数堆叠公式（自动尝试 6 种摆放方向取最优）；多产品按「逐层铺排 · 同层分区」估算混装。柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、绑扎与码头限重</div>`;
+  const P = ctState.products;
+  const prodsEl = box.querySelector('#ctProds'), sumEl = box.querySelector('#ctSum'), resEl = box.querySelector('#ctResult');
+  const cvs = box.querySelector('#ctCv'), wrap = box.querySelector('.ct-cvwrap'), legendEl = box.querySelector('#ctLegend');
+  const segEl = box.querySelector('#ctSeg'), idxEl = box.querySelector('#ctIdx');
+  const btnPrev = box.querySelector('#ctPrev'), btnNext = box.querySelector('#ctNext');
+  const btnAuto = box.querySelector('#ctAuto'), btnReset = box.querySelector('#ctReset'), btnAdd = box.querySelector('#ctAdd');
+  let last = null, drag = null, nIdx = 1;
+  const letter = i => CT_LETTERS[i] || ('P' + (i + 1));
+  const fId = (i, k) => (i === 0 ? 'ct' + k : 'ct' + k + i);
+  const fSel = (i, k) => '#' + fId(i, k);
+
+  function renderRows() {
+    prodsEl.innerHTML = P.map((p, i) => `<div class="ct-prod" data-i="${i}">
+        <div class="ct-pline">
+          <span class="ct-tag" style="background:${p.color}">${letter(i)}</span>
+          <input class="ct-col" type="color" value="${p.color}" data-col="${i}" title="箱体颜色">
+          <span class="ct-lb">长</span><input id="${fId(i, 'L')}" type="number" min="1" value="${p.L}">
+          <span class="ct-lb">宽</span><input id="${fId(i, 'W')}" type="number" min="1" value="${p.W}">
+          <span class="ct-lb">高 cm</span><input id="${fId(i, 'H')}" type="number" min="1" value="${p.H}">
+        </div>
+        <div class="ct-pline">
+          <span class="ct-lb">数量</span><input id="${fId(i, 'N')}" class="ct-n" type="number" min="0" value="${p.qty}">
+          <span class="ct-lb">单箱毛重 kg（选填）</span><input id="${fId(i, 'Kg')}" class="ct-kg" type="number" min="0" step="0.1" value="${p.kg || ''}">
+          ${P.length > 1 ? '<button class="ct-del" data-del="' + i + '" title="删除该产品">×</button>' : ''}
+        </div>
+      </div>`).join('');
+    P.forEach((p, i) => ['L', 'W', 'H', 'N', 'Kg'].forEach(k => {
+      const el = prodsEl.querySelector(fSel(i, k));
+      if (el) el.oninput = schedule;
+    }));
+    prodsEl.querySelectorAll('[data-del]').forEach(b => {
+      b.onclick = () => { const i = +b.dataset.del; P.splice(i, 1); ctState.viewIdx = 0; renderRows(); schedule(); };
+    });
+    prodsEl.querySelectorAll('[data-col]').forEach(inp => {
+      inp.oninput = () => {
+        const i = +inp.dataset.col;
+        P[i].color = inp.value;
+        const tag = prodsEl.querySelector('.ct-prod[data-i="' + i + '"] .ct-tag');
+        if (tag) tag.style.background = inp.value;
+        schedule();
+      };
+    });
+    btnAdd.disabled = P.length >= CT_LETTERS.length;
+  }
+  function sync() {
+    P.forEach((p, i) => {
+      const num = (k, d) => { const el = prodsEl.querySelector(fSel(i, k)); const v = el ? parseFloat(el.value) : NaN; return isFinite(v) ? v : d; };
+      p.L = Math.max(0, num('L', 0)); p.W = Math.max(0, num('W', 0)); p.H = Math.max(0, num('H', 0));
+      p.qty = Math.max(0, Math.round(num('N', 0)));
+      p.kg = Math.max(0, num('Kg', 0));
+    });
+  }
+  function fitCanvas() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.max(260, wrap.clientWidth || 420), h = Math.max(170, wrap.clientHeight || 250);
+    const W = Math.round(w * dpr), H = Math.round(h * dpr);
+    if (cvs.width !== W || cvs.height !== H) { cvs.width = W; cvs.height = H; }
+    cvs._dpr = dpr;
+  }
+  function draw() {
+    if (!last) return;
+    const cut = last.cut ? ' · 面数已达上限，示意已简化' : '';
+    const kgTxt = last.cur.kg ? ' · 约 ' + (last.cur.kg / 1000).toFixed(1) + ' t' : '';
+    ctDraw(cvs, { dpr: cvs._dpr || 1, yaw: ctState.yaw, pitch: ctState.pitch, zoom: ctState.zoom }, {
+      cont: last.cont, faces: last.faces,
+      hudL: `${last.cont.id} · ${last.cur.total} 箱 · 体积利用率 ${last.cur.volRate}%${kgTxt}`,
+      hudR: `第 ${last.i + 1} / ${last.n} 柜`,
+      hudB: '拖拽旋转 · 滚轮缩放 · 双击复位' + cut,
+    });
+  }
+  function compute() {
+    sync();
+    const items = P.map((p, i) => ({ pi: i, L: p.L, W: p.W, H: p.H, kg: p.kg || 0, qty: p.qty }))
+      .filter(it => it.L > 0 && it.W > 0 && it.H > 0);
+    const volOf = it => it.L * it.W * it.H / 1e6;
+    if (!items.length) {
+      sumEl.innerHTML = ''; resEl.innerHTML = '<div class="t-tip">请填写纸箱长宽高</div>';
+      legendEl.innerHTML = ''; last = null; fitCanvas(); return;
+    }
+    // 体积小计（单产品时这一行的措辞别改：回归测试里有断言）
+    const v0 = P[0].L * P[0].W * P[0].H / 1e6;
+    if (P.length === 1) {
+      sumEl.innerHTML = `单箱体积 ${v0.toFixed(3)} m³ <small>· 合计 ${(v0 * P[0].qty).toFixed(2)} m³</small>`;
+    } else {
+      const tot = items.reduce((s, it) => s + volOf(it) * it.qty, 0);
+      sumEl.innerHTML = '单箱体积 ' + items.map(it => `${letter(it.pi)} ${volOf(it).toFixed(3)}`).join(' · ') +
+        ` m³<br><small>合计体积 ${tot.toFixed(2)} m³ · ${items.length} 款混装</small>`;
+    }
+    const live = items.filter(it => it.qty > 0);
+    const single = live.length === 1;
+    const est = single ? containerEstimate(live[0].L, live[0].W, live[0].H, live[0].qty, live[0].kg) : null;
+    // ---------- 结果表 ----------
+    const hasMixCol = !single;
+    let html = `<table class="ct-table"><tr><th>柜型</th><th>每柜可装</th>${hasMixCol ? '<th>每柜构成</th>' : ''}<th>堆叠方式</th><th>需柜数</th><th>体积利用率</th></tr>`;
+    const sims = [];
+    let anyWeight = false;
+    CONTAINERS.forEach((c, k) => {
+      const on = c.id === ctState.viewCont;
+      const sim = single ? ctSimulate(c, live, est[k].per) : ctSimulate(c, live);
+      sims.push(sim);
+      const badge = on ? '<span class="ct-badge">3D</span>' : '';
+      if (single) {
+        const r = est[k];
+        const wl = r.weightLimit && r.weightLimit.weightFirst;
+        const per = wl ? r.weightLimit.perByWeight : r.per;
+        const need = per ? Math.ceil(live[0].qty / per) : 0;
+        if (wl) anyWeight = true;
+        html += `<tr data-ct="${c.id}" class="${on ? 'ct-on' : ''}"><td><b>${c.id}</b>${badge}</td>
+          <td>${wl ? `<span class="ct-num">${per}</span> <span class="ct-warn">(限重)</span>` : `<span class="ct-num">${r.per}</span>`} 箱</td>
+          <td style="color:var(--text-light)">每层 ${r.perLayer} × ${r.layers} 层</td>
+          <td>${need} 柜</td><td>${r.volRate}%</td></tr>`;
+      } else {
+        const cur0 = sim.list[0];
+        if (!cur0) {
+          html += `<tr><td><b>${c.id}</b></td><td colspan="5" style="color:var(--text-light)">放不下，请检查尺寸</td></tr>`;
+          return;
+        }
+        if (cur0.wlimited) anyWeight = true;
+        const comp = items.map((it, ii) => `${cur0.counts[ii] ? `<span class="ct-chip" style="background:${P[it.pi].color}"></span>${letter(it.pi)} ${cur0.counts[ii]}` : ''}`).filter(Boolean).join(' ');
+        html += `<tr data-ct="${c.id}" class="${on ? 'ct-on' : ''}"><td><b>${c.id}</b>${badge}</td>
+          <td><span class="ct-num">${cur0.total}</span> 箱${cur0.wlimited ? ' <span class="ct-warn">(限重)</span>' : ''}</td>
+          <td class="ct-comp">${comp}${cur0.kg ? `<br><small style="color:var(--text-light)">约 ${(cur0.kg / 1000).toFixed(1)} t</small>` : ''}</td>
+          <td style="color:var(--text-light)">分层混装</td>
+          <td>${sim.need}${sim.capped ? ' +' : ''} 柜</td><td>${cur0.volRate}%</td></tr>`;
+      }
     });
     html += '</table>';
-    if (rows.some(r => r.weightLimit && r.weightLimit.weightFirst)) {
-      html += '<div class="t-tip ct-warn">⚠ 按单箱毛重计算已超柜子限重，每柜可装数量以重量为准</div>';
-    }
-    res.innerHTML = html;
+    if (anyWeight) html += '<div class="t-tip ct-warn">⚠ 按单箱毛重计算已超柜子限重，每柜可装数量以重量为准</div>';
+    if (single && live.length === 0) html += '<div class="t-tip">请输入数量</div>';
+    resEl.innerHTML = html;
+    resEl.querySelectorAll('tr[data-ct]').forEach(tr => {
+      tr.onclick = () => { ctState.viewCont = tr.dataset.ct; ctState.viewIdx = 0; schedule(); };
+    });
+    // ---------- 3D ----------
+    segEl.innerHTML = CONTAINERS.map(c => `<button data-ct="${c.id}" class="${c.id === ctState.viewCont ? 'on' : ''}">${c.id}</button>`).join('');
+    segEl.querySelectorAll('button').forEach(b => {
+      b.onclick = () => { ctState.viewCont = b.dataset.ct; ctState.viewIdx = 0; schedule(); };
+    });
+    const k = Math.max(0, CONTAINERS.findIndex(c => c.id === ctState.viewCont));
+    const c = CONTAINERS[k], sim = sims[k] || { list: [], need: 0, capped: false };
+    nIdx = Math.max(1, sim.need || sim.list.length || 1);
+    const shown = sim.list.length || 1;
+    const totTxt = (sim.capped && shown < nIdx) ? '≥' + shown : String(nIdx);
+    ctState.viewIdx = Math.max(0, Math.min(ctState.viewIdx, Math.max(0, sim.list.length - 1)));
+    const cur = sim.list[ctState.viewIdx] || null;
+    idxEl.textContent = `第 ${cur ? ctState.viewIdx + 1 : 0} / ${totTxt} 柜`;
+    btnPrev.disabled = !cur || ctState.viewIdx <= 0;
+    btnNext.disabled = !cur || ctState.viewIdx >= sim.list.length - 1;
+    const colors = items.map(it => ctFan(P[it.pi].color));
+    const sc = cur ? ctScene(cur.plan.rects, colors, cur.counts) : { faces: [], cut: false };
+    last = { cont: c, faces: sc.faces, cut: sc.cut, cur: cur || { total: 0, volRate: 0, counts: [], kg: 0 }, i: ctState.viewIdx, n: totTxt };
+    legendEl.innerHTML = items.map((it, ii) => {
+      const cnt = cur ? (cur.counts[ii] || 0) : 0;
+      return `<span><i style="background:${P[it.pi].color}"></i><b>${letter(it.pi)}</b> ${it.L}×${it.W}×${it.H}` +
+        `<span style="color:#9aa9b4"> ×${it.qty}</span>${cur && cnt ? ` <span style="color:#31556e">本柜 ${cnt}</span>` : ''}</span>`;
+    }).join('');
+    if (cur && cur.total === 0) legendEl.innerHTML += '<span style="color:#e67e22">该柜装不进任何产品</span>';
+    fitCanvas();
+    draw();
+  }
+  function schedule() {
+    // 浏览器里用 rAF 合并连发的 input；没有 rAF 的环境（回归测试）必须同步算完，
+    // 否则「改完输入立刻读面板文字」的断言会读不到新值
+    if (typeof requestAnimationFrame !== 'function') { compute(); return; }
+    if (ctState.raf) return;
+    ctState.raf = requestAnimationFrame(() => { ctState.raf = 0; compute(); });
+  }
+  // 交互：拖拽旋转 / 滚轮缩放 / 双击复位
+  cvs.addEventListener('pointerdown', e => {
+    drag = { x: e.clientX, y: e.clientY, yaw: ctState.yaw, pitch: ctState.pitch };
+    try { cvs.setPointerCapture(e.pointerId); } catch (_) { }
+    e.preventDefault();
+  });
+  cvs.addEventListener('pointermove', e => {
+    if (!drag) return;
+    ctState.yaw = drag.yaw + (e.clientX - drag.x) * 0.0075;
+    ctState.pitch = Math.max(-0.32, Math.min(1.25, drag.pitch + (e.clientY - drag.y) * 0.006));
+    draw();
+  });
+  ['pointerup', 'pointercancel'].forEach(t => cvs.addEventListener(t, () => { drag = null; }));
+  cvs.addEventListener('wheel', e => {
+    e.preventDefault();
+    ctState.zoom = Math.max(0.55, Math.min(3.2, ctState.zoom * Math.exp(-e.deltaY * 0.0011)));
+    draw();
+  }, { passive: false });
+  cvs.addEventListener('dblclick', () => { ctState.yaw = -0.46; ctState.pitch = 0.30; ctState.zoom = 1; draw(); });
+  btnReset.onclick = () => { ctState.yaw = -0.46; ctState.pitch = 0.30; ctState.zoom = 1; draw(); };
+  btnAuto.onclick = () => {
+    if (typeof requestAnimationFrame !== 'function') return;
+    ctState.auto = !ctState.auto;
+    btnAuto.classList.toggle('on', ctState.auto);
+    if (ctState.auto && !ctState.autoRaf) ctState.autoRaf = requestAnimationFrame(autoStep);
   };
-  [L, W, H, N, KG].forEach(el => el.oninput = run);
-  run();
+  function autoStep() {
+    ctState.autoRaf = 0;
+    if (!ctState.auto) return;
+    ctState.yaw += 0.0085;
+    draw();
+    ctState.autoRaf = requestAnimationFrame(autoStep);
+  }
+  btnPrev.onclick = () => { ctState.viewIdx = Math.max(0, ctState.viewIdx - 1); schedule(); };
+  btnNext.onclick = () => { ctState.viewIdx = ctState.viewIdx + 1; schedule(); };
+  btnAdd.onclick = () => {
+    if (P.length >= CT_LETTERS.length) return;
+    const src = P[P.length - 1];
+    P.push({ L: src.L, W: src.W, H: src.H, qty: 500, kg: 0, color: CT_COLORS[P.length % CT_COLORS.length] });
+    ctState.viewIdx = 0;
+    renderRows();
+    schedule();
+  };
+  const onResize = () => { fitCanvas(); draw(); };
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('resize', onResize);
+    ctState.cleanup.push(() => { try { window.removeEventListener('resize', onResize); } catch (_) { } });
+  }
+  renderRows();
+  fitCanvas();
+  compute();
   return box;
 }
 
@@ -4952,7 +5589,7 @@ const TOOLS = [
   { id: 'qr', name: '二维码/条形码', icon: '🔳', desc: '二维码 + Code128/EAN', build: buildToolQr },
   { id: 'watermark', name: '图片水印', icon: '💧', desc: '文字 / Logo 打标', build: buildToolWatermark },
   { id: 'date', name: '日期计算', icon: '📅', desc: '日期推算与差值', build: buildToolDate },
-  { id: 'container', name: '装柜估算', icon: '🚢', desc: '20GP / 40HQ 装柜量', build: buildToolContainer },
+  { id: 'container', name: '装柜估算', icon: '🚢', desc: '混装 3D 预演 · 20GP/40GP/40HQ', build: buildToolContainer },
   { id: 'tz', name: '全球时差', icon: '🕐', desc: '多城市时间对照', build: buildToolTime },
   { id: 'rate', name: '汇率换算', icon: '💱', desc: '常用货币换算', build: buildToolRate },
   { id: 'calc', name: '计算器', icon: '🧮', desc: '随手算一算', build: buildToolCalc },
@@ -11178,6 +11815,7 @@ function renderToolbox() {
   const panel = $('toolPanel');
   if (!chips || !panel) return;
   if (tzTimer) { clearInterval(tzTimer); tzTimer = null; }
+  if (typeof ctDispose === 'function') ctDispose();
   chips.innerHTML = '';
   TOOLS.forEach(t => {
     const chip = document.createElement('button');
@@ -11736,6 +12374,7 @@ if (typeof globalThis !== 'undefined') {
     drawWatermarkOn, wmPos, bindDropImage, isFileDrag,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
+    ctState, ctPlanSingle, ctPlanMixed, ctSimulate, ctScene, ctDraw, ctMergeLayers, ctBestOri, ctDispose,
     hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
     HUE_ANCHORS, buildSchemes, padPalette, pickBaseColor, sheetTextColor, renderPaletteSheet, evaluatePalette, contrastRatio,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
