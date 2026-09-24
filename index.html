@@ -202,15 +202,6 @@
     white-space: nowrap;
     display: inline-block;
   }
-  .done-count-chip {
-    background: rgba(255,255,255,0.25);
-    padding: 1px 9px;
-    border-radius: 20px;
-    font-size: 11.5px;
-    font-weight: 500;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
   .col-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; overflow: hidden; }
   .col-fill { height: 100%; background: rgba(255,255,255,0.9); border-radius: 2px; transition: width 0.4s ease; }
   .col-tools { display: flex; gap: 4px; opacity: 0; transition: opacity .2s; }
@@ -239,13 +230,19 @@
     padding: 0 8px; border-radius: 9px; margin: 2px 0 3px 2px;
     white-space: nowrap; max-width: 186px; overflow: hidden; text-overflow: ellipsis;
   }
-  /* 近期已完成归档列：超出 10 项后的折叠展开按钮 */
+  /* 近期已完成归档列：超出 5 项后的折叠展开按钮 */
   .done-col-toggle {
     display: block; margin: 4px auto 8px; padding: 7px 16px;
     border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm);
     font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit;
   }
   .done-col-toggle:hover { border-color: #b9d5ee; }
+  /* 「近期已完成」归档列：整列灰化（已完成项弱化，不与分类色抢视觉） */
+  .done-col .task.done .checkbox { background: #c2c8ce; border-color: #c2c8ce; }
+  .done-col .task.done .title { color: #5a646e; }
+  .done-col .task.done .status-done { background: #eceef0; color: #6b757e; }
+  .done-col .task.done .status-done .dot { background: #a9b1b8; }
+  .done-col .task.done .mini-fill { background: #c2c8ce; }
 
   /* ===== 任务卡 ===== */
   .task {
@@ -388,20 +385,15 @@
   .bar-line .bar-track { flex: 1; height: 16px; background: #eef1f4; border-radius: 8px; overflow: hidden; }
   .bar-line .bar-fillv { height: 100%; background: linear-gradient(90deg, var(--c-sales), var(--c-done)); border-radius: 8px; transition: width .4s; }
   .bar-line .bar-val { width: 190px; color: var(--text-light); flex-shrink: 0; font-size: 12px; }
-  .done-card { background: #f3fbf9; border: 1px solid #d5efea; border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
-  .done-card .t { font-weight: 600; font-size: 14px; word-break: break-word; }
-  .done-card .meta { font-size: 11px; color: #88a6a0; margin-top: 4px; }
-  .done-col-list { padding: 10px 12px; }
-  .done-count-chip { background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-  /* 近期已完成（全局倒序，最多 10 项，其余折叠） */
+  /* 近期已完成（全局倒序，最多 5 项，其余折叠） */
   .recent-block { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 22px; margin-bottom: 18px; }
   .recent-title { font-size: 15px; margin-bottom: 12px; }
   .recent-sub { font-size: 12px; color: var(--text-light); font-weight: 400; }
   .recent-list, .recent-more { display: flex; flex-direction: column; gap: 8px; }
-  .recent-item { display: flex; align-items: center; gap: 10px; background: #f3fbf9; border: 1px solid #d5efea; border-radius: var(--radius-sm); padding: 9px 12px; flex-wrap: wrap; }
-  .recent-tag { font-size: 11px; color: #fff; padding: 2px 9px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
-  .recent-t { font-weight: 600; font-size: 14px; flex: 1; min-width: 160px; word-break: break-word; }
-  .recent-meta { font-size: 11px; color: #88a6a0; white-space: nowrap; }
+  .recent-item { display: flex; align-items: center; gap: 10px; background: #f5f6f7; border: 1px solid #e4e7ea; border-radius: var(--radius-sm); padding: 9px 12px; flex-wrap: wrap; }
+  .recent-tag { font-size: 11px; color: #fff; background: #98a2ac; padding: 2px 9px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+  .recent-t { font-weight: 600; font-size: 14px; flex: 1; min-width: 160px; word-break: break-word; color: #5a646e; }
+  .recent-meta { font-size: 11px; color: #8b939b; white-space: nowrap; }
   .recent-toggle { margin-top: 10px; padding: 7px 16px; border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit; }
   .recent-toggle:hover { border-color: #b9d5ee; }
 
@@ -1304,7 +1296,6 @@
       <div class="stat-cards" id="doneStatCards"></div>
       <div class="recent-block" id="recentDone"></div>
       <div class="done-bars" id="doneBars"></div>
-      <div class="board" id="doneBoard"></div>
     </div>
   </div>
 
@@ -2552,13 +2543,13 @@ function buildRecentColumn(cols = COLUMNS) {
     empty.textContent = '暂无已完成任务';
     list.appendChild(empty);
   } else {
-    const RECENT_MAX = 10;
+    const RECENT_MAX = 5;
     const visible = items.slice(0, RECENT_MAX);
     const folded = items.slice(RECENT_MAX);
     const appendItem = (it, parent) => {
       const tag = document.createElement('div');
       tag.className = 'colchip';
-      tag.style.background = (it.col && it.col.color) || '#7f8c8d';
+      tag.style.background = '#98a2ac';
       tag.textContent = it.col ? it.col.title : '已完成';
       parent.appendChild(tag);
       parent.appendChild(buildTaskEl(it.t, it.col, true));
@@ -12018,12 +12009,12 @@ function renderDoneView() {
     `<div class="stat-card ${c.cls || ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
   ).join('');
 
-  // 1.5) 近期已完成（全局按完成时间倒序，最多展示 10 项，其余折叠收纳）
+  // 1.5) 近期已完成（全局按完成时间倒序，最多展示 5 项，其余折叠收纳）
   const recentWrap = $('recentDone');
   const allDone = [];
   cols.forEach(col => col.tasks.forEach(t => { if (t.status === 'done') allDone.push({ t, col }); }));
   allDone.sort((a, b) => (b.t.doneAt || 0) - (a.t.doneAt || 0));
-  const RECENT_MAX = 10;
+  const RECENT_MAX = 5;
   if (allDone.length === 0) {
     recentWrap.innerHTML = '<div class="empty-hint" style="border:none">暂无已完成任务</div>';
   } else {
@@ -12038,7 +12029,7 @@ function renderDoneView() {
       const plan = (pS || pE) ? ' · 计划 ' + (pS ? pS + (pE ? ' ~ ' + pE : '') : '止 ' + pE) : '';
       const el = document.createElement('div');
       el.className = 'recent-item';
-      el.innerHTML = `<span class="recent-tag" style="background:${col.color || PALETTE[0]}">${esc(col.title)}</span>`
+      el.innerHTML = `<span class="recent-tag">${esc(col.title)}</span>`
         + `<span class="recent-t">${esc(t.title)}</span>`
         + `<span class="recent-meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${plan}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</span>`;
       return el;
@@ -12074,57 +12065,6 @@ function renderDoneView() {
     });
   }
   $('doneBars').innerHTML = barsHtml;
-
-  // 3) 已完成任务看板（按源分类列分区，按完成时间倒序）
-  const doneBoard = $('doneBoard');
-  doneBoard.innerHTML = '';
-  let shown = 0;
-  cols.forEach(col => {
-    const doneTasks = col.tasks.filter(t => t.status === 'done').slice().sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
-    if (!doneTasks.length && !col.tasks.length) return;
-    shown += doneTasks.length;
-
-    const colEl = document.createElement('div');
-    colEl.className = 'column';
-
-    const header = document.createElement('div');
-    header.className = 'column-header';
-    header.style.background = col.color || PALETTE[0];
-    header.innerHTML = `<div class="header-top"><span class="col-title">${esc(col.title)}</span>
-      <span class="done-count-chip">${doneTasks.length} 项 · ${doneItems.length ? Math.round(doneTasks.length / doneItems.length * 100) : 0}%</span></div>
-      <div class="col-bar"><div class="col-fill" style="width:${doneTasks.length ? 100 : 0}%"></div></div>`;
-    colEl.appendChild(header);
-
-    const list = document.createElement('div');
-    list.className = 'done-col-list';
-    if (!doneTasks.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty-hint';
-      empty.textContent = '本分类暂无已完成';
-      list.appendChild(empty);
-    } else {
-      doneTasks.forEach(t => {
-        const pS = fmtPlanMD(t.planStart), pE = fmtPlanMD(t.planEnd);
-        const plan = (pS || pE) ? ' · 计划 ' + (pS ? pS + (pE ? ' ~ ' + pE : '') : '止 ' + pE) : '';
-        const card = document.createElement('div');
-        card.className = 'done-card';
-        card.innerHTML = `<div class="t">${esc(t.title)}</div>
-          <div class="meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${plan}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</div>`;
-        list.appendChild(card);
-      });
-    }
-    colEl.appendChild(list);
-    doneBoard.appendChild(colEl);
-  });
-
-  if (!shown) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-hint';
-    empty.style.margin = '0 auto';
-    empty.style.maxWidth = '400px';
-    empty.textContent = '还没有已完成的任务，去任务看板勾选完成吧';
-    doneBoard.appendChild(empty);
-  }
 
   updateHeaderStats(cols);
 }
