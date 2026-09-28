@@ -9086,6 +9086,15 @@ const PD_DS_QUICK = 520;   // 拖滑块时的快速档：像素少 4.5 倍，改
 const PD_DRIFT_K = 1.7;
 const PD_SNAP_K = 0.030;
 const PD_SMOOTH = 16;
+// 边缘封口（pdSealEdge）的四个尺度，都是「轮廓平滑半径 sr」的倍数：
+//   W   平滑窗口（沿序列左右各看多少个位置）—— 太大把圆角/直角磨掉，太小磨不掉锯齿
+//   LIM 单次平滑的位移上限 —— 保护真实的阶跃（产品顶边那种硬边）
+//   IT  迭代次数
+//   GAP 允许的填缝宽度 —— 大于它的开口视为真实形状（C 形/U 形），不填
+const PD_SEAL_W = 0.5;
+const PD_SEAL_LIM = 1.0;
+const PD_SEAL_IT = 2;
+const PD_SEAL_GAP = 1.0;
 const PD_EDGE_K = 0.030;
 // 边界回拉的三个闸门（梯度单位 = 1 个掩码格上的灰阶差，步长 1.75 原图像素）：
 //   PD_EDGE_GATE 26：**当前边界**的梯度超过它就说明已经压在真边上 → 一律不动（这是安全性的全部保障）
@@ -9653,6 +9662,14 @@ function detectProductMask(cv, o) {
     o.edgeTex == null ? PD_EDGE_TEX : o.edgeTex, o.edgeTexG == null ? PD_EDGE_TEXG : o.edgeTexG);
   m = pdSmooth(m, mw, mh, sr > 0 ? Math.max(2, Math.round(sr / 3)) : 0);
   m = pdFillHoles(m, mw, mh);
+  // 收口：强制「边缘平滑 + 连续」。放在最后一步，前面所有规整都做完再封边，
+  // 免得后续任何一步又把台阶 / 断点带回来。
+  m = pdSealEdge(m, mw, mh, {
+    win: Math.max(2, Math.round(sr * PD_SEAL_W)),
+    lim: Math.max(2, Math.round(sr * PD_SEAL_LIM)),
+    iter: PD_SEAL_IT,
+    gap: Math.max(2, Math.round(sr * PD_SEAL_GAP)),
+  });
   const mb = pdMaskBox(m, mw, mh);
   if (!mb) return null;
 
@@ -9665,6 +9682,121 @@ function detectProductMask(cv, o) {
   };
   // od / driftG 只为探针回传（用来判断某块边界是不是落在「靠 drift 才吃进来」的模糊带上）。
   return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr, od: od, driftG: Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)) };
+}
+
+// —— 边缘封口：主要产品的外缘「强制平滑 + 强制连续」——
+// 需求：识别主要产品后，边缘必须平滑且连续。
+// 前面那些步骤（pdSmooth / pdOpen / pdClose / pdSnapEdge）各自只治一种毛病（毛刺、细凸、凹口、裙边），
+// **谁都不保证最终轮廓没有台阶、没有断点**。实测样张上仍有 15%~18% 的相邻列/行沿跳变 >1px、
+// 个别列被断成 2 段以上。这一步是收口的硬保证：
+//   ① 只留最大连通域（＝主要产品，其余碎片一律不带走）
+//   ② 逐列取上/下沿，对沿序列做**限幅**均值平滑 —— 磨掉锯齿台阶，限幅保证不把真实的阶跃糊掉
+//   ③ 按平滑后的沿重填：本来就是一段的列直接填实；多段的列保留原段、只填 ≤ gap 的缝
+//      （保住 C 形 / U 形这类真实开口，不能为了「连续」把产品填成一块板）
+//   ④ 逐行把 ≤ gap 的缝填平（横向连续）
+//   ⑤ 填洞收尾
+// ⚠️ 所有尺度都跟着「轮廓平滑」sr 走：用户把平滑拉到 0 时，这里退化为只做连续性修补（窗口取 2）。
+function pdSealPass(m0, W, H, opt) {
+  opt = opt || {};
+  const win = Math.max(1, Math.round(opt.win == null ? 6 : opt.win));
+  const lim = Math.max(1, Math.round(opt.lim == null ? 12 : opt.lim));
+  const it = Math.max(1, Math.round(opt.iter == null ? 2 : opt.iter));
+  const gap = Math.max(0, Math.round(opt.gap == null ? 12 : opt.gap));
+  let m = m0;
+  // ② 逐列上/下沿 + 段数
+  const top = new Int32Array(W).fill(-1), bot = new Int32Array(W).fill(-1);
+  const segs = new Int32Array(W);
+  let x0 = W, x1 = -1;
+  for (let x = 0; x < W; x++) {
+    let prev = 0, s = 0;
+    for (let y = 0; y < H; y++) {
+      const v = m[y * W + x];
+      if (v) { if (top[x] < 0) top[x] = y; bot[x] = y; if (!prev) s++; }
+      prev = v;
+    }
+    segs[x] = s;
+    if (top[x] >= 0) { if (x < x0) x0 = x; x1 = x; }
+  }
+  if (x1 < 0) return m0;
+  // ⚠️ 小物体上别把边抹圆：窗口最多取有效跨度的 1/8。
+  //    真实产品一般几百像素宽（这条不生效），但掩码里只有几十像素的小件会被 ±win 的均值
+  //    明显撑大 —— 实测 21px 宽的合成块面积涨了 5.5%，加上这条降到 1% 出头。
+  const span = x1 - x0 + 1;
+  const win2 = Math.max(1, Math.min(win, Math.round(span / 8)));
+  // 沿序列：限幅均值平滑（只在连续有前景的区间内做，跨断裂处不互相拉扯）
+  const smoothSeq = (arr) => {
+    const out = arr.slice();
+    for (let k = 0; k < it; k++) {
+      const src = out.slice();
+      for (let x = x0; x <= x1; x++) {
+        if (src[x] < 0) continue;
+        let s = 0, c = 0;
+        for (let d = -win2; d <= win2; d++) {
+          const xx = x + d;
+          if (xx < x0 || xx > x1 || src[xx] < 0) continue;
+          s += src[xx]; c++;
+        }
+        let v = s / c;
+        if (v > src[x] + lim) v = src[x] + lim;
+        else if (v < src[x] - lim) v = src[x] - lim;
+        out[x] = Math.round(v);
+      }
+    }
+    return out;
+  };
+  const ntop = smoothSeq(top), nbot = smoothSeq(bot);
+  // ③ 按平滑后的沿重填
+  const out = new Uint8Array(W * H);
+  for (let x = x0; x <= x1; x++) {
+    if (ntop[x] < 0) continue;
+    let a = Math.max(0, Math.min(H - 1, ntop[x])), b = Math.max(0, Math.min(H - 1, nbot[x]));
+    if (a > b) { const t = a; a = b; b = t; }
+    if (segs[x] <= 1) { for (let y = a; y <= b; y++) out[y * W + x] = 1; continue; }
+    // 多段列：保留原有段，只把 ≤ gap 的缝填平（真实的大开口不动）
+    let prev = -1;
+    for (let y = a; y <= b; y++) {
+      if (!m[y * W + x]) continue;
+      if (prev >= 0 && y - prev - 1 > 0 && y - prev - 1 <= gap) {
+        for (let yy = prev + 1; yy < y; yy++) out[yy * W + x] = 1;
+      }
+      out[y * W + x] = 1; prev = y;
+    }
+  }
+  // ④ 逐行填缝（横向连续）
+  if (gap > 0) {
+    for (let y = 0; y < H; y++) {
+      const row = y * W;
+      let prev = -1;
+      for (let x = 0; x < W; x++) {
+        if (!out[row + x]) continue;
+        if (prev >= 0 && x - prev - 1 > 0 && x - prev - 1 <= gap) {
+          for (let xx = prev + 1; xx < x; xx++) out[row + xx] = 1;
+        }
+        prev = x;
+      }
+    }
+  }
+  return pdFillHoles(out, W, H);
+}
+
+// 只留主要产品，再对两个方向各封一次边（列向治上/下沿，行向治左/右沿）。
+// ⚠️ 两个方向都必须做：只做列向时左右两侧的锯齿原样留着（实测跳变比例几乎不掉）。
+function pdSealEdge(m0, W, H, opt) {
+  const r = pdLabel8(m0, W, H);
+  let best = 0, bl = 0;
+  for (let i = 1; i < r.size.length; i++) if (r.size[i] > best) { best = r.size[i]; bl = i; }
+  if (!best) return m0;
+  let m = new Uint8Array(W * H);
+  for (let p = 0; p < m.length; p++) if (r.lab[p] === bl) m[p] = 1;
+  m = pdFillHoles(m, W, H);
+  m = pdSealPass(m, W, H, opt);
+  // 转置后跑同一遍 ＝ 对「行」做同样的处理（左右沿平滑 + 行内填缝）
+  const t = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) t[x * H + y] = m[y * W + x];
+  const t2 = pdSealPass(t, H, W, opt);
+  const out = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) out[y * W + x] = t2[x * H + y];
+  return pdFillHoles(out, W, H);
 }
 
 // —— 把掩码（0/1）双线性铺到裁剪框上，得到 0~255 的 alpha ——
@@ -12449,6 +12581,7 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
+    pdSealEdge, pdSealPass,
     pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdSnapEdge, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
     PD_EDGE_K, PD_EDGE_GATE, PD_EDGE_MIN, PD_EDGE_GAIN, PD_EDGE_TEX, PD_EDGE_TEXG,
     pdOpen, pdClose, pdRowMorph, pdColMorph,
