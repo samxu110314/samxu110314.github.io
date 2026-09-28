@@ -9086,6 +9086,16 @@ const PD_DS_QUICK = 520;   // 拖滑块时的快速档：像素少 4.5 倍，改
 //   edgeK  0.030   ：边界回拉（pdSnapEdge）沿法线的搜索半径 = 短边的 3%（短边 734 → 22 掩码 px）。
 //                   实测圆镜裙边最深约 30 原图 px（17 掩码 px），22 够用且不会够到产品内部的花纹边。
 const PD_DRIFT_K = 1.7;
+// 漂移的**局部台阶闸**（曼哈顿色差，单位同 tolG）：
+//   泛洪沿着「同一色簇」漂出去吃阴影时，只允许**逐格平滑**地漂（阴影渐变一格也就几个灰阶），
+//   不允许一步跨过强边。原来只卡「到簇心的绝对距离 ≤ drift」，于是遇到**镀金/高光边框**
+//   这类「亮部颜色刚好落在 drift 球里」的产品，泛洪会一步跳上边框、再把整条边啃掉
+//   —— 实测一张镀金拱形镜（_DSC1324）左中段被啃 260 行 × 55 原图像素，且左沿时对时错。
+//   加了这道闸之后：阴影（平滑渐变）照吃，边框（强边）不再被啃。
+//   12 是扫出来的：14 时镀金拱形镜的左中段仍会漏吃，12 才干净；
+//   而正常样张（圆镜 / 椭圆 / 长条 / 拱形）在 12 与 9999（等于关掉）下掩码**逐像素一致**，
+//   说明 12 只挡住了「跨强边」这一种情况，没有误伤阴影渐变。
+const PD_DRIFT_STEP = 12;
 const PD_SNAP_K = 0.030;
 const PD_SMOOTH = 16;
 // 边缘封口（pdSealEdge）的四个尺度，都是「轮廓平滑半径 sr」的倍数：
@@ -9192,7 +9202,12 @@ function pdOwnDist(px, W, H, refs) {
 //   b) 和当前像素属于同一簇、且距该簇 ≤ drift（顺着同一块颜色的渐变走，吃阴影用）。
 // ⚠️ drift 不能按「和邻居的差」逐段累加 —— 那样 JPEG 噪声会一步步把泛洪带过整张图。
 //    这里始终是「和簇心的绝对距离」，上限就是 drift，所以漂不出去。
-function pdFlood(W, H, own, dist, tolG, drift) {
+// ⚠️ 但「到簇心的绝对距离」单独一条是**不够**的：它只约束了终点，没约束路径。
+//    亮部产品（镀金边框、金属高光）的亮面颜色可能整片落在 drift 球里，泛洪就能一步跳上去
+//    把整条边啃掉。所以再加一道 **PD_DRIFT_STEP 局部台阶闸**（见常量处的说明）：
+//    漂移只许顺着平滑渐变走，不许跨强边。注意它和上面那条不冲突 ——
+//    「和邻居的差」仍然只用来**判定这一步能不能走**，不做累加，所以依旧漂不出 drift 球。
+function pdFlood(W, H, own, dist, tolG, drift, px, stepMax) {
   const n = W * H, bg = new Uint8Array(n), q = new Int32Array(n);
   let qh = 0, qt = 0;
   const bw = Math.max(2, Math.round(0.012 * Math.min(W, H)));
@@ -9209,12 +9224,21 @@ function pdFlood(W, H, own, dist, tolG, drift) {
   }
   while (qh < qt) {
     const p = q[qh++], x = p % W, o = own[p], dp = dist[p];
-    if (x > 0) { const m = p - 1; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
-    if (x < W - 1) { const m = p + 1; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
-    if (p >= W) { const m = p - W; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
-    if (p < n - W) { const m = p + W; if (!bg[m] && ((own[m] === o && dist[m] <= drift) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    const pi = p * 4;
+    if (x > 0) { const m = p - 1; if (!bg[m] && ((own[m] === o && dist[m] <= drift && smoothStep(px, pi, m * 4, stepMax)) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    if (x < W - 1) { const m = p + 1; if (!bg[m] && ((own[m] === o && dist[m] <= drift && smoothStep(px, pi, m * 4, stepMax)) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    if (p >= W) { const m = p - W; if (!bg[m] && ((own[m] === o && dist[m] <= drift && smoothStep(px, pi, m * 4, stepMax)) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
+    if (p < n - W) { const m = p + W; if (!bg[m] && ((own[m] === o && dist[m] <= drift && smoothStep(px, pi, m * 4, stepMax)) || dist[m] <= tolG)) { bg[m] = 1; q[qt++] = m; } }
   }
   return bg;
+}
+
+// 漂移的单格台阶判定：相邻两格的曼哈顿色差 ≤ stepMax 才算「顺着平滑渐变」。
+// 直接收进背景的那条路（dist[m] ≤ tolG）**不过这道闸** —— 它本来就是按绝对色差判的，
+// 再叠一层台阶只会让真正的背景收不干净。
+function smoothStep(px, i0, i1, stepMax) {
+  if (!px || !(stepMax > 0)) return true;
+  return Math.abs(px[i1] - px[i0]) + Math.abs(px[i1 + 1] - px[i0 + 1]) + Math.abs(px[i1 + 2] - px[i0 + 2]) <= stepMax;
 }
 
 // —— 8 邻域连通域（两遍并查集） ——
@@ -9621,7 +9645,8 @@ function detectProductMask(cv, o) {
   const tolG = tol * 3;
   const refs = pdBorderRefs(px, mw, mh, Math.max(20, tolG));
   const od = pdOwnDist(px, mw, mh, refs);
-  const bg = pdFlood(mw, mh, od.own, od.dist, tolG, Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)));
+  const bg = pdFlood(mw, mh, od.own, od.dist, tolG, Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)),
+    px, o.driftStep == null ? PD_DRIFT_STEP : o.driftStep);
   let m = new Uint8Array(mw * mh);
   for (let p = 0; p < m.length; p++) m[p] = bg[p] ? 0 : 1;
 
