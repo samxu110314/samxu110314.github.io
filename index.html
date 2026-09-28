@@ -9670,6 +9670,10 @@ function detectProductMask(cv, o) {
     iter: PD_SEAL_IT,
     gap: Math.max(2, Math.round(sr * PD_SEAL_GAP)),
   });
+  // 圆拟合收口放在**最后**：前面所有规整都做完，形状才稳定，判「是不是圆」才判得准；
+  // 而且它是**重画**，放后面才不会被后续任何一步把残缺 / 凸起带回来。
+  const rd = {};
+  m = pdRoundFit(m, mw, mh, { dbg: rd });
   const mb = pdMaskBox(m, mw, mh);
   if (!mb) return null;
 
@@ -9681,7 +9685,7 @@ function detectProductMask(cv, o) {
     y1: Math.min(H - 1, Math.ceil((mb.y1 + 1) * sy) - 1),
   };
   // od / driftG 只为探针回传（用来判断某块边界是不是落在「靠 drift 才吃进来」的模糊带上）。
-  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr, od: od, driftG: Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)) };
+  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr, od: od, round: rd, driftG: Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)) };
 }
 
 // —— 边缘封口：主要产品的外缘「强制平滑 + 强制连续」——
@@ -9797,6 +9801,125 @@ function pdSealEdge(m0, W, H, opt) {
   const out = new Uint8Array(W * H);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) out[y * W + x] = t2[x * H + y];
   return pdFillHoles(out, W, H);
+}
+
+// —— 圆拟合收口：主要产品是圆的 → 外缘强制是**正圆** ——
+// 需求：「圆形的抠图必须是正圆，目前边缘明显有残缺或者多余」。
+// 前面十几步（泛洪 / 形态学 / 吸附 / 封边）都在**逐列逐行地修边**，谁都不认识「圆」这个概念：
+// 泛洪停在阴影渐隐处 → 圆弧被抹平（**残缺**）；吸附拉到地板高光上 → 某一段鼓出来（**多余**）。
+// 实测圆镜样张（_DSC1030）：极径相对中位数的偏差最大 +5.0% / −2.9%，最长的一段残缺弧 28°。
+// 做法：把轮廓变成**极坐标半径序列** r(θ)，用稳健统计（中位数）挑出「确实在圆上」的方向做
+// 最小二乘圆拟合，再用拟合圆**重画**掩码 —— 残缺的补回来、多余的削掉，出来就是正圆。
+// ⚠️ 只认**正圆**：斜拍成椭圆的不处理。透视圆数学上也是圆，但「轴比小的椭圆」这个集合里
+//    混着大量真椭圆 / 长条产品，判据分不开 —— 宁可放过，也不要把产品切错。
+// ⚠️ 判「是不是圆」只能靠**极径的一致性**，不能靠「填充率 ≈ 1」：正方形的填充率也有 0.955
+//    （= 1/(π×0.577²)），看着像，但它的极径在 −14%~+23% 之间来回摆 → 内点占比只有 ~19%。
+// ⚠️ 内点必须**环绕分布**（12 个扇区逐个查）：否则「只有半边是圆的」的物体会被拟合成整圆。
+// ⚠️ 质心必须落在前景里：C 形 / U 形 / 长条的质心常常在背景上，那类形状一律不碰（实测 test3
+//    就是这样 —— 质心在背景里，极径全是 0，直接被这一步挡掉）。
+// ⚠️ 最后还有一道 IoU 兜底：判据万一被没见过的形状骗过，也不会把产品切坏（差太多就不替换）。
+function pdRoundFit(m0, W, H, opt) {
+  opt = opt || {};
+  const dbg = opt.dbg || null;
+  const N = 720, SEC = 12;
+  const tol = opt.tol == null ? 3 : opt.tol;            // 内点容忍：极径与中位数的偏差（%）
+  const tolPx = opt.tolPx == null ? 2.5 : opt.tolPx;    // 内点容忍的**绝对**下限（掩码 px）
+  const need = opt.need == null ? 0.70 : opt.need;      // 内点占比下限
+  const iouMin = opt.iouMin == null ? 0.80 : opt.iouMin;
+  const done = (v) => { if (dbg) dbg.used = v; };
+  if (dbg) dbg.used = 0;
+  let area = 0, sx = 0, sy = 0;
+  for (let y = 0, p = 0; y < H; y++) for (let x = 0; x < W; x++, p++) if (m0[p]) { area++; sx += x; sy += y; }
+  if (area < 400) return m0;
+  const cx = sx / area, cy = sy / area;
+  const cxi = Math.round(cx), cyi = Math.round(cy);
+  if (cxi < 0 || cxi >= W || cyi < 0 || cyi >= H || !m0[cyi * W + cxi]) return m0;
+  // ① 极径：沿 N 个方向从质心往外走，取「连续前景」的最远处（容忍 ≤2px 的缝）
+  const ux = new Float64Array(N), uy = new Float64Array(N), rs = new Float64Array(N);
+  const maxR = Math.max(W, H);
+  for (let i = 0; i < N; i++) {
+    const th = i / N * Math.PI * 2, dx = Math.cos(th), dy = Math.sin(th);
+    ux[i] = dx; uy[i] = dy;
+    let last = 0, gap = 0;
+    for (let t = 1; t < maxR; t += 1) {
+      const x = Math.round(cx + dx * t), y = Math.round(cy + dy * t);
+      if (x < 0 || x >= W || y < 0 || y >= H) break;
+      if (m0[y * W + x]) { last = t; gap = 0; }
+      else if ((gap += 1) > 2) break;
+    }
+    rs[i] = last;
+  }
+  const srt = Array.prototype.slice.call(rs).sort(function (a, b) { return a - b; });
+  const med = srt[N >> 1];
+  if (!(med > 8)) return m0;
+  const fill = area / (Math.PI * med * med);
+  const inl = new Uint8Array(N), secN = new Int32Array(SEC);
+  let nIn = 0;
+  // ⚠️ 容忍必须同时给**绝对值**和**相对值**，取大：光栅化 + 质心偏心造成的误差是**绝对**的
+  //    （约 1~2 掩码 px，与圆多大无关），只给 3% 的话小圆（r=40 → 1.2px）整圈都判成异常，
+  //    内点占比掉到 60% 而误拒。上限 med×8% 是怕太大的绝对阈值把小物体整块放过。
+  const tolAbs = Math.min(Math.max(tolPx, med * tol / 100), med * 0.08);
+  for (let i = 0; i < N; i++) {
+    if (Math.abs(rs[i] - med) <= tolAbs) { inl[i] = 1; nIn++; secN[(i * SEC / N) | 0]++; }
+  }
+  const inlPct = nIn / N;
+  // ⚠️ 允许最多 2 个扇区（60°）不达标：一段 30°~40° 的明显残缺本来就会吃掉一两个扇区，
+  //    那正是要治的毛病；但半圆 / 只有一小段是弧的形状会坏掉 6 个以上扇区，照样被拒。
+  let secBad = 0;
+  for (let s = 0; s < SEC; s++) if (secN[s] < N / SEC * 0.25) secBad++;
+  const secOk = secBad <= 2;
+  if (dbg) { dbg.med = +med.toFixed(1); dbg.fill = +fill.toFixed(4); dbg.inlPct = +inlPct.toFixed(4); dbg.secOk = secOk; }
+  // ② 粗筛：填充率离 1 太远 = 缺了一大块或鼓出了一大块，那已经不是「圆的有点残缺」的量级
+  if (inlPct < need || !secOk || fill < 0.80 || fill > 1.25) return m0;
+  // ③ 内点端点做最小二乘圆拟合（Kåsa：x²+y² = A·x + B·y + C，A=2·cx，B=2·cy，C=r²−cx²−cy²）
+  let Sx = 0, Sy = 0, Sz = 0, Sxx = 0, Sxy = 0, Sxz = 0, Syy = 0, Syz = 0, n = 0;
+  for (let i = 0; i < N; i++) {
+    if (!inl[i]) continue;
+    const x = cx + ux[i] * rs[i], y = cy + uy[i] * rs[i], z = x * x + y * y;
+    Sx += x; Sy += y; Sz += z; Sxx += x * x; Sxy += x * y; Sxz += x * z; Syy += y * y; Syz += y * z; n++;
+  }
+  const g = [[Sxx, Sxy, Sx, Sxz], [Sxy, Syy, Sy, Syz], [Sx, Sy, n, Sz]];
+  let solvable = true;
+  for (let c = 0; c < 3 && solvable; c++) {
+    let piv = c;
+    for (let r = c + 1; r < 3; r++) if (Math.abs(g[r][c]) > Math.abs(g[piv][c])) piv = r;
+    if (Math.abs(g[piv][c]) < 1e-9) { solvable = false; break; }
+    if (piv !== c) { const t = g[piv]; g[piv] = g[c]; g[c] = t; }
+    for (let r = 0; r < 3; r++) {
+      if (r === c) continue;
+      const f = g[r][c] / g[c][c];
+      for (let k = c; k < 4; k++) g[r][k] -= f * g[c][k];
+    }
+  }
+  if (!solvable) return m0;
+  const ox = g[0][3] / g[0][0] / 2, oy = g[1][3] / g[1][1] / 2;
+  const rr = Math.sqrt(Math.max(0, g[2][3] / g[2][2] + ox * ox + oy * oy));
+  // ④ 拟合结果与稳健估计不能差太多：差太多说明内点里混进了别的东西（花纹边、高光）
+  if (!(rr > 4) || !isFinite(rr)) return m0;
+  if (Math.abs(rr - med) / med > 0.06) return m0;
+  if (Math.sqrt((ox - cx) * (ox - cx) + (oy - cy) * (oy - cy)) > med * 0.05) return m0;
+  // ⑤ 重画 + 顺带算 IoU（兜底判据）
+  // ⚠️ 半径要补 0.5 掩码 px：极径取的是「最后一个前景像素中心」的距离，比真实边界小半格，
+  //    不补的话整个圆会缩水（实测半径 40 的圆拟合出 39.5 → 面积少 2.5%）。
+  const rrOut = rr + 0.5;
+  const out = new Uint8Array(W * H), rr2 = rrOut * rrOut;
+  let inter = 0, uni = 0;
+  for (let y = 0; y < H; y++) {
+    const dy = y - oy, dy2 = dy * dy, row = y * W;
+    for (let x = 0; x < W; x++) {
+      const dx = x - ox;
+      const inc = dx * dx + dy2 <= rr2;
+      const has = m0[row + x];
+      if (inc) out[row + x] = 1;
+      if (inc && has) inter++;
+      if (inc || has) uni++;
+    }
+  }
+  const iou = inter / Math.max(1, uni);
+  if (dbg) { dbg.r = +rr.toFixed(1); dbg.cx = +ox.toFixed(1); dbg.cy = +oy.toFixed(1); dbg.iou = +iou.toFixed(4); }
+  if (iou < iouMin) return m0;
+  done(1);
+  return out;
 }
 
 // —— 把掩码（0/1）双线性铺到裁剪框上，得到 0~255 的 alpha ——
@@ -12581,7 +12704,7 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
-    pdSealEdge, pdSealPass,
+    pdSealEdge, pdSealPass, pdRoundFit,
     pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdSnapEdge, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
     PD_EDGE_K, PD_EDGE_GATE, PD_EDGE_MIN, PD_EDGE_GAIN, PD_EDGE_TEX, PD_EDGE_TEXG,
     pdOpen, pdClose, pdRowMorph, pdColMorph,
