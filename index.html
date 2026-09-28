@@ -636,6 +636,8 @@
   .cu-sl input[type=range] { width: 100%; margin: 0; }
   .cu-sl b { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; }
   .cu-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  /* 一组按钮前面的小标签（尺寸 / 方形底 / 背景）。固定宽度让三行的按钮左边缘对齐 */
+  .cu-lb { font-size: 12px; color: var(--text-light); min-width: 42px; }
   .cu-bar { height: 8px; border-radius: 5px; background: #e7edf3; overflow: hidden; margin-top: 8px; }
   .cu-bar i { display: block; height: 100%; width: 0; background: var(--c-sales, #3498db); transition: width .18s; }
   .cu-log { font-size: 11.5px; line-height: 1.65; color: var(--text-light); max-height: 132px; overflow: auto; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
@@ -9674,6 +9676,10 @@ function detectProductMask(cv, o) {
   // 而且它是**重画**，放后面才不会被后续任何一步把残缺 / 凸起带回来。
   const rd = {};
   m = pdRoundFit(m, mw, mh, { dbg: rd });
+  // 拱形拟合同样放在最后、紧跟圆拟合之后：两者都是**重画**，谁后跑谁的形状说了算。
+  // 先圆后拱是有意的 —— 拱形的判据里「顶行半宽必须很小」，天然排除了圆和椭圆，不会互相打架。
+  const ad = {};
+  m = pdArchFit(m, mw, mh, { dbg: ad });
   const mb = pdMaskBox(m, mw, mh);
   if (!mb) return null;
 
@@ -9685,7 +9691,7 @@ function detectProductMask(cv, o) {
     y1: Math.min(H - 1, Math.ceil((mb.y1 + 1) * sy) - 1),
   };
   // od / driftG 只为探针回传（用来判断某块边界是不是落在「靠 drift 才吃进来」的模糊带上）。
-  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr, od: od, round: rd, driftG: Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)) };
+  return { mask: m, mw: mw, mh: mh, box: box, refs: refs, tolG: tolG, smoothR: sr, od: od, round: rd, arch: ad, driftG: Math.round(tolG * (o.driftK == null ? PD_DRIFT_K : o.driftK)) };
 }
 
 // —— 边缘封口：主要产品的外缘「强制平滑 + 强制连续」——
@@ -9919,6 +9925,308 @@ function pdRoundFit(m0, W, H, opt) {
   if (dbg) { dbg.r = +rr.toFixed(1); dbg.cx = +ox.toFixed(1); dbg.cy = +oy.toFixed(1); dbg.iou = +iou.toFixed(4); }
   if (iou < iouMin) return m0;
   done(1);
+  return out;
+}
+
+// —— 拱形拟合收口：主要产品是「拱形」→ 外缘强制是一条理想拱 ——
+// 需求：「拱形产品抠图，边缘也要整齐，不能缺损或多余」。
+// 拱形 = 下边平直 + 左右竖直 + 顶部一段（半）椭圆弧 —— 圆顶镜、圆顶框条、拱形挂牌都是这一类。
+// 实测用户样张（拱形镜 arch1，掩码 736×992）：顶部弧上有一处凹口、右侧被咬掉一块、
+// 底部两个角塌陷、底边还带一段斜切。这些**不是噪声**，是「形状没被约束」：
+// 前面十几步（泛洪 / 形态学 / 吸附 / 封边）每一步都只做局部修边，谁都不认识「拱」这个概念。
+// 平滑能把边弄顺，但弄不「拱」—— 所以这里先判「是不是拱形」，是就把整条外缘**重画**成理想拱。
+//
+// 模型：直边段 v ∈ [vs, vb] 半宽恒为 a；顶弧 v ∈ [vt, vs) 半宽 = a·√(1−((vs−v)/b)²)。
+//   即「半椭圆拱」：b = a 是半圆拱，b < a 是扁拱，b > a 是高拱（实测这张镜子 b/a ≈ 1.08）。
+// 三个参数都取**稳健量**，抗残缺：
+//   ① a、cx —— 取「半宽 ≥ 0.98×最大半宽」那些行的左右沿**中位数**（不是极值：一处凸起就能把极值带跑）
+//   ② vs、b —— 顶弧每行满足 v = vs − b·u，其中 u = √(1−(半宽/a)²) → **对 (u, v) 做直线回归**，
+//              斜率 = −b、截距 = vs。这一招是整段拟合的关键：把非线性问题变成一次直线拟合，
+//              而且只用顶弧那些行，完全不受底部缺陷影响（两轮 IRLS 剔掉残差大的行）。
+//   ③ vb —— 左右直边各自「一直保持竖直」到哪一行，取更靠下的那个（一侧被咬缺时靠另一侧兜住）
+//
+// 判据链（全过才重画；任一条不过就原样返回 → 不误伤椭圆 / 圆角矩形 / 胶囊 / 长条）：
+//   · 直边段 ≥ 总高的 25%      —— 圆 / 椭圆 / 胶囊的横向没有直边段
+//   · b/a ∈ [0.2, 3.0]         —— 太扁或太高都不是拱
+//   · 顶行半宽 ≤ 0.45a **且** 顶弧内 20% 处 ≤ 0.72a
+//                              —— 这一条专治**圆角矩形**：它顶边中段是平的、只有小圆角，
+//                                 直线回归照样能拟合出一个小 b，但「顶行很宽」直接把它挡掉
+//   · vb 不能离掩码底太远（≤ 总高 20%）—— 圆的下半段半宽迅速收窄，vb 会停在半高处，这条把它挡掉
+//   · 底带（底部 5% 行）中位半宽 ≥ 0.70a —— 拱脚是平的、和拱肩一样宽；
+//                              胶囊 / 盾形 / 大圆角矩形的底是收的，straight、bar 那几把关不住它们
+//   · 顶弧逐行内点占比 ≥ 0.78（容差 a×1.6%）—— 拱的「形状签名」全在顶弧上，这条是主要判据
+//   · 直边段逐行偏差**中位数** ≤ 0.08a —— 用中位数是因为真实照片常有 1~2% 的透视收分，
+//                              那是形状不是缺陷；用「最大值」或「内点占比」会把它当成缺陷而拒绝拟合
+//   · 12 段里最多 2 段不达标（直边段容差放宽到 a×5%，同上的理由）
+//   · 与理想拱的 IoU ≥ 0.93 —— 全局兜底，最后一道
+//
+// ⚠️ **不要加「全图逐行内点占比」这类全局偏差判据**。第一版就写了 inlPct ≥ 0.72，
+//    结果真实样张 0.713 被拒 —— 可那 28% 的坏行恰恰是**要修的缺陷**（底部被斜切、中段有收分）。
+//    判据问的是「这是不是拱」，不是「这掩码干不干净」；干净与否由 IoU 兜底就够了。
+// ⚠️ 和 pdRoundFit 一样是**重画**，必须挂在流水线最末尾，否则后面任何一步都能把残缺带回来。
+// ⚠️ 只认「拱顶朝上或朝下」的正立拱；横放的拱（拱顶朝左/右）不处理 —— 宁可放过，不能切错。
+function pdArchSolve(m0, W, H, opt) {
+  opt = opt || {};
+  // ⚠️ strMin 从 0.25 提到 0.30：0.25 时正圆（r=40）能凑出 0.26 混过这一关，
+  //    全靠后面的 botNarrow 兜；拱的直边段本来就有 30%~70% 的行，0.30 照样过。
+  const strMin = opt.strMin == null ? 0.30 : opt.strMin;
+  const barMin = opt.barMin == null ? 0.20 : opt.barMin;
+  const barMax = opt.barMax == null ? 3.00 : opt.barMax;
+  const iouMin = opt.iouMin == null ? 0.93 : opt.iouMin;
+  const capNeed = opt.capNeed == null ? 0.78 : opt.capNeed;    // 顶弧逐行内点占比
+  const strMax = opt.strMax == null ? 0.08 : opt.strMax;       // 直边段逐行偏差中位数 / a
+  const botMin = opt.botMin == null ? 0.70 : opt.botMin;       // 底带中位半宽 / a
+  const apexMax = opt.apexMax == null ? 0.45 : opt.apexMax;
+  const capMax = opt.capMax == null ? 0.72 : opt.capMax;
+  const SEC = 12;
+  // 拒绝原因只写进 opt.dbg.why —— 判据链有 20 多条，光看「没拟合」没法定位是哪条挂的；
+  // 探针与回归断言都靠它（断言「圆必须在 bar/straight 上被拒」比断言「used=0」有力得多）。
+  let lastWhy = '';
+  const no = (w) => { lastWhy = w; return null; };
+  const medOf = (arr) => {
+    if (!arr.length) return 0;
+    const s = Array.prototype.slice.call(arr).sort(function (p, q) { return p - q; });
+    return s[s.length >> 1];
+  };
+  // 逐行左右沿（只做一次，两个朝向共用）
+  const L = new Int32Array(H).fill(-1), R = new Int32Array(H).fill(-1);
+  let area = 0;
+  for (let y = 0, p = 0; y < H; y++) for (let x = 0; x < W; x++, p++) if (m0[p]) { if (L[y] < 0) L[y] = x; R[y] = x; area++; }
+  if (area < 800) return no('area');
+
+  const solveDir = (dir) => {
+    const V = (y) => (dir > 0 ? y : H - 1 - y);
+    let yt = -1, yb = -1;
+    for (let y = 0; y < H; y++) if (L[y] >= 0) { if (yt < 0) yt = y; yb = y; }
+    if (yt < 0) return no('empty');
+    // v 索引从"拱顶那一行"起算，vt = 0
+    const nv = yb - yt + 1;
+    if (nv < 60) return no('tooShort');
+    const hw = new Float64Array(nv);
+    for (let y = yt; y <= yb; y++) hw[V(y) - V(yt)] = (R[y] - L[y] + 1) / 2;
+    let aMax = 0;
+    for (let i = 0; i < nv; i++) if (hw[i] > aMax) aMax = hw[i];
+    if (!(aMax > 12)) return no('tinyA');
+    // ① a、cx —— 取「半宽落在**上四分位那一档**」的行的左右沿**中位数**。
+    //    ⚠️ 不能取「最宽的那几行」（第一版就是这么写的）：一处鼓包 —— 恰恰正是要修的「多余」——
+    //       就会把那几行顶成最宽，于是 a 和 cx 全被带跑（合成样张上实测 a 40→45、cx 60→55，
+    //       整条拱画歪 5px）。取上四分位档是因为拱的直边段本来就占 25%~70% 的行，鼓包只有几行；
+    //       再用**中位数**而不是极值，单侧被咬缺也带不跑。
+    const srt = Array.prototype.slice.call(hw).sort(function (p, q) { return p - q; });
+    const aTop = srt[Math.min(nv - 1, Math.round(nv * 0.75))];
+    const tolBand = Math.max(2, aTop * 0.02);
+    const ls = [], rs = [];
+    for (let i = 0; i < nv; i++) {
+      if (hw[i] < aTop - tolBand) continue;
+      const y = dir > 0 ? yt + i : H - 1 - (yt + i);
+      ls.push(L[y]); rs.push(R[y]);
+    }
+    if (ls.length < 8) return no('noBand');
+    const sL = medOf(ls), sR = medOf(rs);
+    const a = (sR - sL + 1) / 2, cx = (sL + sR + 1) / 2;
+    if (!(a > 12)) return no('tinyA2');
+    // 直边段 = 「半宽 ≈ a」的**最长连续段**（不能用 bTop/bBot 取首尾：中间一个噪声行就能把段拉长）
+    const tolRun = Math.max(2, a * 0.02);
+    let runS = -1, runE = -1, curS = -1;
+    for (let i = 0; i <= nv; i++) {
+      const ok = i < nv && hw[i] >= a - tolRun;
+      if (ok) { if (curS < 0) curS = i; }
+      else if (curS >= 0) { if (runS < 0 || i - curS > runE - runS) { runS = curS; runE = i - 1; } curS = -1; }
+    }
+    if (runS < 0) return no('noRun');
+    const straight = (runE - runS + 1) / nv;
+    if (straight < strMin) return no('straight');
+    if (runS < 6) return no('capTooShort');                       // 顶弧太短，回归没有依据
+    // ② 顶弧直线回归：v(i) = vs − b·u，u = √(1−(hw/a)²)
+    const us = [], is = [];
+    for (let i = 0; i < runS; i++) {
+      const t = hw[i] / a;
+      if (t < 0.18 || t > 0.92) continue;
+      us.push(Math.sqrt(Math.max(0, 1 - t * t))); is.push(i);
+    }
+    if (us.length < 8) return no('fewCapPts');
+    // ⚠️ 初值必须用 Theil–Sen（两两斜率的中位数，抗 29% 离群），不能直接上最小二乘：
+    //    顶弧上只要有两三行被啃掉（那正是要修的缺陷），最小二乘的斜率就被拽偏，
+    //    接着用 3% 的窄带去剔点会把好点也剔光 —— 合成样张上直接 n<6 拒拟合（why=fitN）。
+    const sls = [];
+    for (let i2 = 0; i2 < us.length; i2++) for (let j2 = i2 + 1; j2 < us.length; j2++) {
+      const du = us[j2] - us[i2];
+      if (Math.abs(du) > 1e-6) sls.push((is[j2] - is[i2]) / du);
+    }
+    if (sls.length < 6) return no('fitN');
+    sls.sort(function (p, q) { return p - q; });
+    let slope = sls[sls.length >> 1];
+    let icept = medOf(is.map(function (v, k) { return v - slope * us[k]; }));
+    if (!(slope < -0.5)) return no('slope');                 // 必须随 u 增大而向上（i 减小）
+    let keep = null;
+    for (let pass = 0; pass < 3; pass++) {
+      const bTry = -slope;
+      const lim = Math.max(1.5, bTry * 0.03);
+      keep = new Uint8Array(us.length);
+      let nBad = 0;
+      for (let k = 0; k < us.length; k++) {
+        if (Math.abs((icept + slope * us[k]) - is[k]) <= lim) keep[k] = 1; else nBad++;
+      }
+      if (!nBad) break;                                // 已经全在内，再迭代也不会变
+      let n = 0, su = 0, si = 0, suu = 0, sui = 0;
+      for (let k = 0; k < us.length; k++) {
+        if (!keep[k]) continue;
+        n++; su += us[k]; si += is[k]; suu += us[k] * us[k]; sui += us[k] * is[k];
+      }
+      if (n < 6) break;      // ⚠️ 别 return：Theil–Sen 初值还在，拿它继续，后面还有 IoU 兜底
+      const den = n * suu - su * su;
+      if (Math.abs(den) < 1e-9) break;
+      slope = (n * sui - su * si) / den;
+      icept = (si - slope * su) / n;
+    }
+    // 用最终内点重算一次（内点不足 6 个就沿用 Theil–Sen 初值）
+    let n = 0, su = 0, si = 0, suu = 0, sui = 0;
+    for (let k = 0; k < us.length; k++) {
+      if (keep && !keep[k]) continue;
+      n++; su += us[k]; si += is[k]; suu += us[k] * us[k]; sui += us[k] * is[k];
+    }
+    if (n >= 6) {
+      const den2 = n * suu - su * su;
+      if (Math.abs(den2) >= 1e-9) { slope = (n * sui - su * si) / den2; icept = (si - slope * su) / n; }
+    }
+    const vsI = icept;
+    const b = -slope;
+    if (!(b > 1) || !isFinite(b) || !isFinite(vsI)) return no('bBad');
+    const bar = b / a;
+    if (bar < barMin || bar > barMax) return no('bar');
+    if (vsI < runS - 0.5 || vsI > runE + 0.5) return no('vsRange');   // 起拱点必须落在直边段顶端
+    // 顶弧「尖不尖」：拱顶是一点，圆角矩形是一段平的
+    if (hw[0] / a > apexMax) return no('apex');
+    const i20 = Math.max(0, Math.min(nv - 1, Math.round(0.2 * vsI)));
+    if (hw[i20] / a > capMax) return no('cap20');
+    // ③ 底边：左右直边各自保持竖直到哪一行
+    const tolB = Math.max(3, a * 0.04);
+    let endL = runE, endR = runE;
+    for (let i = runE; i < nv; i++) {
+      const y = dir > 0 ? yt + i : H - 1 - (yt + i);
+      if (Math.abs(L[y] - sL) <= tolB) endL = i;
+      if (Math.abs(R[y] - sR) <= tolB) endR = i;
+    }
+    const vbRaw = Math.max(endL, endR);
+    if (vbRaw < runE + 0.05 * nv) return no('vbShort');                 // 直边段太短
+    if (vbRaw < nv - 1 - 0.20 * nv) return no('vbFar');               // 平底离掩码底太远 → 圆/椭圆在这挂
+    // 拱脚 = 掩码**底行**：平底要补齐，不能像圆那样停在半高。
+    // 「底带中位半宽 ≥ 0.70a」是这条的保险 —— 底部是尖的（盾形）/ 收的（胶囊、大圆角矩形）直接拒。
+    const bnd = Math.max(6, Math.round(0.05 * nv));
+    const bot = [];
+    for (let i = nv - bnd; i < nv; i++) bot.push(hw[i]);
+    const botMed = medOf(bot) / a;
+    if (botMed < botMin) return no('botNarrow');
+    const vbI = nv - 1;
+    // 逐行偏差 → 顶弧内点占比 / 直边中位偏差 / 12 段覆盖 / 最长粗差段
+    // ⚠️ 顶弧用紧容差（a×1.6%：形状签名在这），直边用松容差（a×5%：透视收分不算缺陷）。
+    //    混用一套容差的结果就是「真拱因为照片有 2% 收分被拒，而缺陷反而留下」。
+    const tolAbs = Math.min(Math.max(2, a * 0.016), a * 0.06);
+    const tolStr = Math.max(tolAbs, a * 0.05);
+    const gross = 2 * tolStr;
+    const bad = new Uint8Array(nv);
+    const devS = [];
+    let nCap = 0, nCapIn = 0, runBest = 0, runCur = 0;
+    for (let i = 0; i <= vbI; i++) {
+      let e;
+      if (i < vsI) { const t = (vsI - (i + 0.5)) / b; e = t >= 1 ? 0 : a * Math.sqrt(Math.max(0, 1 - t * t)); }
+      else e = a;
+      const d = hw[i] - e;
+      if (i < vsI) { nCap++; if (Math.abs(d) <= tolAbs) nCapIn++; }
+      if (Math.abs(d) > (i < vsI ? tolAbs : tolStr)) bad[i] = 1;
+      if (Math.abs(d) > gross) { runCur++; if (runCur > runBest) runBest = runCur; } else runCur = 0;
+      if (i >= runS) devS.push(Math.abs(d));
+    }
+    const capInl = nCapIn / Math.max(1, nCap);
+    const strDev = medOf(devS) / Math.max(1, a);
+    const secT = new Int32Array(SEC), secG = new Int32Array(SEC);
+    const nSec = vbI + 1;
+    for (let i = 0; i <= vbI; i++) { const s = Math.min(SEC - 1, (i * SEC / nSec) | 0); secT[s]++; if (!bad[i]) secG[s]++; }
+    let secBad = 0;
+    for (let s = 0; s < SEC; s++) if (secG[s] < secT[s] * 0.25) secBad++;
+    // ⚠️ 诊断量必须写在**判据之前**：写在 return 之后就永远执行不到（第一版就踩了，
+    //    结果 why='inliers' 却看不到到底差多少）。
+    if (opt.dbg && dir > 0) Object.assign(opt.dbg, { tA: +a.toFixed(1), tB: +b.toFixed(1), tBar: +bar.toFixed(3),
+      tStraight: +straight.toFixed(3), tVs: +vsI.toFixed(1), tVB: vbI, tNV: nv,
+      tCapInl: +capInl.toFixed(4), tStrDev: +strDev.toFixed(4), tBot: +botMed.toFixed(3),
+      tSecBad: secBad, tRun: runBest, tApex: +(hw[0] / a).toFixed(3), tCap: +(hw[i20] / a).toFixed(3),
+      tTolA: +tolAbs.toFixed(2), tTolS: +tolStr.toFixed(2) });
+    if (capInl < capNeed) return no('capInl');
+    if (strDev > strMax) return no('strDev');
+    if (runBest > 0.25 * nv) return no('longDefect');
+    if (secBad > 2) return no('sectors');
+    return { dir: dir, yt: yt, yb: yb, nv: nv, a: a, b: b, bar: bar, cx: cx,
+      vtI: 0, vsI: vsI, vbI: vbI, straight: straight, capInl: capInl, strDev: strDev,
+      botMed: botMed, secBad: secBad, runRows: runBest };
+  };
+
+  const cands = [], whys = {};
+  for (const d of [1, -1]) { lastWhy = ''; const r = solveDir(d); whys[d] = lastWhy; if (r) cands.push(r); }
+  if (opt.dbg) { opt.dbg.whyUp = whys[1]; opt.dbg.whyDn = whys[-1]; }
+  if (!cands.length) return no('nocand');
+  // 两个朝向都过判据时（极少见）取 IoU 高的那个
+  const iouOf = (p) => {
+    const aOut = p.a + 0.5, bOut = p.vsI + 0.5;
+    let inter = 0, uni = 0;
+    for (let y = p.yt; y <= p.yb; y++) {
+      const vi = (p.dir > 0 ? y : H - 1 - y) - (p.dir > 0 ? p.yt : H - 1 - p.yb);
+      let h = -1;
+      if (vi <= p.vbI + 0.5) {
+        if (vi < p.vsI) { const t = (p.vsI - vi) / bOut; h = t >= 1 ? 0 : aOut * Math.sqrt(Math.max(0, 1 - t * t)); }
+        else h = aOut;
+      }
+      const row = y * W;
+      for (let x = 0; x < W; x++) {
+        const inc = h > 0 && (x + 0.5) >= p.cx - h && (x + 0.5) <= p.cx + h;
+        const has = !!m0[row + x];
+        if (inc && has) inter++;
+        if (inc || has) uni++;
+      }
+    }
+    return inter / Math.max(1, uni);
+  };
+  let best = null;
+  for (const c of cands) { const q = iouOf(c); c.iou = q; if (!best || q > best.iou) best = c; }
+  if (!best || best.iou < iouMin) return no('iou');
+  // v 索引 → 图像 y：dir=+1 时 y = yt + v；dir=−1 时 y = yb − v
+  // ⚠️ dir=−1 的换算不是「H−1−(yt+v)」—— 那样的锚点错一格到几十格（探针第一版就踩了这个）。
+  best.vtY = best.dir > 0 ? best.yt : best.yb;
+  best.vbY = best.dir > 0 ? best.yt + best.vbI : best.yb - best.vbI;
+  best.vsY = best.dir > 0 ? best.yt + best.vsI : best.yb - best.vsI;
+  return best;
+}
+
+function pdArchFit(m0, W, H, opt) {
+  opt = opt || {};
+  const dbg = opt.dbg || null;
+  if (dbg) dbg.used = 0;
+  const p = pdArchSolve(m0, W, H, opt);
+  if (dbg) {
+    if (!p) { dbg.used = -1; }   // -1 = 判过但不成拱（区别于 0 = 没跑）
+    else {
+      dbg.used = 1; dbg.a = +p.a.toFixed(1); dbg.b = +p.b.toFixed(1); dbg.bar = +p.bar.toFixed(3);
+      dbg.cx = +p.cx.toFixed(1); dbg.vs = p.vsY; dbg.vb = p.vbY; dbg.vt = p.vtY;
+      dbg.straight = +p.straight.toFixed(3); dbg.capInl = +p.capInl.toFixed(4);
+      dbg.strDev = +p.strDev.toFixed(4); dbg.botMed = +p.botMed.toFixed(3);
+      dbg.secBad = p.secBad; dbg.iou = +p.iou.toFixed(4); dbg.dir = p.dir; dbg.runRows = p.runRows;
+    }
+  }
+  if (!p) return m0;
+  // 重画：横向补 0.5（左右沿取的是「最边上一个前景格」，比真实边界小半格），
+  // 纵向拱顶同理补 0.5（顶弧从 vt−0.5 起算），不补整条拱会缩水。
+  const aOut = p.a + 0.5, bOut = p.vsI + 0.5, vbOut = p.vbI + 0.5;
+  const out = new Uint8Array(W * H);
+  const vBase = p.dir > 0 ? p.yt : H - 1 - p.yb;
+  for (let y = p.yt; y <= p.yb; y++) {
+    const vi = (p.dir > 0 ? y : H - 1 - y) - vBase;
+    if (vi > vbOut) continue;
+    let h;
+    if (vi < p.vsI) { const t = (p.vsI - vi) / bOut; h = t >= 1 ? 0 : aOut * Math.sqrt(Math.max(0, 1 - t * t)); }
+    else h = aOut;
+    const x0 = Math.max(0, Math.ceil(p.cx - h - 0.5)), x1 = Math.min(W - 1, Math.floor(p.cx + h - 0.5));
+    const row = y * W;
+    for (let x = x0; x <= x1; x++) out[row + x] = 1;
+  }
   return out;
 }
 
@@ -10369,24 +10677,40 @@ const sleep0 = () => new Promise(r => setTimeout(r, 0));
 //    在缩略图上缩放等于先把掩码分辨率降一级再放大，alpha 边缘会发毛。
 // ⚠️ 面板读数与真正落盘的尺寸必须**同一套取整**，否则会差 1px（用户会以为导出错了）。
 //    所以尺寸计算单独抽成 outSizeOf，两处都调它，别各算各的。
-function outSizeOf(W, H, target) {
+// sq = 方形底边长（0 = 不要方形底）。方形底时画布固定 sq×sq，产品等比缩放后**居中**。
+// ⚠️ 方形底也遵守「只缩不放」：产品长边已经 ≤ sq 时按原尺寸居中，不硬拉满 —— 放大不增加信息。
+// ⚠️ 返回里 w/h 是**产品**尺寸，cw/ch 是**画布**尺寸（方形时才不等），ox/oy 是产品在画布里的左上角。
+//    面板读数与落盘都读 cw/ch，两处永远一致。
+function outSizeOf(W, H, target, sq) {
   const t = Math.round(target || 0);
+  const S = Math.round(sq || 0);
   const L = Math.max(W, H);
-  if (!t || L <= t) return { w: W, h: H, k: 1, t: t };
+  if (S) {
+    const k = Math.min(1, S / Math.max(1, L));
+    const w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+    return { w: w, h: h, k: k, t: t, sq: S, cw: S, ch: S, ox: Math.round((S - w) / 2), oy: Math.round((S - h) / 2) };
+  }
+  if (!t || L <= t) return { w: W, h: H, k: 1, t: t, sq: 0, cw: W, ch: H, ox: 0, oy: 0 };
   const k = t / L;
-  return { w: Math.max(1, Math.round(W * k)), h: Math.max(1, Math.round(H * k)), k: k, t: t };
+  const w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+  return { w: w, h: h, k: k, t: t, sq: 0, cw: w, ch: h, ox: 0, oy: 0 };
 }
-function scaleToLongSide(cv, target) {
-  const s = outSizeOf(cv.width, cv.height, target);
-  if (s.k === 1) return cv;
+// ⚠️ 白底是 cutProductOutline 里合进**裁剪画布**的（那时画布还是长方形），
+//    所以方形底 + 白底必须在这里**先把整块方形铺白**再画产品，
+//    否则只有产品那一块是白的、四角留着透明 —— 那就不是「白底方形」了。
+function composeOutput(cv, target, sq, bg) {
+  const s = outSizeOf(cv.width, cv.height, target, sq);
+  if (s.k === 1 && !s.sq) return cv;
   const out = document.createElement('canvas');
-  out.width = s.w; out.height = s.h;
+  out.width = s.cw; out.height = s.ch;
   const g = out.getContext('2d');
+  if (bg === 'white') { g.fillStyle = '#fff'; g.fillRect(0, 0, s.cw, s.ch); }
   g.imageSmoothingEnabled = true;
   g.imageSmoothingQuality = 'high';
-  g.drawImage(cv, 0, 0, s.w, s.h);
+  g.drawImage(cv, 0, 0, cv.width, cv.height, s.ox, s.oy, s.w, s.h);
   return out;
 }
+function scaleToLongSide(cv, target) { return composeOutput(cv, target, 0, null); }
 
 // ================= 工具：框条抠图 =================
 function buildToolFrameCut() {
@@ -11532,14 +11856,19 @@ function buildToolProdCut() {
           <div class="cu-grp">
             <div class="cu-grp-t">输出 <span style="font-weight:400">（套用到整批）</span></div>
             <div class="cu-row">
-              <select id="pdSize" class="cu-mini" style="width:100%" title="按长边缩放。原图长边已经小于所选值时保持原尺寸 —— 放大不增加任何信息，只会变糊。">
-                <option value="0">原像素 · 高清无损</option>
-                <option value="2048">长边 2048 px</option>
-                <option value="1024">长边 1024 px</option>
-              </select>
+              <span class="cu-lb">尺寸</span>
+              <button class="cu-mini" id="pdSz0" title="原像素输出，不做任何缩放（高清无损）">原像素</button>
+              <button class="cu-mini" id="pdSz2048" title="按长边缩到 2048 px。原图长边已经小于 2048 时保持原尺寸 —— 放大不增加信息，只会变糊">2048</button>
+              <button class="cu-mini" id="pdSz1024" title="按长边缩到 1024 px。原图长边已经小于 1024 时保持原尺寸">1024</button>
             </div>
             <div class="cu-row" style="margin-top:6px">
-              <span style="font-size:12px;color:var(--text-light)">背景</span>
+              <span class="cu-lb">方形底</span>
+              <button class="cu-mini" id="pdSq0" title="不要方形底，画布就贴着产品">无</button>
+              <button class="cu-mini" id="pdSq2048" title="产品等比缩放、居中放进 2048×2048 的方形画布（产品比 2048 小时按原尺寸居中，不硬拉满）">2048</button>
+              <button class="cu-mini" id="pdSq1024" title="产品等比缩放、居中放进 1024×1024 的方形画布（产品比 1024 小时按原尺寸居中，不硬拉满）">1024</button>
+            </div>
+            <div class="cu-row" style="margin-top:6px">
+              <span class="cu-lb">背景</span>
               <button class="cu-mini on" id="pdBgT" title="透明底 PNG，可直接叠到任何底色上">透明</button>
               <button class="cu-mini" id="pdBgW" title="合成为纯白底，输出的 PNG 不带透明通道">白底</button>
             </div>
@@ -11597,10 +11926,10 @@ function buildToolProdCut() {
     // pad 默认 PD_PAD = 20：四周留 20 原图像素的空白，别让成品正好切在产品的物理边上。
     // 调色五项（sharpen / brightness / contrast / saturation / hue）默认全 0 = 不动原像素，
     // 交给 cutProductOutline 里的 applyPixelAdjust（与框条抠图同一套运算，-100~+100，色相 ±180）。
-    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent', sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0 },
+    opt: { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, sq: 0, bg: 'transparent', sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0 },
   };
   const NG0 = { t: 0, b: 0, l: 0, r: 0 };
-  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, bg: 'transparent', sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0 };
+  const DEFAULTS = { mode: 'outline', tol: 10, smooth: PD_SMOOTH, feather: 1, pad: PD_PAD, size: 0, sq: 0, bg: 'transparent', sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0 };
   // 调色五项：控件 id → st.opt 的键。syncOpt / syncTone / 绑定 / 重置四处都靠它，
   // 提在这里声明（别留在绑定那段里）是为了让 syncOpt 无论什么时候被调用都拿得到。
   // 顺序也定了界面上滑块的顺序（用户点名要的是「亮度、对比度、锐化、饱和度、色相」）。
@@ -11753,7 +12082,12 @@ function buildToolProdCut() {
     set('pdFeather', st.opt.feather); set('pdFeatherV', st.opt.feather);
     set('pdPad', st.opt.pad);
     set('pdMode', st.opt.mode);
-    set('pdSize', String(st.opt.size || 0));
+    // 尺寸 / 方形底是**互斥**的两组（选了方形底就不再按长边缩放，反之亦然），
+    // 所以点亮时要连对方一起判断，否则会出现「2048」和「方形 1024」同时高亮的假象。
+    const sz = st.opt.size || 0, sq = st.opt.sq || 0;
+    const mark = (id, on) => { const el = $(id); if (el) el.classList.toggle('on', !!on); };
+    mark('pdSz0', !sq && sz === 0); mark('pdSz2048', !sq && sz === 2048); mark('pdSz1024', !sq && sz === 1024);
+    mark('pdSq0', sq === 0); mark('pdSq2048', sq === 2048); mark('pdSq1024', sq === 1024);
     Object.keys(TONE_MAP).forEach(syncTone);
     const wt = st.opt.bg === 'white';
     if ($('pdBgT')) $('pdBgT').classList.toggle('on', !wt);
@@ -11915,9 +12249,12 @@ function buildToolProdCut() {
     // 读数 = **最终导出尺寸**（不是裁剪尺寸）：选了「长边 2048 / 1024」或白底之后，
     // 预览画布还是裁剪尺寸，用户必须能从这行读出真正会落盘的像素数。
     // ⚠️ 验收脚本用 /(\d+)×(\d+) px/ 抓这一行比对落盘 PNG，所以「输出 W×H px」要留在最前面。
-    const fsz = outSizeOf(r.canvas.width, r.canvas.height, st.opt.size);
-    $('pdBoxInfo').textContent = '输出 ' + fsz.w + '×' + fsz.h + ' px（'
-      + (fsz.k === 1 ? '原像素' : '长边缩到 ' + fsz.t) + ' · ' + (st.opt.bg === 'white' ? '白底' : '透明底') + '）· 裁剪自 '
+    const fsz = outSizeOf(r.canvas.width, r.canvas.height, st.opt.size, st.opt.sq);
+    // ⚠️ 第一个「N×N px」必须是**画布**尺寸（方形底时 = 方形边长），验收脚本按它比对落盘 PNG。
+    $('pdBoxInfo').textContent = '输出 ' + fsz.cw + '×' + fsz.ch + ' px（'
+      + (fsz.sq ? '方形底 ' + fsz.sq + ' · 产品 ' + fsz.w + '×' + fsz.h + ' 居中'
+        : (fsz.k === 1 ? '原像素' : '长边缩到 ' + fsz.t))
+      + ' · ' + (st.opt.bg === 'white' ? '白底' : '透明底') + '）· 裁剪自 '
       + r.box.x0 + ',' + r.box.y0 + ' → ' + r.box.x1 + ',' + r.box.y1
       + (hasTone(st.opt) ? ' · 已调色' : '');
     $('pdRefInfo').textContent = cur.det && cur.det.plain
@@ -12059,7 +12396,16 @@ function buildToolProdCut() {
   // 输出尺寸 / 背景都是「整批」参数，不参与识别 → 改完只重渲染预览（不重跑检测，很快）。
   // 背景改了预览也要跟着变：透明模式看棋盘底，白底模式直接看成品效果（白底更严格，
   // 边缘残留的灰边只有白底上才看得出来）。
-  $('pdSize').onchange = () => { st.opt.size = parseInt($('pdSize').value, 10) || 0; syncOpt(); drawPreview(); };
+  // ⚠️ 尺寸与方形底互斥：点一组就要把另一组清掉，否则「长边 1024 + 方形 2048」这种
+  //    自相矛盾的组合会一起生效（先缩到 1024 再塞进 2048 方形，等于白缩放一次还丢了像素）。
+  const setSz = (v) => { st.opt.size = v; st.opt.sq = 0; syncOpt(); drawPreview(); };
+  const setSq = (v) => { st.opt.sq = v; st.opt.size = 0; syncOpt(); drawPreview(); };
+  $('pdSz0').onclick = () => setSz(0);
+  $('pdSz2048').onclick = () => setSz(2048);
+  $('pdSz1024').onclick = () => setSz(1024);
+  $('pdSq0').onclick = () => setSq(0);
+  $('pdSq2048').onclick = () => setSq(2048);
+  $('pdSq1024').onclick = () => setSq(1024);
   const putBg = (v) => { st.opt.bg = v; syncOpt(); drawPreview(); };
   $('pdBgT').onclick = () => putBg('transparent');
   $('pdBgW').onclick = () => putBg('white');
@@ -12107,8 +12453,9 @@ function buildToolProdCut() {
       if (!det) throw new Error(o.mode === 'plain' ? '整张图都被判成背景（容差过大）' : '没找到产品主体（试试调小「容差」或「轮廓平滑」）');
       const r = cutProductOutline(cv, Object.assign({}, o, { det: det, nudge: nudgeOf(i), ds: 0 }));
       if (!r) throw new Error('裁剪区域为空（手动边距过大）');
-      // 输出收尾：按「输出尺寸」缩长边（0 = 不缩）。只缩不放，白底已在 cutProductOutline 里合好。
-      const fin = scaleToLongSide(r.canvas, st.opt.size);
+      // 输出收尾：按「输出尺寸」缩长边（0 = 不缩），或按「方形底」把产品居中放进方形画布。
+      // 只缩不放；白底已在 cutProductOutline 里合好，方形底的白由 composeOutput 铺满整块方形。
+      const fin = composeOutput(r.canvas, st.opt.size, st.opt.sq, st.opt.bg);
       const w = fin.width, h = fin.height;
       const bytes = await canvasToPngBytes(fin);
       const name = frameOutName('', fileBaseName(item.file), used);
@@ -12704,11 +13051,11 @@ if (typeof globalThis !== 'undefined') {
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
-    pdSealEdge, pdSealPass, pdRoundFit,
+    pdSealEdge, pdSealPass, pdRoundFit, pdArchSolve, pdArchFit,
     pdFillHoles, pdBoxBlur, pdSmooth, pdSnapOut, pdSnapEdge, pdMaskBox, pdMaskToAlpha, pdBoxBlurF,
     PD_EDGE_K, PD_EDGE_GATE, PD_EDGE_MIN, PD_EDGE_GAIN, PD_EDGE_TEX, PD_EDGE_TEXG,
     pdOpen, pdClose, pdRowMorph, pdColMorph,
-    PD_DS, PD_DS_QUICK, outSizeOf, scaleToLongSide,
+    PD_DS, PD_DS_QUICK, outSizeOf, composeOutput, scaleToLongSide,
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, tagSize, stampNow, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
     sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
