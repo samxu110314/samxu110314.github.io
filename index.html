@@ -590,6 +590,35 @@
   .tz-city small { display: block; font-weight: 400; color: var(--text-light); font-size: 10.5px; }
   .tz-time { font-variant-numeric: tabular-nums; font-weight: 700; }
   .tz-diff { font-size: 11px; color: #e67e22; white-space: nowrap; }
+  /* ===== 全球时差：实体钟表（SVG 指针）+ 数字时钟 并排 ===== */
+  .tz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 10px; }
+  .tz-card {
+    display: flex; align-items: center; gap: 11px; padding: 10px 12px;
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.05);
+  }
+  .tz-card.self { border-color: #b9d5ee; background: linear-gradient(180deg, #f2f8fd 0%, #fff 72%); }
+  .tz-clock { width: 70px; height: 70px; flex: 0 0 auto; filter: drop-shadow(0 1px 2px rgba(16,24,40,.12)); }
+  .tz-clock .ck-face { fill: #fff; }
+  .tz-clock .ck-ring { fill: none; stroke: #d7dde3; stroke-width: 1.6; }
+  .tz-clock .ck-tick { stroke: #c2ccd4; stroke-width: 1.3; stroke-linecap: round; }
+  .tz-clock .ck-tick.major { stroke: #7f8c8d; stroke-width: 2.1; }
+  .tz-clock .ck-h { stroke: #2c3e50; stroke-width: 4.4; stroke-linecap: round; }
+  .tz-clock .ck-m { stroke: #2c3e50; stroke-width: 2.8; stroke-linecap: round; }
+  .tz-clock .ck-s { stroke: #e74c3c; stroke-width: 1.5; stroke-linecap: round; }
+  .tz-clock .ck-pin { fill: #e74c3c; }
+  .tz-card.self .tz-clock .ck-ring { stroke: #3498db; }
+  .tz-info { min-width: 0; flex: 1 1 auto; }
+  .tz-card .tz-city { font-weight: 600; font-size: 13px; line-height: 1.3; }
+  .tz-card .tz-city small { display: block; font-weight: 400; color: var(--text-light); font-size: 10.5px; }
+  .tz-dig {
+    margin-top: 3px; font-size: 19px; font-weight: 700; line-height: 1.2; color: var(--text);
+    font-variant-numeric: tabular-nums; letter-spacing: .3px;
+  }
+  .tz-dig .sec { font-size: 13px; font-weight: 600; color: var(--text-light); margin-left: 1px; }
+  .tz-meta { font-size: 11px; color: var(--text-light); margin-top: 2px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tz-meta .tz-diff { font-size: 11px; }
+  @media (max-width: 520px) { .tz-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
   /* 取色板 */
   .pal-grid { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
   .pal-cell { width: 118px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
@@ -3938,39 +3967,96 @@ function fmtOffsetDiff(min) {
   const txt = Number.isInteger(h) ? h + 'h' : h.toFixed(1) + 'h';
   return (min > 0 ? '早 ' : '晚 ') + Math.abs(txt);
 }
+// 生成一枚实体钟表的 SVG 骨架（指针初始指向 12 点，之后只改 transform）
+function tzClockSvg() {
+  let ticks = '';
+  for (let i = 0; i < 12; i++) {
+    const major = i % 3 === 0;
+    const y1 = major ? 5.5 : 6.5, y2 = major ? 11.5 : 10;
+    ticks += `<line class="ck-tick${major ? ' major' : ''}" x1="36" y1="${y1}" x2="36" y2="${y2}" transform="rotate(${i * 30} 36 36)"/>`;
+  }
+  return `<svg class="tz-clock" viewBox="0 0 72 72" aria-hidden="true">`
+    + `<circle class="ck-face" cx="36" cy="36" r="34"/>`
+    + `<circle class="ck-ring" cx="36" cy="36" r="34"/>`
+    + ticks
+    + `<line class="ck-h" x1="36" y1="36" x2="36" y2="19.5"/>`
+    + `<line class="ck-m" x1="36" y1="36" x2="36" y2="12"/>`
+    + `<line class="ck-s" x1="36" y1="36" x2="36" y2="14"/>`
+    + `<circle class="ck-pin" cx="36" cy="36" r="2.4"/>`
+    + `</svg>`;
+}
+// SVG 元素在回归的 DOM 桩上没有 setAttribute，统一走这个兜底（浏览器仍走真 setAttribute）
+function tzSetAttr(el, k, v) {
+  if (!el) return;
+  if (typeof el.setAttribute === 'function') el.setAttribute(k, v);
+  else el.attributes[k] = v;
+}
+
 function buildToolTime() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🕐 全球时差 <small id="tzNow" style="color:var(--text-light);font-weight:400"></small></h4>
-    <div id="tzList"></div>
+    <div class="tz-grid" id="tzList"></div>
     <div class="tool-row" style="margin-top:12px">
       <span style="color:var(--text-light);font-size:12px">按北京时间查</span>
       <input id="tzPick" type="datetime-local" style="width:200px">
     </div>
     <div id="tzPicked" style="margin-top:6px"></div>
-    <div class="t-tip">上方为各城市当前时间（每秒刷新）；填一个北京时间，下方显示各城市对应时刻，方便约客户会议</div>`;
+    <div class="t-tip">每座城市同时给出实体表盘与数字时刻（每秒刷新）；填一个北京时间，下方显示各城市对应时刻，方便约客户会议</div>`;
   const list = box.querySelector('#tzList'), nowEl = box.querySelector('#tzNow');
   const pick = box.querySelector('#tzPick'), picked = box.querySelector('#tzPicked');
   const bjOffset = 8 * 60;
+  const p2 = n => String(n).padStart(2, '0');
+
+  // 骨架只建一次：之后每秒只改指针角度和文字，避免整块重排抖动
+  const cells = [];
+  TZ_CITIES.forEach(cz => {
+    const card = document.createElement('div');
+    card.className = 'tz-card' + (cz.zone === 'Asia/Shanghai' ? ' self' : '');
+    card.innerHTML = tzClockSvg()
+      + `<div class="tz-info"><div class="tz-city">${cz.city}<small>${cz.sub}</small></div>`
+      + `<div class="tz-dig"><span class="tz-hm">--:--</span><span class="sec">--</span></div>`
+      + `<div class="tz-meta"><span class="tz-diff"></span><span class="tz-date"></span></div></div>`;
+    list.appendChild(card);
+    cells.push({
+      cz: cz,
+      hh: card.querySelector('.ck-h'), mm: card.querySelector('.ck-m'), ss: card.querySelector('.ck-s'),
+      hm: card.querySelector('.tz-hm'), sec: card.querySelector('.sec'),
+      diff: card.querySelector('.tz-diff'), date: card.querySelector('.tz-date'),
+      off: null,
+    });
+  });
+
+  // 时区偏移只在分钟变化时重算（Intl 格式化较贵，没必要每秒 9 次）
+  let offKey = -1;
+  const ensureOff = (now) => {
+    const key = Math.floor(now.getTime() / 60000);
+    if (key === offKey) return;
+    offKey = key;
+    cells.forEach(c => { c.off = zoneOffsetMin(c.cz.zone, now); });
+  };
+
   const wall = (instant, offMin) => {
     const d = new Date(instant + offMin * 60000);
-    const p2 = n => String(n).padStart(2, '0');
     return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())} 周${'日一二三四五六'[d.getUTCDay()]} ${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
   };
   const paint = () => {
     const now = new Date();
-    nowEl.textContent = `（本机 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}）`;
-    let html = '';
-    TZ_CITIES.forEach(cz => {
-      const off = zoneOffsetMin(cz.zone, now);
-      if (off === null) return;
-      const d = new Date(now.getTime() + off * 60000);
-      const p2 = n => String(n).padStart(2, '0');
-      const time = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`;
-      const diff = off - bjOffset;
-      html += `<div class="tz-row"><span class="tz-city">${cz.city}<small>${cz.sub}</small></span>
-        <span><span class="tz-time">${time}</span> <span class="tz-diff">${diff === 0 ? '＝北京' : fmtOffsetDiff(diff)}</span></span></div>`;
+    nowEl.textContent = `（本机 ${p2(now.getHours())}:${p2(now.getMinutes())}）`;
+    ensureOff(now);
+    cells.forEach(c => {
+      if (c.off === null) return;
+      const d = new Date(now.getTime() + c.off * 60000);
+      const h = d.getUTCHours(), m = d.getUTCMinutes(), s = d.getUTCSeconds();
+      c.hm.textContent = `${p2(h)}:${p2(m)}`;
+      c.sec.textContent = ':' + p2(s);
+      c.date.textContent = `${d.getUTCMonth() + 1}月${d.getUTCDate()}日 周${'日一二三四五六'[d.getUTCDay()]}`;
+      // 时针/分针带连续推进（不跳格），秒针按整秒走
+      tzSetAttr(c.hh, 'transform', 'rotate(' + (((h % 12) + m / 60 + s / 3600) * 30).toFixed(2) + ' 36 36)');
+      tzSetAttr(c.mm, 'transform', 'rotate(' + ((m + s / 60) * 6).toFixed(2) + ' 36 36)');
+      tzSetAttr(c.ss, 'transform', 'rotate(' + (s * 6).toFixed(2) + ' 36 36)');
+      const diff = c.off - bjOffset;
+      c.diff.textContent = diff === 0 ? '＝北京' : fmtOffsetDiff(diff);
     });
-    list.innerHTML = html;
   };
   const runPick = () => {
     const v = (pick.value || '').trim();
