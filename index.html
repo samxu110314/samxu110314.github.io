@@ -463,6 +463,69 @@
   .tool-mini:hover { color: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); }
   .tool-swatch { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
   .tool-calc-hist { font-size: 12px; color: var(--text-light); margin-top: 8px; line-height: 1.7; word-break: break-all; }
+  /* ===== 计算器模型：暗色机身 + 4×5 键位，可鼠标点按 ===== */
+  .calc-wrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .calc-body {
+    width: 286px; flex: 0 0 auto; padding: 12px; border-radius: 18px; outline: none;
+    background: linear-gradient(180deg, #3a4450 0%, #252d38 46%, #1b222b 100%);
+    box-shadow: 0 12px 28px -12px rgba(20,30,45,.6), 0 2px 6px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  .calc-body:focus-visible { box-shadow: 0 12px 28px -12px rgba(20,30,45,.6), 0 0 0 3px rgba(52,152,219,.55); }
+  .calc-screen {
+    background: linear-gradient(180deg, #131b25 0%, #0c131b 100%);
+    border-radius: 12px; padding: 10px 12px 9px; margin-bottom: 11px; text-align: right;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.05);
+  }
+  .calc-sc-top { display: flex; align-items: center; gap: 8px; }
+  .calc-expr {
+    flex: 1 1 auto; min-width: 0; min-height: 17px; font-size: 12px; line-height: 1.45; color: #8fa3b8;
+    word-break: break-all; font-variant-numeric: tabular-nums;
+  }
+  .calc-val {
+    font-size: 27px; font-weight: 600; line-height: 1.25; margin-top: 3px; color: #fff;
+    font-variant-numeric: tabular-nums; letter-spacing: .5px; word-break: break-all;
+  }
+  .tool-panel .calc-del {
+    width: 25px; height: 25px; flex: 0 0 auto; padding: 0; border: none; border-radius: 7px; cursor: pointer;
+    background: rgba(255,255,255,.09); color: #cfe0f2; font-size: 12px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .tool-panel .calc-del:hover { background: rgba(255,255,255,.18); color: #fff; }
+  .calc-pad { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .tool-panel .calc-pad .ck {
+    height: 46px; padding: 0; border: none; border-radius: 11px; cursor: pointer;
+    font-family: inherit; font-size: 17px; font-weight: 600; color: #fff;
+    background: rgba(255,255,255,.12);
+    box-shadow: 0 2px 0 rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.11);
+    transition: background .13s, transform .06s, box-shadow .1s;
+  }
+  .tool-panel .calc-pad .ck:hover { background: rgba(255,255,255,.21); }
+  .tool-panel .calc-pad .ck:active {
+    transform: translateY(2px);
+    box-shadow: 0 0 0 rgba(0,0,0,0), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .tool-panel .calc-pad .ck-fn { background: rgba(255,255,255,.08); color: #a6bacd; font-size: 15px; }
+  .tool-panel .calc-pad .ck-op {
+    background: linear-gradient(180deg, #4ea6e2 0%, #2f8fd0 100%); color: #fff; font-size: 19px;
+  }
+  .tool-panel .calc-pad .ck-op:hover { background: linear-gradient(180deg, #5db2ea 0%, #3a9adb 100%); }
+  .tool-panel .calc-pad .ck-eq {
+    background: linear-gradient(180deg, #f4a83f 0%, #e08a1e 100%); color: #fff; font-size: 20px;
+  }
+  .tool-panel .calc-pad .ck-eq:hover { background: linear-gradient(180deg, #f8b457 0%, #ec952b 100%); }
+  .calc-side { flex: 1 1 190px; min-width: 170px; }
+  .calc-side .tool-calc-hist { margin-top: 0; }
+  .calc-hist-t { font-size: 12px; font-weight: 600; color: var(--text-light); margin-bottom: 6px; }
+  .calc-empty { font-size: 12px; color: #a9b3bc; }
+  .calc-hist-item {
+    display: flex; justify-content: space-between; gap: 10px; padding: 4px 0;
+    border-bottom: 1px dashed var(--border); cursor: pointer;
+  }
+  .calc-hist-item:last-child { border-bottom: none; }
+  .calc-hist-item:hover { color: var(--c-sales, #3498db); }
+  .calc-hist-item b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .calc-hist-item:hover b { color: var(--c-sales, #3498db); }
+  @media (max-width: 520px) { .calc-body { width: 100%; } }
   .tool-preview-img { max-width: 100%; max-height: 240px; border-radius: 8px; border: 1px solid var(--border); margin-top: 10px; }
   /* 装柜大师表 */
   .ct-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
@@ -3932,37 +3995,144 @@ function buildToolTime() {
 }
 
 // ---- 8) 计算器 ----
+// 计算器：独立求值内核（无副作用，便于回归直接调用）
+function calcEval(s) {
+  const t = String(s || '').replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-').replace(/%/g, '/100');
+  if (!t || !/^[0-9+\-*/().\s]+$/.test(t)) return null;
+  try {
+    const v = Function('"use strict";return (' + t + ')')();
+    if (typeof v !== 'number' || !isFinite(v)) return null;
+    return Math.round(v * 1e10) / 1e10;
+  } catch (_) { return null; }
+}
+// 数字显示：加千分位，超长走科学计数法（避免把机身撑爆）
+function calcFmt(v) {
+  if (v === null || v === undefined) return '';
+  const r = Math.round(v * 1e10) / 1e10;
+  if (Math.abs(r) >= 1e13) return r.toExponential(6).replace('e+', 'e');
+  const s = String(r), neg = s[0] === '-', b = neg ? s.slice(1) : s;
+  const dot = b.indexOf('.');
+  const i = dot < 0 ? b : b.slice(0, dot), d = dot < 0 ? '' : b.slice(dot);
+  return (neg ? '-' : '') + i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + d;
+}
+// 取表达式末尾正在输入的那个数字段（还没输完时大字显示它，而不是显示半成品的结果）
+function calcTail(s) {
+  const m = String(s || '').match(/(\d+(?:\.\d*)?|\.\d+)$/);
+  return m ? m[1] : null;
+}
+
 function buildToolCalc() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🧮 计算器</h4>
-    <div class="tool-row">
-      <input id="tcExpr" placeholder="输入算式，如 (12.5+3)*2/5" style="width:260px">
-      <span class="tool-out" id="tcRes"></span>
+    <div class="calc-wrap">
+      <div class="calc-body" id="tcBody" tabindex="0" aria-label="计算器">
+        <div class="calc-screen">
+          <div class="calc-sc-top">
+            <div class="calc-expr" id="tcExpr"></div>
+            <button class="calc-del" id="tcBack" title="退格" aria-label="退格">⌫</button>
+          </div>
+          <div class="calc-val" id="tcVal">0</div>
+        </div>
+        <div class="calc-pad" id="tcPad"></div>
+      </div>
+      <div class="calc-side">
+        <div class="calc-hist-t">历史</div>
+        <div class="tool-calc-hist" id="tcHist"></div>
+      </div>
     </div>
-    <div class="tool-calc-hist" id="tcHist"></div>
-    <div class="t-tip">支持 + - * / ( ) 和小数，回车或实时计算</div>`;
-  const expr = box.querySelector('#tcExpr'), res = box.querySelector('#tcRes'), hist = box.querySelector('#tcHist');
-  const calcHist = [];
-  const run = () => {
-    const s = (expr.value || '').trim();
-    if (!s) { res.textContent = ''; return; }
-    if (!/^[0-9+\-*/().\s]+$/.test(s)) { res.textContent = '含不支持的字符'; return; }
-    try {
-      const v = Function('"use strict";return (' + s + ')')();
-      if (typeof v !== 'number' || !isFinite(v)) { res.textContent = '算式无效'; return; }
-      const txt = Math.round(v * 1e8) / 1e8;
-      res.textContent = '= ' + txt;
-      expr.dataset.ok = s + ' = ' + txt;
-    } catch (_) { res.textContent = '算式无效'; }
+    <div class="t-tip">鼠标点按即可；点一下机身也能直接用键盘敲（0-9 · + − × ÷ · 括号 · 回车 = · Esc 清空 · 退格）。点击历史记录可回填。</div>`;
+
+  // 键位：4 列 × 5 行正好填满 20 格，运算符统一在最右列
+  // AC/(/)/÷ · 789× · 456− · 123+ · %/0/./=   （0 不跨格，否则最后一行会挤出第 6 行）
+  const KEYS = [
+    ['AC', 'fn'], ['(', 'fn'], [')', 'fn'], ['÷', 'op'],
+    ['7', ''], ['8', ''], ['9', ''], ['×', 'op'],
+    ['4', ''], ['5', ''], ['6', ''], ['−', 'op'],
+    ['1', ''], ['2', ''], ['3', ''], ['+', 'op'],
+    ['%', 'fn'], ['0', ''], ['.', ''], ['=', 'eq'],
+  ];
+  const pad = box.querySelector('#tcPad');
+  // 逐个按钮直接挂 onclick（不用事件委托：回归用的 DOM 桩只会在 click() 时触发 onclick）
+  KEYS.forEach(([k, cls]) => {
+    const b = document.createElement('button');
+    b.className = 'ck' + (cls ? ' ck-' + cls : '');
+    b.textContent = k; b.dataset.k = k;
+    b.onclick = () => { push(k); focusBody(); };
+    pad.appendChild(b);
+  });
+
+  const exprEl = box.querySelector('#tcExpr'), valEl = box.querySelector('#tcVal'), histEl = box.querySelector('#tcHist');
+  const body = box.querySelector('#tcBody');
+  const focusBody = () => { if (body && body.focus) body.focus(); }; // DOM 桩没有 focus，别让它炸
+  let expr = '';
+  const hist = [];
+
+  const render = () => {
+    const v = calcEval(expr);
+    const tail = calcTail(expr);
+    // 上方小字：完整算式；算式能求值且不等于正在输入的尾段时，右侧补一个浅色预览
+    let top = expr || '';
+    if (v !== null && top && tail !== top) top += '  = ' + calcFmt(v);
+    exprEl.textContent = top;
+    valEl.textContent = tail !== null ? calcFmt(parseFloat(tail)) : (v !== null ? calcFmt(v) : '0');
+    histEl.innerHTML = hist.length
+      ? hist.map(h => '<div class="calc-hist-item" data-e="' + esc(h.e) + '" title="点击回填"><span>' + esc(h.shown) + '</span><b>' + esc(h.res) + '</b></div>').join('')
+      : '<div class="calc-empty">还没有记录</div>';
+    // 历史条目同样直接挂 onclick（点击回填算式）
+    histEl.querySelectorAll('.calc-hist-item').forEach(it => {
+      it.onclick = () => { expr = it.dataset.e || ''; render(); focusBody(); };
+    });
   };
-  expr.oninput = run;
-  expr.onkeydown = e => {
-    if (e.key === 'Enter' && expr.dataset.ok) {
-      calcHist.unshift(expr.dataset.ok);
-      if (calcHist.length > 5) calcHist.pop();
-      hist.innerHTML = calcHist.map(h => '<div>' + esc(h) + '</div>').join('');
+
+  const push = (k) => {
+    if (k === 'AC') { expr = ''; render(); return; }
+    if (k === '⌫') { expr = expr.slice(0, -1); render(); return; }
+    if (k === '=') {
+      const v = calcEval(expr);
+      if (v !== null) {
+        hist.unshift({ e: String(v), shown: expr, res: calcFmt(v) });
+        if (hist.length > 6) hist.pop();
+        expr = String(v);
+      }
+      render(); return;
     }
+    if (k === '%') { // 当前数字段直接换算成百分数
+      const m = expr.match(/(\d+(?:\.\d*)?|\.\d+)$/);
+      if (m) { const v = parseFloat(m[1]) / 100; expr = expr.slice(0, expr.length - m[1].length) + String(v); }
+      render(); return;
+    }
+    // 运算符连按：替换掉末尾那个，别拼出 "5++3" 这种废串
+    if ('+−×÷'.indexOf(k) >= 0 && /[+−×÷]$/.test(expr)) { expr = expr.slice(0, -1) + k; render(); return; }
+    if (/[0-9]/.test(k) && expr === '0') { expr = k; render(); return; }
+    if (k === '.') { const t = calcTail(expr); if (t !== null && t.indexOf('.') >= 0) { render(); return; } }
+    expr += k;
+    render();
   };
+
+  box.querySelector('#tcBack').onclick = () => { push('⌫'); focusBody(); };
+
+  // 键盘：只在机身获得焦点时生效（绑 document 会抢走页面上其它输入框的按键）
+  body.addEventListener('keydown', e => {
+    const k = e.key;
+    let m = null;
+    if (/^[0-9]$/.test(k)) m = k;
+    else if (k === '.') m = '.';
+    else if (k === '+') m = '+';
+    else if (k === '-') m = '−';
+    else if (k === '*') m = '×';
+    else if (k === '/') m = '÷';
+    else if (k === '(' || k === ')') m = k;
+    else if (k === '%') m = '%';
+    else if (k === 'Enter' || k === '=') m = '=';
+    else if (k === 'Backspace') m = '⌫';
+    else if (k === 'Escape' || k === 'Delete') m = 'AC';
+    if (m === null) return;
+    push(m);
+    if (e.preventDefault) e.preventDefault();
+  });
+
+  render();
+  box.__calc = { push: push, keys: KEYS.map(k => k[0]), get: () => expr, eval: calcEval, fmt: calcFmt };
   return box;
 }
 
