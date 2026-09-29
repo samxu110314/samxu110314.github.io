@@ -619,6 +619,53 @@
   .tz-meta { font-size: 11px; color: var(--text-light); margin-top: 2px; display: flex; gap: 6px; flex-wrap: wrap; }
   .tz-meta .tz-diff { font-size: 11px; }
   @media (max-width: 520px) { .tz-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
+  /* 汇率换算 */
+  .fx-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
+  .fx-conv { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .fx-amt { width: 128px; font-size: 17px; font-weight: 700; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); }
+  .fx-amt:focus { outline: none; border-color: #3498db; }
+  .fx-sel { min-width: 128px; padding: 7px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; font-size: 13px; color: var(--text); }
+  .fx-sel:focus { outline: none; border-color: #3498db; }
+  .fx-swap { width: 34px; height: 34px; border: 1px solid var(--border); background: linear-gradient(180deg, #fff, #f4f6f8); border-radius: 50%; cursor: pointer; font-size: 15px; color: var(--text-light); transition: all .18s; flex: none; }
+  .fx-swap:hover { border-color: #3498db; color: #3498db; transform: rotate(180deg); }
+  .fx-res { flex: 1; min-width: 210px; background: linear-gradient(135deg, #f7fbff, #edf3ff); border: 1px solid #d6e4f7; border-radius: var(--radius-sm); padding: 7px 14px; display: flex; flex-direction: column; justify-content: center; }
+  .fx-big { font-size: 25px; font-weight: 700; color: #1f5fa9; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+  .fx-big span { font-size: 13px; font-weight: 700; color: #6b8cb5; margin-left: 5px; }
+  .fx-sub { font-size: 11.5px; color: var(--text-light); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .fx-quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .fx-q { padding: 3px 11px; border: 1px solid var(--border); background: #fff; border-radius: 20px; font-size: 12px; cursor: pointer; color: var(--text-light); }
+  .fx-q:hover { border-color: #3498db; color: #3498db; }
+  .fx-q.on { background: #3498db; border-color: #3498db; color: #fff; }
+  .fx-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 8px; font-size: 12px; color: var(--text-light); }
+  .fx-dot { width: 7px; height: 7px; border-radius: 50%; background: #27ae60; display: inline-block; margin-right: 5px; vertical-align: 1px; }
+  .fx-dot.off { background: #bdc3c7; }
+  .fx-dot.wait { background: #f39c12; animation: fxPulse .9s infinite alternate; }
+  @keyframes fxPulse { from { opacity: .35; } to { opacity: 1; } }
+  .fx-btn { padding: 5px 12px; border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; color: var(--text); }
+  .fx-btn:hover { border-color: #3498db; color: #3498db; }
+  .fx-btn:disabled { opacity: .55; cursor: default; }
+  .fx-scroll { max-height: 336px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .fx-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .fx-tbl th { position: sticky; top: 0; background: #fbfcfd; text-align: right; padding: 7px 9px; color: var(--text-light); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; z-index: 1; }
+  .fx-tbl th:first-child { text-align: left; }
+  .fx-tbl td { padding: 5px 9px; border-bottom: 1px solid #f2f4f6; text-align: right; white-space: nowrap; }
+  .fx-tbl td:first-child { text-align: left; }
+  .fx-row { cursor: pointer; transition: background .12s; }
+  .fx-row:hover { background: #f4f9ff; }
+  .fx-row.sel { background: #e8f2ff; }
+  .fx-c { display: flex; align-items: center; gap: 7px; }
+  .fx-code { font-weight: 700; font-size: 11.5px; background: #eef1f5; border-radius: 4px; padding: 1px 5px; color: #455a64; letter-spacing: .4px; }
+  .fx-row.sel .fx-code { background: #3498db; color: #fff; }
+  .fx-nm { color: var(--text-light); font-size: 11.5px; }
+  .fx-r2 { font-variant-numeric: tabular-nums; color: var(--text-light); }
+  .fx-in { width: 92px; padding: 3px 6px; border: 1px solid transparent; background: #fafbfc; border-radius: 4px; text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+  .fx-in:focus { outline: none; border-color: #3498db; background: #fff; }
+  .fx-in.manual { border-color: #f0a202; background: #fffaf0; }
+  .fx-chg { font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .fx-up { color: #e74c3c; }
+  .fx-dn { color: #27ae60; }
+  .fx-flat { color: #bdc3c7; }
+  .fx-grp td { background: #f7f9fb; color: var(--text-light); font-size: 11px; font-weight: 700; letter-spacing: 1px; padding: 6px 9px; }
   /* 取色板 */
   .pal-grid { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
   .pal-cell { width: 118px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
@@ -3099,35 +3146,300 @@ function buildToolCompress() {
   return box;
 }
 
-// ---- 5) 汇率换算（汇率可编辑，默认近似值） ----
+// ---- 5) 汇率换算（41 币种 · 联网取实时汇率，断网用内置基准值） ----
+// 币种表：base 是「1 该币种 = ? 人民币」的离线基准值（2026-09 快照），
+// 只在首次打开 / 联网失败时兜底，联网成功即被实时值覆盖。
+const FX_LIST = [
+  // —— 主要货币 ——
+  { c: 'CNY', n: '人民币', s: '¥', g: '主要货币', base: 1 },
+  { c: 'USD', n: '美元', s: '$', g: '主要货币', base: 6.72156 },
+  { c: 'EUR', n: '欧元', s: '€', g: '主要货币', base: 7.63919 },
+  { c: 'JPY', n: '日元', s: 'JP¥', g: '主要货币', base: 0.0426975 },
+  { c: 'GBP', n: '英镑', s: '£', g: '主要货币', base: 8.90123 },
+  { c: 'HKD', n: '港元', s: 'HK$', g: '主要货币', base: 0.856847 },
+  // —— 亚洲 ——
+  { c: 'KRW', n: '韩元', s: '₩', g: '亚洲', base: 0.004955 },
+  { c: 'SGD', n: '新加坡元', s: 'S$', g: '亚洲', base: 5.26194 },
+  { c: 'TWD', n: '新台币', s: 'NT$', g: '亚洲', base: 0.2114 },
+  { c: 'THB', n: '泰铢', s: '฿', g: '亚洲', base: 0.200621 },
+  { c: 'MYR', n: '马来西亚林吉特', s: 'RM', g: '亚洲', base: 1.652 },
+  { c: 'VND', n: '越南盾', s: '₫', g: '亚洲', base: 0.000259 },
+  { c: 'IDR', n: '印尼盾', s: 'Rp', g: '亚洲', base: 0.000376 },
+  { c: 'PHP', n: '菲律宾比索', s: '₱', g: '亚洲', base: 0.1075 },
+  { c: 'INR', n: '印度卢比', s: '₹', g: '亚洲', base: 0.070133 },
+  { c: 'MOP', n: '澳门元', s: 'MOP$', g: '亚洲', base: 0.831894 },
+  { c: 'KZT', n: '哈萨克坚戈', s: '₸', g: '亚洲', base: 0.0152 },
+  { c: 'BDT', n: '孟加拉塔卡', s: '৳', g: '亚洲', base: 0.0546023 },
+  { c: 'LKR', n: '斯里兰卡卢比', s: 'Rs', g: '亚洲', base: 0.0203346 },
+  { c: 'PKR', n: '巴基斯坦卢比', s: 'Rs', g: '亚洲', base: 0.024261 },
+  // —— 欧洲 ——
+  { c: 'CHF', n: '瑞士法郎', s: 'CHF', g: '欧洲', base: 8.078 },
+  { c: 'SEK', n: '瑞典克朗', s: 'kr', g: '欧洲', base: 0.674477 },
+  { c: 'NOK', n: '挪威克朗', s: 'kr', g: '欧洲', base: 0.705683 },
+  { c: 'DKK', n: '丹麦克朗', s: 'kr', g: '欧洲', base: 1.02247 },
+  { c: 'PLN', n: '波兰兹罗提', s: 'zł', g: '欧洲', base: 1.7525 },
+  { c: 'CZK', n: '捷克克朗', s: 'Kč', g: '欧洲', base: 0.314 },
+  { c: 'HUF', n: '匈牙利福林', s: 'Ft', g: '欧洲', base: 0.020974 },
+  { c: 'RON', n: '罗马尼亚列伊', s: 'lei', g: '欧洲', base: 1.4513 },
+  { c: 'RUB', n: '俄罗斯卢布', s: '₽', g: '欧洲', base: 0.0797 },
+  { c: 'TRY', n: '土耳其里拉', s: '₺', g: '欧洲', base: 0.1374 },
+  { c: 'UAH', n: '乌克兰格里夫纳', s: '₴', g: '欧洲', base: 0.149971 },
+  // —— 美洲 ——
+  { c: 'CAD', n: '加元', s: 'C$', g: '美洲', base: 4.74462 },
+  { c: 'AUD', n: '澳元', s: 'A$', g: '美洲', base: 4.70969 },
+  { c: 'NZD', n: '新西兰元', s: 'NZ$', g: '美洲', base: 3.79596 },
+  { c: 'BRL', n: '巴西雷亚尔', s: 'R$', g: '美洲', base: 1.2956 },
+  { c: 'MXN', n: '墨西哥比索', s: 'MX$', g: '美洲', base: 0.3797 },
+  { c: 'CLP', n: '智利比索', s: 'CLP$', g: '美洲', base: 0.0069906 },
+  { c: 'ARS', n: '阿根廷比索', s: 'AR$', g: '美洲', base: 0.00439676 },
+  // —— 中东·非洲 ——
+  { c: 'AED', n: '阿联酋迪拉姆', s: 'AED', g: '中东·非洲', base: 1.83024 },
+  { c: 'SAR', n: '沙特里亚尔', s: 'SAR', g: '中东·非洲', base: 1.79242 },
+  { c: 'ILS', n: '以色列新谢克尔', s: '₪', g: '中东·非洲', base: 2.19228 },
+  { c: 'EGP', n: '埃及镑', s: 'E£', g: '中东·非洲', base: 0.129115 },
+  { c: 'ZAR', n: '南非兰特', s: 'R', g: '中东·非洲', base: 0.411022 },
+  { c: 'NGN', n: '尼日利亚奈拉', s: '₦', g: '中东·非洲', base: 0.00505617 },
+  { c: 'MAD', n: '摩洛哥迪拉姆', s: 'MAD', g: '中东·非洲', base: 0.697511 },
+];
+const FX_API = 'https://open.er-api.com/v6/latest/CNY'; // 免费、无需 Key、CORS 全开
+const FX_KEY = 'wb_fx_v2';        // 实时汇率缓存
+const FX_OVER_KEY = 'wb_fx_over_v1'; // 手动改过的汇率（RATE_KEY 是旧版 2 币种用的，不再读写）
+const FX_MAX_AGE = 30 * 60 * 1000; // 30 分钟内的缓存直接用，不重复打接口
+const FX_GROUPS = ['主要货币', '亚洲', '欧洲', '美洲', '中东·非洲'];
+function fxCur(c) { return FX_LIST.find(x => x.c === c) || FX_LIST[0]; }
+// 数值越大越不需要小数位：日元 0.0427、越南盾 0.000259 这类小数货币要留够位数才不至于显示成 0.00
+function fxDp(v) {
+  const a = Math.abs(v);
+  if (a >= 1000) return 2;
+  if (a >= 100) return 3;
+  if (a >= 1) return 4;
+  if (a >= 0.01) return 6;
+  return 8;
+}
+function fxSep(v, dp) {
+  if (!isFinite(v)) return '-';
+  const p = Math.abs(v).toFixed(dp).split('.');
+  p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (v < 0 ? '-' : '') + p.join('.');
+}
+// 汇率：位数随大小自适应，日元 / 越南盾这类小数货币才不会被抹成 0.00
+function fxNum(v) { return fxSep(v, fxDp(v)); }
+// 金额：按钱的习惯显示两位小数（太小的值才加位数），别出现 100.000 这种
+function fxMoney(v) {
+  const a = Math.abs(v);
+  if (a === 0) return '0';
+  if (a >= 0.01) return fxSep(v, 2);
+  if (a >= 0.0001) return fxSep(v, 6);
+  return fxSep(v, 8);
+}
+function fxAgo(ts) {
+  if (!ts) return '';
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return '刚刚';
+  if (m < 60) return m + ' 分钟前';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' 小时前';
+  return Math.floor(h / 24) + ' 天前';
+}
+function fxFallback() {
+  const per = {};
+  FX_LIST.forEach(x => { per[x.c] = x.base; });
+  return { per: per, prev: null, ts: 0, src: 'offline', updated: '' };
+}
+function fxLoad() {
+  const c = loadJSON(FX_KEY, null);
+  if (!c || !c.per || !c.per.USD) return fxFallback();
+  const per = {};
+  FX_LIST.forEach(x => { per[x.c] = (typeof c.per[x.c] === 'number' && c.per[x.c] > 0) ? c.per[x.c] : x.base; });
+  return { per: per, prev: c.prev || null, ts: c.ts || 0, src: c.src || 'offline', updated: c.updated || '' };
+}
+function fxSave(st) { saveJSON(FX_KEY, { per: st.per, prev: st.prev, ts: st.ts, src: st.src, updated: st.updated }); }
+// 接口返回的是「1 CNY = ? 外币」，统一翻成「1 外币 = ? CNY」再看
+function fxPull() {
+  if (typeof fetch !== 'function') return Promise.reject(new Error('当前环境不支持联网'));
+  return fetch(FX_API, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || d.result !== 'success' || !d.rates || !d.rates.USD) throw new Error('接口返回异常');
+    const per = {};
+    FX_LIST.forEach(function (x) {
+      const v = d.rates[x.c];
+      if (typeof v === 'number' && v > 0) per[x.c] = 1 / v;
+    });
+    if (!per.USD || !per.EUR) throw new Error('缺少主要币种');
+    return { per: per, updated: d.time_last_update_utc || '' };
+  });
+}
+
 function buildToolRate() {
   const box = document.createElement('div');
-  const rates = loadJSON(RATE_KEY, { usd: 7.10, eur: 7.85 });
-  box.innerHTML = `<h4>💱 汇率换算 <small style="color:var(--text-light);font-weight:400">（1 外币 = ? 人民币，可改）</small></h4>
-    <div class="tool-row">
-      <input id="trAmt" type="number" value="100" style="width:100px">
-      <select id="trCur"><option value="cny">人民币 CNY</option><option value="usd">美元 USD</option><option value="eur">欧元 EUR</option></select>
-      <span class="tool-out" id="trOut"></span>
+  const st = fxLoad();
+  const over = loadJSON(FX_OVER_KEY, null) || {};   // 手动改过的汇率（优先于实时值）
+  let wait = false, note = '';
+
+  const optsHtml = (sel) => FX_GROUPS.map(g =>
+    '<optgroup label="' + g + '">' + FX_LIST.filter(x => x.g === g)
+      .map(x => '<option value="' + x.c + '"' + (x.c === sel ? ' selected' : '') + '>' + x.c + ' ' + x.n + '</option>').join('')
+    + '</optgroup>').join('');
+
+  box.innerHTML = `<h4>💱 汇率换算 <small style="color:var(--text-light);font-weight:400">（${FX_LIST.length} 币种 · 联网实时汇率）</small></h4>
+    <div class="fx-top">
+      <div class="fx-conv">
+        <input id="fxAmt" class="fx-amt" type="number" value="100">
+        <select id="fxFrom" class="fx-sel">${optsHtml('USD')}</select>
+        <button id="fxSwap" class="fx-swap" title="对调币种">⇄</button>
+        <select id="fxTo" class="fx-sel">${optsHtml('CNY')}</select>
+      </div>
+      <div class="fx-res">
+        <div class="fx-big" id="fxBig">—</div>
+        <div class="fx-sub" id="fxSub"></div>
+      </div>
     </div>
-    <div class="tool-row" style="margin-top:8px">
-      <span style="color:var(--text-light);font-size:12px">1 USD =</span><input id="trUsd" type="number" step="0.01" value="${rates.usd}" style="width:80px">
-      <span style="color:var(--text-light);font-size:12px">CNY　1 EUR =</span><input id="trEur" type="number" step="0.01" value="${rates.eur}" style="width:80px">
-      <span style="color:var(--text-light);font-size:12px">CNY</span>
+    <div class="fx-quick" id="fxQuick"></div>
+    <div class="fx-bar">
+      <span id="fxMeta"></span>
+      <button class="fx-btn" id="fxRefresh">刷新实时汇率</button>
+      <button class="fx-btn" id="fxReset">清除手动值</button>
     </div>
-    <div class="t-tip">默认为近似汇率，做报价前请按当日牌价修改；汇率保存在本机</div>`;
-  const amt = box.querySelector('#trAmt'), cur = box.querySelector('#trCur'), out = box.querySelector('#trOut');
-  const usdEl = box.querySelector('#trUsd'), eurEl = box.querySelector('#trEur');
-  const run = () => {
-    const u = parseFloat(usdEl.value) || 0, e = parseFloat(eurEl.value) || 0;
-    saveJSON(RATE_KEY, { usd: u, eur: e });
-    const v = parseFloat(amt.value);
-    if (isNaN(v)) { out.textContent = ''; return; }
-    const cny = cur.value === 'usd' ? v * u : cur.value === 'eur' ? v * e : v;
-    out.innerHTML = `≈ ¥${cny.toFixed(2)} <small>｜ $${(cny / (u || 1)).toFixed(2)} · €${(cny / (e || 1)).toFixed(2)}</small>`;
+    <div class="fx-scroll"><table class="fx-tbl">
+      <thead><tr><th>币种</th><th>1 外币 = CNY（可改）</th><th>1 CNY = 外币</th><th>较上次</th></tr></thead>
+      <tbody id="fxBody"></tbody>
+    </table></div>
+    <div class="t-tip">打开即自动拉取实时汇率（30 分钟内复用缓存）；表格里的数字可以直接改成银行牌价，会标黄并优先使用 · 汇率保存在本机</div>`;
+
+  const amtEl = box.querySelector('#fxAmt'), fromEl = box.querySelector('#fxFrom'), toEl = box.querySelector('#fxTo');
+  const bigEl = box.querySelector('#fxBig'), subEl = box.querySelector('#fxSub');
+  const bodyEl = box.querySelector('#fxBody'), metaEl = box.querySelector('#fxMeta');
+  const quickEl = box.querySelector('#fxQuick'), btnR = box.querySelector('#fxRefresh'), btnC = box.querySelector('#fxReset');
+  const QUICKS = [1, 10, 100, 1000, 10000];
+
+  const rateOf = (c) => (typeof over[c] === 'number' && over[c] > 0) ? over[c] : (st.per[c] || fxCur(c).base);
+
+  const paintMeta = () => {
+    const dot = wait ? 'wait' : (st.src === 'live' ? '' : 'off');
+    let txt;
+    if (wait) txt = '正在获取实时汇率…';
+    else if (st.src === 'live') txt = '实时汇率 · ' + fxAgo(st.ts) + '更新 · 来源 exchangerate-api（每日刷新）';
+    else txt = '离线基准汇率（内置 ' + '2026-09' + ' 快照）· 联网后点「刷新」' + (note ? ' · ' + note : '');
+    metaEl.innerHTML = '<span class="fx-dot ' + dot + '"></span>' + esc(txt);
+    btnR.disabled = wait;
   };
-  [amt, usdEl, eurEl].forEach(el => el.oninput = run);
-  cur.onchange = run;
-  run();
+
+  const paintConv = () => {
+    const v = parseFloat(amtEl.value);
+    const f = fromEl.value || 'USD', t = toEl.value || 'CNY';
+    if (isNaN(v)) { bigEl.textContent = '—'; subEl.textContent = ''; return; }
+    const cny = v * rateOf(f);
+    const out = cny / (rateOf(t) || 1);
+    bigEl.innerHTML = fxMoney(out) + '<span>' + t + '</span>';
+    // 副行给两个方向的单价（报价看的就是这两个数）；本就涉及 CNY 的那一半不重复写
+    const mid = [];
+    // 金额就是 1 时主句已经是单价了，再列一遍纯属重复
+    if (Math.abs(v) !== 1) {
+      if (f !== 'CNY') mid.push('1 ' + f + ' = ' + fxNum(rateOf(f)) + ' CNY');
+      if (t !== 'CNY') mid.push('1 CNY = ' + fxNum(1 / (rateOf(t) || 1)) + ' ' + t);
+    }
+    subEl.textContent = fxMoney(v) + ' ' + f + ' = ' + fxMoney(out) + ' ' + t
+      + (mid.length ? '　·　' + mid.join('　·　') : '');
+  };
+
+  const paintTable = () => {
+    let html = '';
+    FX_GROUPS.forEach(g => {
+      html += '<tr class="fx-grp"><td colspan="4">' + esc(g) + '</td></tr>';
+      FX_LIST.filter(x => x.g === g).forEach(x => {
+        const r = rateOf(x.c), inv = 1 / (r || 1);
+        let chg = '<span class="fx-flat">—</span>';
+        const p0 = st.prev ? st.prev[x.c] : 0;
+        if (p0 > 0 && x.c !== 'CNY') {
+          const d = (r - p0) / p0 * 100;
+          if (Math.abs(d) >= 0.005) chg = '<span class="fx-chg ' + (d > 0 ? 'fx-up' : 'fx-dn') + '">'
+            + (d > 0 ? '▲' : '▼') + Math.abs(d).toFixed(2) + '%</span>';
+        }
+        html += '<tr class="fx-row" data-c="' + x.c + '">'
+          + '<td><span class="fx-c"><span class="fx-code">' + x.c + '</span><span class="fx-nm">' + esc(x.n) + '</span></span></td>'
+          + '<td><input class="fx-in' + (over[x.c] ? ' manual' : '') + '" data-c="' + x.c + '" value="' + fxNum(r) + '" title="改成银行牌价"></td>'
+          + '<td class="fx-r2">' + fxNum(inv) + '</td>'
+          + '<td>' + chg + '</td></tr>';
+      });
+    });
+    bodyEl.innerHTML = html;
+    const rows = bodyEl.querySelectorAll('.fx-row');
+    rows.forEach(r => {
+      r.onclick = () => { toEl.value = r.dataset.c; markSel(); paintConv(); };
+    });
+    const ins = bodyEl.querySelectorAll('.fx-in');
+    ins.forEach(i => {
+      i.onclick = (e) => { if (e && e.stopPropagation) e.stopPropagation(); };
+      i.onchange = () => {
+        const c = i.dataset.c, v = parseFloat(i.value);
+        if (isNaN(v) || v <= 0) { i.value = fxNum(rateOf(c)); return; }
+        over[c] = v; saveJSON(FX_OVER_KEY, over);
+        paintTable();          // 整表重绘：顺带刷新「1 CNY = 外币」那一列，并给该行打上手动标记
+        paintConv();
+      };
+    });
+    markSel();
+  };
+
+  const markSel = () => {
+    const rows = bodyEl.querySelectorAll('.fx-row');
+    rows.forEach(r => r.classList.toggle('sel', r.dataset.c === toEl.value));
+  };
+
+  const paintAll = () => { paintMeta(); paintTable(); paintConv(); };
+
+  // 快捷金额
+  QUICKS.forEach(q => {
+    const b = document.createElement('button');
+    b.className = 'fx-q'; b.textContent = String(q); b.dataset.q = String(q);
+    b.onclick = () => { amtEl.value = String(q); syncQuick(); paintConv(); };
+    quickEl.appendChild(b);
+  });
+  const syncQuick = () => {
+    const qs = quickEl.querySelectorAll('.fx-q');
+    qs.forEach(b => b.classList.toggle('on', b.dataset.q === String(parseFloat(amtEl.value))));
+  };
+
+  amtEl.oninput = () => { syncQuick(); paintConv(); };
+  fromEl.onchange = paintConv;
+  toEl.onchange = () => { markSel(); paintConv(); };
+  box.querySelector('#fxSwap').onclick = () => {
+    const f = fromEl.value; fromEl.value = toEl.value; toEl.value = f;
+    markSel(); paintConv();
+  };
+  btnR.onclick = () => refresh(true);
+  btnC.onclick = () => {
+    Object.keys(over).forEach(k => delete over[k]);
+    saveJSON(FX_OVER_KEY, over);
+    paintTable(); paintConv();
+  };
+
+  const refresh = (manual) => {
+    if (wait) return;
+    if (!manual && st.src === 'live' && Date.now() - st.ts < FX_MAX_AGE) return;
+    wait = true; paintMeta();
+    fxPull().then(function (got) {
+      wait = false;
+      // 面板可能已被切走（切工具会重建 DOM），这时只落缓存、别碰旧节点
+      if (box.isConnected === false) { st.per = got.per; st.ts = Date.now(); st.src = 'live'; st.updated = got.updated; fxSave(st); return; }
+      st.prev = st.per;              // 留上一版，用来算「较上次」涨跌
+      st.per = got.per;
+      st.ts = Date.now();
+      st.src = 'live';
+      st.updated = got.updated;
+      note = '';
+      fxSave(st);
+      paintAll();
+    }).catch(function (e) {
+      wait = false;
+      note = '获取失败（' + (e && e.message ? e.message : '网络不通') + '）';
+      if (box.isConnected !== false) paintMeta();
+    });
+  };
+
+  paintAll();
+  syncQuick();
+  refresh(false);           // 首次打开或缓存过期就自动拉一次
+  box.__fx = { rateOf: rateOf, state: st, refresh: refresh, list: FX_LIST };
   return box;
 }
 
@@ -5996,7 +6308,7 @@ const TOOLS = [
   { id: 'date', name: '日期计算', icon: '📅', desc: '日期推算与差值', build: buildToolDate },
   { id: 'container', name: '装柜大师', icon: '🚢', desc: '混装 3D 预演 · 20GP/40GP/40HQ', build: buildToolContainer },
   { id: 'tz', name: '全球时差', icon: '🕐', desc: '多城市时间对照', build: buildToolTime },
-  { id: 'rate', name: '汇率换算', icon: '💱', desc: '常用货币换算', build: buildToolRate },
+  { id: 'rate', name: '汇率换算', icon: '💱', desc: FX_LIST.length + ' 币种 · 实时汇率', build: buildToolRate },
   { id: 'calc', name: '计算器', icon: '🧮', desc: '随手算一算', build: buildToolCalc },
 ];
 
