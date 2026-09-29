@@ -420,7 +420,13 @@
     transition: transform .16s;
   }
   .tool-chip .tc-ico svg { width: 100%; height: 100%; display: block; }
-  .tool-chip .tc-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .tool-chip .tc-name { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+  /* 功能名后的状态徽标（如「调试中」）：橙色提示该功能仍在调整，结果可能不稳定 */
+  .tc-badge {
+    font-size: 10px; font-weight: 600; line-height: 1.5; white-space: nowrap;
+    padding: 0 5px; border-radius: 5px; color: #b45309;
+    background: #fef3c7; border: 1px solid #fcd34d;
+  }
   .tool-chip .tc-desc { font-size: 11px; color: var(--text-light); line-height: 1.4; }
   .tool-chip:hover { border-color: #b9d5ee; box-shadow: 0 10px 22px -8px rgba(52,152,219,.38); transform: translateY(-4px); }
   .tool-chip:hover::before { opacity: 1; }
@@ -11804,7 +11810,7 @@ function buildToolFrameCut() {
 // ================= 工具：产品抠图（通用去纯色背景） =================
 function buildToolProdCut() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>🖼️ 产品抠图 <small style="color:var(--text-light);font-weight:400">（认外框轮廓 → 透明底 PNG，批量）</small></h4>
+  box.innerHTML = `<h4>🖼️ 产品抠图 <span class="tc-badge">调试中</span> <small style="color:var(--text-light);font-weight:400">（认外框轮廓 → 透明底 PNG，批量）</small></h4>
     <div class="cu-drop" id="pdDrop">
       <label class="cc-upload"><span>📁 选择文件夹</span><input type="file" id="pdFolder" webkitdirectory directory multiple style="display:none"></label>
       <label class="cc-upload"><span>🖼️ 选择图片</span><input type="file" id="pdFiles" accept="image/*" multiple style="display:none"></label>
@@ -12549,7 +12555,7 @@ function buildToolProdCut() {
 const CUTS = [
   // icon 只在 sprite 里没有对应 symbol 时兜底；框条抠图已有 ic-framecut（真实样张缩略图）所以走 SVG
   { id: 'framecut', name: '框条抠图', icon: '✂️', desc: '正面去背景 · 原像素 PNG', build: buildToolFrameCut },
-  { id: 'prodcut', name: '产品抠图', icon: '🖼️', desc: '去背景 · 批量透明 PNG', build: buildToolProdCut },
+  { id: 'prodcut', name: '产品抠图', badge: '调试中', icon: '🖼️', desc: '去背景 · 批量透明 PNG', build: buildToolProdCut },
 ];
 let activeCut = null;
 function renderCutbox() {
@@ -12566,6 +12572,7 @@ function renderCutbox() {
       ? '<svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#ic-' + t.id + '"/></svg>'
       : esc(t.icon || '');
     const nm = document.createElement('span'); nm.className = 'tc-name'; nm.textContent = t.name;
+    if (t.badge) { const bg = document.createElement('span'); bg.className = 'tc-badge'; bg.textContent = t.badge; nm.appendChild(bg); }
     const de = document.createElement('span'); de.className = 'tc-desc'; de.textContent = t.desc || '';
     chip.appendChild(ico); chip.appendChild(nm); chip.appendChild(de);
     chip.onclick = () => { activeCut = activeCut === t.id ? null : t.id; renderCutbox(); };
