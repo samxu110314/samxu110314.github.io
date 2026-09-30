@@ -583,6 +583,36 @@
   .ct-table tr[data-ct]:hover td { background: #f7fbff; }
   .ct-table tr.ct-on td { background: #f1f8ff; }
   .ct-badge { display: inline-block; font-size: 9.5px; padding: 1px 5px; border-radius: 5px; background: #e8f3fc; color: var(--c-sales, #3498db); font-weight: 700; margin-left: 5px; vertical-align: 1px; }
+  /* 每款产品的摆放约束（正放 / 侧放 / 立放 / 转向） */
+  .ct-allow { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .ct-allow button { padding: 2px 8px; font-size: 11px; border-radius: 6px; color: var(--text-light); background: #fff; }
+  .ct-allow button.on { background: #eaf4fb; border-color: #b8d8ee; color: #1c5f8a; font-weight: 600; }
+  .ct-allow button.turn { margin-left: 4px; border-style: dashed; }
+  .ct-allow button.turn.on { border-style: solid; }
+  .ct-allow-off { font-size: 11px; color: #e67e22; }
+  /* 装柜记录 */
+  .ct-log { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; background: #fcfdfe; padding: 10px 11px 11px; }
+  .ct-log-bar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .ct-log-bar input { width: 130px; padding: 4px 7px; font-size: 12.5px; }
+  .ct-log-bar .ct-log-act { margin-left: auto; display: inline-flex; gap: 6px; }
+  .ct-log-empty { font-size: 12px; color: #8a99a5; padding: 9px 2px 3px; }
+  .ct-recs { display: flex; flex-direction: column; gap: 8px; margin-top: 9px; }
+  .ct-rec { border: 1px solid var(--border); border-radius: 9px; background: #fff; padding: 8px 10px 9px; }
+  .ct-rec.cmp { border-color: var(--c-sales, #3498db); box-shadow: 0 0 0 2px rgba(52,152,219,.13); }
+  .ct-rec-hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ct-rec-hd b { font-size: 13px; }
+  .ct-rec-hd time { font-size: 11px; color: #93a2ad; font-variant-numeric: tabular-nums; }
+  .ct-rec-hd .ct-rec-act { margin-left: auto; display: inline-flex; gap: 5px; }
+  .ct-rec-p { margin-top: 5px; font-size: 11.5px; color: var(--text-light); line-height: 1.8; word-break: break-all; }
+  .ct-rec-p em { font-style: normal; color: var(--text); font-weight: 600; }
+  .ct-rec-r { margin-top: 6px; display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 5px 12px; font-size: 11.5px; color: var(--text-light); }
+  .ct-rec-r span b { font-variant-numeric: tabular-nums; }
+  .ct-cmp-tbl { width: 100%; border-collapse: collapse; margin-top: 9px; font-size: 12px; }
+  .ct-cmp-tbl th, .ct-cmp-tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+  .ct-cmp-tbl th:first-child, .ct-cmp-tbl td:first-child { text-align: left; }
+  .ct-cmp-tbl th { background: #f5f7f9; color: var(--text-light); font-size: 11px; font-weight: 600; }
+  .ct-cmp-tbl td.ct-best { color: #16a34a; font-weight: 700; }
+  .ct-cmp-tbl tr:last-child td { border-bottom: none; }
   /* 全球时差 */
   .tz-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 2px; border-bottom: 1px dashed #e4e9ee; font-size: 13px; flex-wrap: wrap; }
   .tz-row:last-child { border-bottom: none; }
@@ -3493,11 +3523,28 @@ const CT_MODES = [
 function ctMode(id) { return CT_MODES.find(m => m.id === id) || CT_MODES[0]; }
 
 const ctState = {
-  products: [{ L: 40, W: 30, H: 20, qty: 1000, kg: 0, color: CT_COLORS[0] }],
+  products: [{ L: 40, W: 30, H: 20, qty: 1000, kg: 0, color: CT_COLORS[0], allow: { flat: true, side: true, stand: true, turn: true } }],
   mode: 'auto', viewCont: '40HQ', viewIdx: 0,
   yaw: -0.46, pitch: 0.30, zoom: 1, auto: false,
   raf: 0, autoRaf: 0, cleanup: [],
 };
+function ctAllowClone(p) {
+  const a = ctAllowOf(p);
+  return { flat: a.flat !== false, side: a.side !== false, stand: a.stand !== false, turn: a.turn !== false };
+}
+// 记录区到一个极短的可读串：「正侧立·转」「仅转」「正立」……
+function ctAllowText(p) {
+  const a = ctAllowOf(p);
+  const fams = CT_FAMS.filter(f => a[f.id] !== false).map(f => f.label);
+  if (!fams.length) return '不许摆';
+  const t = a.turn !== false ? '·可转向' : '·不转向';
+  return fams.join('/') + t;
+}
+// 该产品有没有被勾掉任何一种摆放方式。没勾掉 = 老口径（六向全开），一个数都不能动。
+function ctFree(p) {
+  const a = ctAllowOf(p);
+  return !(a.flat === false || a.side === false || a.stand === false || a.turn === false);
+}
 // 面板重建前必须收尾：rAF 循环与 window 监听都挂在旧画布上
 function ctDispose() {
   if (ctState.raf) { cancelAnimationFrame(ctState.raf); ctState.raf = 0; }
@@ -3507,10 +3554,48 @@ function ctDispose() {
   ctState.cleanup = [];
 }
 
-// 六个摆放方向；up = 只许正放（底面必须是 长×宽，高朝上）—— 即只能 [l,w,h] / [w,l,h]
-function ctOris(l, w, h, up) {
-  return up ? [[l, w, h], [w, l, h]]
-    : [[l, w, h], [l, h, w], [w, l, h], [w, h, l], [h, l, w], [h, w, l]];
+// 每个规格可选的摆放方式。哪个尺寸朝上决定了「族」，勾选 turn 就再允许绕竖轴转 90°：
+//   正放 flat  = 长×宽落地、高朝上 ｜ 侧放 side = 长×高落地、宽朝上（侧倒）｜ 立放 stand = 宽×高落地、长朝上（竖起来）
+// 三者全勾且勾转向 = 老版本默认的六向全开，所以勾选盒默认全开，改动前后的换算结果必须一个数都不差。
+const CT_ALLOW_ALL = { flat: true, side: true, stand: true, turn: true };
+const CT_ALLOW_UP = { flat: true, side: false, stand: false, turn: true }; // 老的 up=true 口径
+const CT_FAMS = [
+  { id: 'flat', label: '正放', desc: '长×宽落地、高朝上' },
+  { id: 'side', label: '侧放', desc: '长×高落地、宽朝上（侧倒）' },
+  { id: 'stand', label: '立放', desc: '宽×高落地、长朝上（竖起来）' },
+];
+const CT_LOG_KEY = 'wb_ctlog_v1';   // 装柜记录（localStorage）
+const CT_LOG_MAX = 40;              // 记录上限，超了丢最旧的
+function ctLoadLog() {
+  const v = loadJSON(CT_LOG_KEY, []);
+  return Array.isArray(v) ? v.filter(r => r && Array.isArray(r.rows)) : [];
+}
+function ctSaveLog(list) { saveJSON(CT_LOG_KEY, list); }
+function ctLogStamp(ts) {
+  const d = new Date(ts), p2 = n => String(n).padStart(2, '0');
+  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+function ctAllowOf(p) { return (p && p.allow) ? p.allow : CT_ALLOW_ALL; }
+// 最终允许的方向：全局「只许正放」与产品自身勾选的交集。老调用不传产品（无 allow）时等价全开。
+function ctOriAllow(pr, up) {
+  const a = ctAllowOf(pr);
+  if (!up) return a;
+  return { flat: a.flat !== false, side: false, stand: false, turn: a.turn !== false };
+}
+// 六个摆放方向 (dx,dy,dz)。
+// ⚠️ push 顺序必须与老实现逐项一致 —— ctBestOri / ctPlanMixed 打平时靠「先到先得」取最优，
+//    只要换过顺序，平局侧翻就会改结果（1078 / 2310 / 2730 都是这么定下来的）。
+function ctOris(l, w, h, up, allow) {
+  const a = allow || (up ? CT_ALLOW_UP : CT_ALLOW_ALL);
+  const on = (fam, turn) => a[fam] !== false && (turn ? a.turn !== false : true);
+  const out = [];
+  if (on('flat', false)) out.push([l, w, h]);   // 正放（高朝上）
+  if (on('side', false)) out.push([l, h, w]);   // 侧放（宽朝上）
+  if (on('flat', true)) out.push([w, l, h]);    // 正放 + 转 90°
+  if (on('stand', false)) out.push([w, h, l]);  // 立放（长朝上）
+  if (on('side', true)) out.push([h, l, w]);    // 侧放 + 转 90°
+  if (on('stand', true)) out.push([h, w, l]);   // 立放 + 转 90°
+  return out;
 }
 function ctFan(hex) {
   const out = {};
@@ -3523,10 +3608,11 @@ function ctShade(hex, k) {
   return 'rgb(' + f(c.r) + ',' + f(c.g) + ',' + f(c.b) + ')';
 }
 // 单产品最优摆放方向（与 containerEstimate 同一判据：perLayer × layers 最大）
-// ⚠️ up=true 时只允许「长 × 宽」落地、高朝上两种（正放 / 转 90°），不许侧倒、不许竖起来。
+// ⚠️ up=true（只许正放）时只允许「长 × 宽」落地、高朝上两种。up=false 时还要看产品自身勾了哪些族。
 function ctBestOri(cont, pr, up) {
+  const allow = ctOriAllow(pr, up);
   let best = null;
-  for (const o of ctOris(pr.L, pr.W, pr.H, up)) {
+  for (const o of ctOris(pr.L, pr.W, pr.H, up, allow)) {
     const perLayer = Math.floor(cont.L / o[0]) * Math.floor(cont.W / o[1]);
     const layers = Math.floor(cont.H / o[2]);
     const per = perLayer * layers;
@@ -3548,7 +3634,7 @@ function ctRectFits(fr, prods, counts, avail, dz, up, onlyI) {
   for (let i = 0; i < prods.length; i++) {
     if (counts[i] >= avail[i]) continue;
     if (onlyI >= 0 && i !== onlyI) continue;
-    for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H, up)) if (o[2] === dz && o[0] <= fr.L && o[1] <= fr.W) return true;
+    for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H, up, ctOriAllow(prods[i], up))) if (o[2] === dz && o[0] <= fr.L && o[1] <= fr.W) return true;
   }
   return false;
 }
@@ -3595,7 +3681,7 @@ function ctPlanMixed(cont, prods, avail, opt) {
         for (let i = 0; i < n; i++) {
           if (counts[i] >= avail[i]) continue;
           if (onlyI >= 0 && i !== onlyI) continue;
-          for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H, up)) {
+          for (const o of ctOris(prods[i].L, prods[i].W, prods[i].H, up, ctOriAllow(prods[i], up))) {
             if (o[2] !== dz || o[1] > fr.W) continue;
             const k = Math.min(Math.floor(fr.L / o[0]), avail[i] - counts[i]);
             if (k < 1) continue;
@@ -3992,7 +4078,20 @@ function buildToolContainer() {
       </div>
     </div>
     <div id="ctResult"></div>
-    <div class="t-tip">单产品沿用整数堆叠公式（自动尝试 6 种摆放方向取最优）；多产品可切换堆叠方式：自动混装（逐层铺排 · 同层分区）/ 每层同款 / 分区堆放 / 只许正放，每一种都会即时重算并同步到 3D。柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、绑扎与码头限重</div>`;
+    <div class="ct-log" id="ctLog">
+      <div class="ct-sec"><b>📋 装柜记录</b><span class="ct-single">把当前方案存下来 · 多条横向对比</span></div>
+      <div class="ct-log-bar">
+        <span class="ct-lb">名称</span><input id="ctLogName" placeholder="留空自动编号" maxlength="24">
+        <button id="ctLogSave">保存当前方案</button>
+        <span class="ct-log-act">
+          <button class="ct-mini" id="ctLogCmp">对比查看</button>
+          <button class="ct-mini" id="ctLogClear">清空记录</button>
+        </span>
+      </div>
+      <div id="ctRecs" class="ct-recs"></div>
+      <div id="ctCmp"></div>
+    </div>
+    <div class="t-tip">单产品沿用整数堆叠公式（自动尝试 6 种摆放方向取最优）；多产品可切换堆叠方式：自动混装（逐层铺排 · 同层分区）/ 每层同款 / 分区堆放 / 只许正放，每一种都会即时重算并同步到 3D。每款产品还能单独勾选允许「正放 / 侧放 / 立放」以及要不要允许轉向 90° —— 有向上标记或怕压的产品把侧放、立放去掉即是「不可倒置」。柜内尺寸 20GP 5.89×2.35×2.39m / 40GP 12.03×2.35×2.39m / 40HQ 12.03×2.35×2.69m。实际装柜请再考虑托盘、绑扎与码头限重</div>`;
   const P = ctState.products;
   const prodsEl = box.querySelector('#ctProds'), sumEl = box.querySelector('#ctSum'), resEl = box.querySelector('#ctResult');
   const cvs = box.querySelector('#ctCv'), wrap = box.querySelector('.ct-cvwrap'), legendEl = box.querySelector('#ctLegend');
@@ -4000,7 +4099,11 @@ function buildToolContainer() {
   const btnPrev = box.querySelector('#ctPrev'), btnNext = box.querySelector('#ctNext');
   const btnAuto = box.querySelector('#ctAuto'), btnReset = box.querySelector('#ctReset'), btnAdd = box.querySelector('#ctAdd');
   const modesEl = box.querySelector('#ctModes'), modeDescEl = box.querySelector('#ctModeDesc');
-  let last = null, drag = null, nIdx = 1;
+  const nameEl = box.querySelector('#ctLogName'), recsEl = box.querySelector('#ctRecs'), cmpEl = box.querySelector('#ctCmp');
+  const btnLogSave = box.querySelector('#ctLogSave'), btnLogCmp = box.querySelector('#ctLogCmp'), btnLogClear = box.querySelector('#ctLogClear');
+  let last = null, drag = null, nIdx = 1, lastSnap = null;
+  let logs = ctLoadLog(), cmpOn = false;
+  const cmpSel = new Set();
   const letter = i => CT_LETTERS[i] || ('P' + (i + 1));
   const fId = (i, k) => (i === 0 ? 'ct' + k : 'ct' + k + i);
   const fSel = (i, k) => '#' + fId(i, k);
@@ -4019,6 +4122,14 @@ function buildToolContainer() {
           <span class="ct-lb">单箱毛重 kg（选填）</span><input id="${fId(i, 'Kg')}" class="ct-kg" type="number" min="0" step="0.1" value="${p.kg || ''}">
           ${P.length > 1 ? '<button class="ct-del" data-del="' + i + '" title="删除该产品">×</button>' : ''}
         </div>
+        <div class="ct-pline">
+          <span class="ct-lb">允许摆放</span>
+          <span class="ct-allow" data-allow="${i}">
+            ${CT_FAMS.map(f => `<button data-fam="${f.id}" class="${ctAllowOf(p)[f.id] !== false ? 'on' : ''}" title="${f.desc}">${f.label}</button>`).join('')}
+            <button data-fam="turn" class="turn ${ctAllowOf(p).turn !== false ? 'on' : ''}" title="以上方向都允许再绕竖轴转 90°">转向 90°</button>
+          </span>
+          <span class="ct-allow-off" data-off="${i}" hidden></span>
+        </div>
       </div>`).join('');
     P.forEach((p, i) => ['L', 'W', 'H', 'N', 'Kg'].forEach(k => {
       const el = prodsEl.querySelector(fSel(i, k));
@@ -4026,6 +4137,27 @@ function buildToolContainer() {
     }));
     prodsEl.querySelectorAll('[data-del]').forEach(b => {
       b.onclick = () => { const i = +b.dataset.del; P.splice(i, 1); ctState.viewIdx = 0; renderRows(); schedule(); };
+    });
+    prodsEl.querySelectorAll('.ct-allow').forEach(grp => {
+      const i = +grp.dataset.allow;
+      grp.querySelectorAll('button').forEach(b => {
+        b.onclick = () => {
+          if (!P[i].allow) P[i].allow = ctAllowClone(P[i]);
+          const fam = b.dataset.fam;
+          // 至少要留一种落地方式，否则这件产品哪儿都放不进去 —— 关最后一个时把它顶回来
+          const fams = CT_FAMS.map(f => f.id);
+          if (fams.includes(fam) && P[i].allow[fam] !== false
+            && fams.filter(f => P[i].allow[f] !== false).length === 1) return;
+          P[i].allow[fam] = P[i].allow[fam] === false;
+          const off = prodsEl.querySelector('[data-off="' + i + '"]');
+          if (off) {
+            const none = CT_FAMS.every(f => P[i].allow[f.id] === false);
+            off.hidden = !none;
+            off.textContent = none ? '至少勾选一种摆放方式' : '';
+          }
+          renderRows(); schedule();
+        };
+      });
     });
     prodsEl.querySelectorAll('[data-col]').forEach(inp => {
       inp.oninput = () => {
@@ -4045,6 +4177,130 @@ function buildToolContainer() {
       b.onclick = () => { ctState.mode = b.dataset.m; ctState.viewIdx = 0; renderModes(); schedule(); };
     });
     modeDescEl.innerHTML = `<b>${cur.label}</b> · ${cur.desc}`;
+  }
+  // ---------- 装柜记录 ----------
+  const prodLine = prods => prods.map((p, i) =>
+    `<em>${CT_LETTERS[i] || 'P' + (i + 1)}</em> ${p.L}×${p.W}×${p.H} ×${p.qty}${p.kg ? ` · ${p.kg}kg` : ''} <span style="color:#93a2ad">${ctAllowText(p)}</span>`
+  ).join(' ｜ ');
+  const rowLine = rows => rows.map(r =>
+    `<span><b>${r.id}</b> ${r.per ? `${r.per} 箱/柜 · ${r.need}${r.capped ? '+' : ''} 柜 · ${r.volRate}%` : '放不下'}</span>`
+  ).join('');
+  function renderLog() {
+    if (!logs.length) {
+      recsEl.innerHTML = '<div class="ct-log-empty">还没有记录。调好方案后点「保存当前方案」，多存几条就能在下面横向对比。</div>';
+      cmpEl.innerHTML = '';
+      btnLogCmp.disabled = true;
+      return;
+    }
+    btnLogCmp.disabled = false;
+    recsEl.innerHTML = logs.map((r, i) => `<div class="ct-rec${cmpSel.has(i) ? ' cmp' : ''}" data-i="${i}">
+        <div class="ct-rec-hd">
+          <b>${esc(r.name || ('方案 ' + (i + 1)))}</b>
+          <time>${ctLogStamp(r.ts)}</time>
+          <span style="font-size:11px;color:#93a2ad">${esc(ctMode(r.mode).label)} · ${r.prods.length} 款</span>
+          <span class="ct-rec-act">
+            <button class="ct-mini ct-rload" data-load="${i}">载入</button>
+            <button class="ct-mini ct-rcmp${cmpSel.has(i) ? ' on' : ''}" data-cmp="${i}">对比</button>
+            <button class="ct-mini ct-rdel" data-del="${i}" title="删除">×</button>
+          </span>
+        </div>
+        <div class="ct-rec-p">${prodLine(r.prods)}</div>
+        <div class="ct-rec-r">${rowLine(r.rows)}</div>
+      </div>`).join('');
+    recsEl.querySelectorAll('.ct-rload').forEach(b => {
+      b.onclick = () => { loadRec(+b.dataset.load); };
+    });
+    recsEl.querySelectorAll('.ct-rcmp').forEach(b => {
+      b.onclick = () => {
+        const i = +b.dataset.cmp;
+        if (cmpSel.has(i)) cmpSel.delete(i); else cmpSel.add(i);
+        cmpOn = true; renderLog();
+      };
+    });
+    recsEl.querySelectorAll('.ct-rdel').forEach(b => {
+      b.onclick = () => {
+        const i = +b.dataset.del;
+        logs.splice(i, 1); cmpSel.clear(); ctSaveLog(logs); renderLog();
+      };
+    });
+    renderCmp();
+  }
+  // 对比表：行 = 柜型，列 = 选中的记录；每行把最优（箱数最多 / 柜数最少）标绿
+  function renderCmp() {
+    const picks = [...cmpSel].filter(i => logs[i]).sort((a, b) => a - b);
+    if (!cmpOn || picks.length < 2) {
+      cmpEl.innerHTML = cmpOn && picks.length ? '<div class="ct-log-empty">再勾一条记录才能对比</div>' : '';
+      return;
+    }
+    let html = '<table class="ct-cmp-tbl"><tr><th>柜型</th>' +
+      picks.map(i => `<th>${esc(logs[i].name || ('方案 ' + (i + 1)))}</th>`).join('') + '</tr>';
+    CONTAINERS.forEach((c, ci) => {
+      const cells = picks.map(i => (logs[i].rows[ci] || { per: 0, need: 0, volRate: 0 }));
+      const bestPer = Math.max(...cells.map(r => r.per || 0));
+      html += `<tr><td><b>${c.id}</b> 每柜箱数</td>` +
+        cells.map(r => `<td class="${r.per && r.per === bestPer ? 'ct-best' : ''}">${r.per || '—'}</td>`).join('') + '</tr>';
+      const needs = cells.map(r => (r.per ? r.need : Infinity));
+      const bestNeed = Math.min(...needs);
+      html += `<tr><td><b>${c.id}</b> 需柜数</td>` +
+        cells.map((r, j) => `<td class="${needs[j] === bestNeed && isFinite(bestNeed) ? 'ct-best' : ''}">${r.per ? (r.need + (r.capped ? '+' : '')) : '—'}</td>`).join('') + '</tr>';
+      const bestRate = Math.max(...cells.map(r => r.volRate || 0));
+      html += `<tr><td><b>${c.id}</b> 利用率</td>` +
+        cells.map(r => `<td class="${r.volRate && r.volRate === bestRate ? 'ct-best' : ''}">${r.per ? r.volRate + '%' : '—'}</td>`).join('') + '</tr>';
+    });
+    html += '</table><div class="ct-log-empty" style="padding-top:6px">绿色 = 该行最优</div>';
+    cmpEl.innerHTML = html;
+  }
+  function loadRec(i) {
+    const r = logs[i];
+    if (!r || !r.prods.length) return;
+    P.length = 0;
+    r.prods.forEach(p => P.push({
+      L: p.L, W: p.W, H: p.H, qty: p.qty, kg: p.kg || 0,
+      color: p.color || CT_COLORS[0], allow: ctAllowClone(p),
+    }));
+    if (ctMode(r.mode)) ctState.mode = r.mode;
+    ctState.viewIdx = 0;
+    renderRows(); renderModes(); schedule();
+  }
+  btnLogSave.onclick = () => {
+    if (!lastSnap) return;
+    const usable = lastSnap.rows.some(r => r.per > 0);
+    if (!usable) { hintSave('当前规格装不进任何柜型，先改尺寸'); return; }
+    const nm = (nameEl.value || '').trim();
+    const auto = '方案 ' + (logs.length + 1);
+    logs.push({
+      name: nm || auto, ts: Date.now(), mode: lastSnap.mode,
+      prods: lastSnap.prods.map(p => ({ L: p.L, W: p.W, H: p.H, qty: p.qty, kg: p.kg, color: p.color, allow: ctAllowClone(p) })),
+      rows: lastSnap.rows.map(r => ({ id: r.id, need: r.need, capped: r.capped, per: r.per, volRate: r.volRate, kg: r.kg, counts: r.counts.slice() })),
+    });
+    if (logs.length > CT_LOG_MAX) logs.splice(0, logs.length - CT_LOG_MAX);
+    ctSaveLog(logs);
+    nameEl.value = '';
+    renderLog();
+    hintSave('已保存：' + (nm || auto));
+  };
+  btnLogCmp.onclick = () => {
+    cmpOn = !cmpOn;
+    btnLogCmp.classList.toggle('on', cmpOn);
+    if (cmpOn && cmpSel.size < 2) { cmpSel.clear(); logs.forEach((_, i) => { if (cmpSel.size < 3) cmpSel.add(i); }); }
+    renderLog();
+  };
+  btnLogClear.onclick = () => {
+    if (!logs.length) return;
+    logs = []; cmpSel.clear(); ctSaveLog(logs); renderLog();
+  };
+  let hintT = 0;
+  function hintSave(txt) {
+    const exist = box.querySelector('.ct-log-hint');
+    if (exist) exist.remove();
+    const d = document.createElement('div');
+    d.className = 'ct-log-hint ct-log-empty';
+    d.textContent = txt;
+    box.querySelector('#ctLog').appendChild(d);
+    if (typeof requestAnimationFrame === 'function') {
+      clearTimeout(hintT);
+      hintT = setTimeout(() => { try { d.remove(); } catch (_) { } }, 2600);
+    }
   }
   function sync() {
     P.forEach((p, i) => {
@@ -4074,7 +4330,7 @@ function buildToolContainer() {
   }
   function compute() {
     sync();
-    const items = P.map((p, i) => ({ pi: i, L: p.L, W: p.W, H: p.H, kg: p.kg || 0, qty: p.qty }))
+    const items = P.map((p, i) => ({ pi: i, L: p.L, W: p.W, H: p.H, kg: p.kg || 0, qty: p.qty, allow: ctAllowClone(p) }))
       .filter(it => it.L > 0 && it.W > 0 && it.H > 0);
     const volOf = it => it.L * it.W * it.H / 1e6;
     if (!items.length) {
@@ -4096,15 +4352,16 @@ function buildToolContainer() {
     const opt = { mode };
     const up = mode === 'upright';
     const est = single ? containerEstimate(live[0].L, live[0].W, live[0].H, live[0].qty, live[0].kg) : null;
-    // 单产品 + 只许正放：containerEstimate 固定试 6 向，这里改用受限口径重算 per / 层数
-    // ⚠️ 非 upright 时一字不改地沿用 containerEstimate，保证 1078/2310/2730 与 5/3/2 不变
+    // ⚠️ 非 upright 且这款没勾任何摆放限制时，一字不改地沿用 containerEstimate，保证 1078/2310/2730 与 5/3/2 不变；
+    //    一旦勾了限制（或全局只许正放），containerEstimate 那套「固定试 6 向」就不管用了，
+    //    必须改走受限口径重算，否则表格里的数字会和右边 3D 画的布置对不上。
     const singlePer = (c, k, it) => {
-      if (!up) {
+      if (!up && ctFree(it)) {
         const r = est[k];
         const wl = r.weightLimit && r.weightLimit.weightFirst;
         return { per: wl ? r.weightLimit.perByWeight : r.per, perLayer: r.perLayer, layers: r.layers, volRate: r.volRate, wl: !!wl };
       }
-      const b = ctBestOri(c, it, true);
+      const b = ctBestOri(c, it, up);
       let per = b ? b.per : 0;
       const perByWeight = it.kg > 0 ? Math.floor(c.payload / it.kg) : 0;
       const wl = perByWeight > 0 && perByWeight < per;
@@ -4149,6 +4406,20 @@ function buildToolContainer() {
       }
     });
     html += '</table>';
+    // 给「装柜记录」留的快照：算完就有，点保存时直接落盘（不必重算一遍）
+    lastSnap = {
+      mode, single, cmpIx: -1,
+      prods: P.map(p => ({ L: p.L, W: p.W, H: p.H, qty: p.qty, kg: p.kg || 0, color: p.color, allow: ctAllowClone(p) })),
+      rows: CONTAINERS.map((c, k) => {
+        const sim = sims[k] || { list: [], need: 0, capped: false };
+        const c0 = sim.list[0];
+        return {
+          id: c.id, need: sim.need, capped: !!sim.capped,
+          per: c0 ? c0.total : 0, volRate: c0 ? c0.volRate : 0,
+          kg: c0 ? c0.kg : 0, counts: c0 ? (c0.counts || []).slice() : [],
+        };
+      }),
+    };
     if (anyWeight) html += '<div class="t-tip ct-warn">⚠ 按单箱毛重计算已超柜子限重，每柜可装数量以重量为准</div>';
     if (single && live.length === 0) html += '<div class="t-tip">请输入数量</div>';
     resEl.innerHTML = html;
@@ -4227,7 +4498,10 @@ function buildToolContainer() {
   btnAdd.onclick = () => {
     if (P.length >= CT_LETTERS.length) return;
     const src = P[P.length - 1];
-    P.push({ L: src.L, W: src.W, H: src.H, qty: 500, kg: 0, color: CT_COLORS[P.length % CT_COLORS.length] });
+    P.push({
+      L: src.L, W: src.W, H: src.H, qty: 500, kg: 0,
+      color: CT_COLORS[P.length % CT_COLORS.length], allow: ctAllowClone(src),
+    });
     ctState.viewIdx = 0;
     renderRows();
     schedule();
@@ -4247,6 +4521,7 @@ function buildToolContainer() {
   }
   renderRows();
   renderModes();
+  renderLog();
   fitCanvas();
   compute();
   return box;
@@ -13668,6 +13943,8 @@ if (typeof globalThis !== 'undefined') {
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
     ctState, ctPlanSingle, ctPlanMixed, ctPlanZones, ctSimulate, ctScene, ctDraw, ctMergeLayers, ctBestOri, ctDispose, CT_MODES, ctMode,
+    ctOris, ctOriAllow, ctAllowClone, ctAllowText, CT_FAMS, CT_ALLOW_ALL, ctRectFits,
+    ctLoadLog, ctSaveLog, CT_LOG_KEY, CT_LOG_MAX, ctLogStamp,
     hexToRgb, srgbToLab, labToLch, lchToRgbRaw, lchToHex, hexToLch, hueName, coloroName, coloroCode, coloroOf,
     HUE_ANCHORS, buildSchemes, padPalette, pickBaseColor, sheetTextColor, renderPaletteSheet, evaluatePalette, contrastRatio,
     adminUsers, computeAdminStats, renderStatCards, renderTrend, renderRank,
