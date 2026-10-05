@@ -461,6 +461,30 @@
   .tool-out small { color: var(--text-light); font-weight: 400; }
   .tool-mini { font-size: 11.5px; border: 1px dashed #c9d2da; border-radius: 14px; padding: 3px 10px; cursor: pointer; color: var(--text-light); background: #fff; }
   .tool-mini:hover { color: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); }
+  /* ===== 图片 Resize：单张 / 批量 切换 + 批量清单 ===== */
+  .rs-tabs { display: flex; gap: 6px; margin: 8px 0 2px; }
+  .rs-tab {
+    font-size: 12.5px; padding: 4px 14px; border-radius: 16px; border: 1px solid #d4dae0;
+    background: #fff; color: var(--text-light); cursor: pointer;
+  }
+  .rs-tab.on { background: var(--c-sales, #3498db); border-color: var(--c-sales, #3498db); color: #fff; font-weight: 600; }
+  .rsb-drop {
+    margin-top: 8px; padding: 13px 12px; border: 1.5px dashed #c9d2da; border-radius: 10px;
+    text-align: center; font-size: 12.5px; color: var(--text-light); background: #fbfcfd;
+  }
+  #rsMany.drop-hot .rsb-drop { border-color: var(--c-sales, #3498db); background: #eef6fd; color: var(--c-sales, #3498db); }
+  .rsb-list { margin-top: 10px; max-height: 264px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .rsb-item { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-bottom: 1px solid #eef1f4; font-size: 12px; }
+  .rsb-item:last-child { border-bottom: none; }
+  .rsb-thumb { width: 38px; height: 38px; border-radius: 5px; object-fit: cover; background: #f2f4f6; flex: 0 0 auto; }
+  .rsb-meta { flex: 1 1 auto; min-width: 0; }
+  .rsb-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rsb-dim { color: var(--text-light); font-size: 11.5px; margin-top: 2px; }
+  .rsb-dim.done { color: #2e9e5b; }
+  .rsb-dim.err { color: #d9534f; }
+  .rsb-del { color: var(--text-light); cursor: pointer; padding: 0 4px; flex: 0 0 auto; font-size: 13px; }
+  .rsb-del:hover { color: #d9534f; }
+  .rsb-sum { font-size: 12.5px; color: var(--text-light); margin-top: 6px; line-height: 1.6; }
   .tool-swatch { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
   .tool-calc-hist { font-size: 12px; color: var(--text-light); margin-top: 8px; line-height: 1.7; word-break: break-all; }
   /* ===== 计算器模型：暗色机身 + 4×5 键位，可鼠标点按 ===== */
@@ -2876,9 +2900,172 @@ function downloadBlob(blob, filename) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
 }
+// ---- 批量改尺寸：目标像素的计算规则（UI 与回归测试共用同一份，别在 UI 里另写一套） ----
+// mode: px 指定宽高 / pct 按比例 / long 最长边 / short 最短边 / width 统一宽 / height 统一高 / fit 限定框内
+// opt : { w, h, pct, n, noUp }。noUp = 只缩不放（小图不被拉大，放大只会变糊）
+const RS_MODES = [
+  { v: 'long', label: '最长边限定', one: '最长边' },
+  { v: 'short', label: '最短边限定', one: '最短边' },
+  { v: 'width', label: '统一宽度', one: '宽度' },
+  { v: 'height', label: '统一高度', one: '高度' },
+  { v: 'pct', label: '按比例缩放', one: '比例' },
+  { v: 'px', label: '指定宽高', one: '宽' },
+  { v: 'fit', label: '限定框内', one: '框宽' },
+];
+function rsPlanSize(mode, opt, sw, sh) {
+  sw = Math.max(1, Math.round(Number(sw) || 0));
+  sh = Math.max(1, Math.round(Number(sh) || 0));
+  const o = opt || {};
+  const n = Number(o.n);
+  let w = sw, h = sh;
+  if (mode === 'px') { w = Number(o.w) || sw; h = Number(o.h) || sh; }
+  else if (mode === 'pct') { const k = (Number(o.pct) == null ? 100 : Number(o.pct)) / 100; w = sw * k; h = sh * k; }
+  else if (mode === 'long') { const k = (n || Math.max(sw, sh)) / Math.max(sw, sh); w = sw * k; h = sh * k; }
+  else if (mode === 'short') { const k = (n || Math.min(sw, sh)) / Math.min(sw, sh); w = sw * k; h = sh * k; }
+  else if (mode === 'width') { const k = (n || sw) / sw; w = n || sw; h = sh * k; }
+  else if (mode === 'height') { const k = (n || sh) / sh; w = sw * k; h = n || sh; }
+  else if (mode === 'fit') { const k = Math.min((Number(o.w) || sw) / sw, (Number(o.h) || sh) / sh); w = sw * k; h = sh * k; }
+  w = Math.max(1, Math.round(w)); h = Math.max(1, Math.round(h));
+  if (o.noUp) {
+    const k = Math.min(1, Math.min(sw / w, sh / h));
+    if (k < 1) { w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k)); }
+  }
+  return { w: w, h: h };
+}
+// 像素 + DPI → 打印出来的物理尺寸（cm）。DPI 只影响这个读数，像素一个不动
+function rsPhysCm(w, h, dpi) {
+  const d = Math.max(1, Number(dpi) || 96);
+  const cm = v => (Number(v) || 0) / d * 2.54;
+  return `${cm(w).toFixed(1)} × ${cm(h).toFixed(1)} cm`;
+}
+// ---- 把分辨率（DPI）写进文件头 ----
+// canvas 导出的 JPG/PNG 不带 DPI 标记，排版软件一律按 72 DPI 打开 —— 3000px 的图会被认成
+// 105cm 宽，实际想要的是 300 DPI 下的 25cm。这里直接改文件头：JPEG 改 JFIF APP0 的 density
+// 段（没有就插一个），PNG 插 / 改 pHYs 块。像素数据一个字节都不动，画质零损失。
+// ⚠️ PNG 块头是**大端**（长度 4 字节 + 类型 4 字节 + 数据 + CRC 4 字节），别拿 zipStore 用的
+//    u32le 小端写法来拼 —— 拼出来的长度会变成 0x09000000 这种天文数字，看图软件直接报文件损坏。
+function u32be(n, bytes) {
+  const a = new Uint8Array(bytes);
+  for (let i = 0; i < bytes; i++) a[i] = (n >>> ((bytes - 1 - i) * 8)) & 0xFF;
+  return a;
+}
+function pngChunkBytes(type, data) {
+  const enc = new TextEncoder();
+  const body = concatU8([enc.encode(type), data]);
+  return concatU8([u32be(data.length, 4), body, u32be(crc32(body), 4)]);
+}
+function pngSetDpiBytes(u8, dpi) {
+  if (!u8 || u8.length < 33 || !(u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47)) return u8;
+  const d = Math.max(1, Math.min(65535, Math.round(Number(dpi) || 0)));
+  const ppu = Math.max(1, Math.round(d / 0.0254)); // 每米像素数（PNG 的 pHYs 只认「像素/米」）
+  const dat = new Uint8Array(9);
+  for (let i = 0; i < 4; i++) { const b = (ppu >>> (24 - i * 8)) & 0xFF; dat[i] = b; dat[4 + i] = b; }
+  dat[8] = 1; // unit = 1（米）
+  const chunk = pngChunkBytes('pHYs', dat);
+  let i = 8;
+  while (i + 12 <= u8.length) {
+    const len = ((u8[i] << 24) | (u8[i + 1] << 16) | (u8[i + 2] << 8) | u8[i + 3]) >>> 0;
+    const ty = String.fromCharCode(u8[i + 4], u8[i + 5], u8[i + 6], u8[i + 7]);
+    if (ty === 'pHYs') return concatU8([u8.slice(0, i), chunk, u8.slice(i + 12 + len)]);
+    if (ty === 'IDAT' || ty === 'IEND') break; // pHYs 必须排在 IDAT 之前，i 正好停在 IDAT 起点
+    i += 12 + len;
+  }
+  // 走到这里：i 要么停在 IDAT/IEND 起点（插在 IHDR 之后），要么文件已读完 —— 都往 i 处插
+  return concatU8([u8.slice(0, i), chunk, u8.slice(i)]);
+}
+function jpegSetDpiBytes(u8, dpi) {
+  if (!u8 || u8.length < 4 || !(u8[0] === 0xFF && u8[1] === 0xD8)) return u8;
+  const d = Math.max(1, Math.min(65535, Math.round(Number(dpi) || 0)));
+  const hi = (d >> 8) & 0xFF, lo = d & 0xFF;
+  let i = 2;
+  while (i + 4 <= u8.length) {
+    if (u8[i] !== 0xFF) { i++; continue; }
+    const mk = u8[i + 1];
+    if (mk === 0xD8 || mk === 0x01 || (mk >= 0xD0 && mk <= 0xD7) || mk === 0xFF) { i += 2; continue; }
+    const len = (u8[i + 2] << 8) | u8[i + 3];
+    if (mk === 0xE0 && i + 13 <= u8.length &&
+        u8[i + 4] === 0x4A && u8[i + 5] === 0x46 && u8[i + 6] === 0x49 && u8[i + 7] === 0x46 && u8[i + 8] === 0x00) {
+      u8[i + 11] = 1;              // units = 1（像素/英寸）
+      u8[i + 12] = hi; u8[i + 13] = lo;  // Xdensity
+      u8[i + 14] = hi; u8[i + 15] = lo;  // Ydensity
+      return u8;
+    }
+    if (len < 2) break;
+    i += 2 + len;
+  }
+  // 没有 JFIF 段 → 紧跟 SOI 插一个标准 APP0
+  const app0 = new Uint8Array([0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00,
+    0x01, 0x02, 0x01, hi, lo, hi, lo, 0x00, 0x00]);
+  return concatU8([u8.slice(0, 2), app0, u8.slice(2)]);
+}
+function rsSetDpiBytes(u8, type, dpi) {
+  const t = String(type || '');
+  if (t.indexOf('jpeg') >= 0 || t.indexOf('jpg') >= 0) return jpegSetDpiBytes(u8, dpi);
+  if (t.indexOf('png') >= 0) return pngSetDpiBytes(u8, dpi);
+  return u8;
+}
+// 缩图：一步缩太多会糊（5760px 直接缩到 1080px 细节发虚），先逐级折半再收尾
+function rsDrawScaled(ctx, img, w, h) {
+  const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+  let src = img, cw = sw, ch = sh;
+  while (cw >= w * 4 && ch >= h * 4 && cw > 4 && ch > 4) {
+    const nw = Math.max(w, Math.round(cw / 2)), nh = Math.max(h, Math.round(ch / 2));
+    const t = document.createElement('canvas');
+    t.width = nw; t.height = nh;
+    const c = t.getContext('2d');
+    if (!c) break;
+    c.imageSmoothingEnabled = true;
+    try { c.imageSmoothingQuality = 'high'; } catch (_) { }
+    c.drawImage(src, 0, 0, cw, ch, 0, 0, nw, nh);
+    src = t; cw = nw; ch = nh;
+  }
+  ctx.drawImage(src, 0, 0, cw, ch, 0, 0, w, h);
+}
+async function rsRenderBlob(img, w, h, type, q) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  if (!ctx) throw new Error(`图太大（${w}×${h}），浏览器分配不出画布内存`);
+  if (type !== 'image/png') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); }
+  ctx.imageSmoothingEnabled = true;
+  try { ctx.imageSmoothingQuality = 'high'; } catch (_) { }
+  rsDrawScaled(ctx, img, w, h);
+  const blob = await canvasToBlob(cv, type, q);
+  if (!blob) throw new Error('该格式浏览器不支持，请换 JPG');
+  return blob;
+}
+async function rsBlobWithDpi(blob, type, dpi) {
+  if (!dpi || !(dpi > 0)) return blob;
+  if (String(type).indexOf('jpeg') < 0 && String(type).indexOf('png') < 0) return blob; // WebP 没有 DPI 字段
+  try {
+    const u8 = new Uint8Array(await blob.arrayBuffer());
+    return new Blob([rsSetDpiBytes(u8, type, dpi)], { type: type });
+  } catch (_) { return blob; }
+}
+// ZIP 内不允许重名：同名第二张得改名，否则解压时后一张把前一张盖掉
+function rsUniqName(name, used) {
+  const key = String(name || '').toLowerCase();
+  if (!used[key]) { used[key] = 1; return String(name); }
+  const m = /^(.*)\.([A-Za-z0-9]{1,5})$/.exec(String(name));
+  const stem = m ? m[1] : String(name), ext = m ? '.' + m[2] : '';
+  let k = 2, n2 = '';
+  do { n2 = stem + '-' + k + ext; k++; } while (used[n2.toLowerCase()]);
+  used[n2.toLowerCase()] = 1;
+  return n2;
+}
+function rsOutName(name, w, h, type, withSize) {
+  const ext = String(type).indexOf('png') >= 0 ? 'png' : String(type).indexOf('webp') >= 0 ? 'webp' : 'jpg';
+  const stem = String(name || 'image').replace(/\.[^./\\]+$/, '');
+  return sanitizeName(withSize ? `${stem}_${Math.round(w)}x${Math.round(h)}` : stem) + '.' + ext;
+}
 function buildToolResize() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🖼️ 图片尺寸调整 Resize <small id="rsInfo" style="color:var(--text-light);font-weight:400"></small></h4>
+    <div class="rs-tabs">
+      <button type="button" class="rs-tab on" id="rsTabOne">单张调整</button>
+      <button type="button" class="rs-tab" id="rsTabMany">批量处理</button>
+    </div>
+    <div id="rsOne">
     <div class="tool-row"><input type="file" id="rsFile" accept="image/*"><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span></div>
     <div class="tool-row" id="rsOpts" style="margin-top:10px;display:none">
       <span style="color:var(--text-light);font-size:12px">宽</span><input id="rsW" type="number" min="1" style="width:82px">
@@ -2890,13 +3077,67 @@ function buildToolResize() {
     <div class="tool-row" id="rsPresets" style="margin-top:8px;display:none"></div>
     <div id="rsPrevWrap" style="display:none"><img id="rsPrev" class="tool-preview-img" alt="预览"></div>
     <div class="tool-row" style="margin-top:10px"><button id="rsGo" style="display:none">生成并下载</button><span class="tool-out" id="rsOut"></span></div>
-    <div class="t-tip">点击预设一键填入尺寸；锁比例时改宽或高，另一个自动按原比例计算。输出 JPG/WebP 时透明底会变白</div>`;
+    <div class="t-tip">点击预设一键填入尺寸；锁比例时改宽或高，另一个自动按原比例计算。输出 JPG/WebP 时透明底会变白</div>
+    </div>
+    <div id="rsMany" style="display:none">
+      <div class="tool-row"><input type="file" id="rsFiles" accept="image/*" multiple><button type="button" id="rsbClear">清空清单</button><span class="tool-out" id="rsbCount"></span></div>
+      <div class="rsb-drop">把多张图片（或整个文件夹）拖到这里 · 一次可加几十张</div>
+      <div class="tool-row" style="margin-top:10px">
+        <span style="color:var(--text-light);font-size:12px">调整方式</span>
+        <select id="rsbMode">
+          <option value="long">最长边限定</option>
+          <option value="short">最短边限定</option>
+          <option value="width">统一宽度</option>
+          <option value="height">统一高度</option>
+          <option value="pct">按比例缩放</option>
+          <option value="px">指定宽高</option>
+          <option value="fit">限定框内</option>
+        </select>
+        <span id="rsbLblA" style="color:var(--text-light);font-size:12px">最长边</span><input id="rsbA" type="number" min="1" value="1920" style="width:82px">
+        <span id="rsbLblB" style="color:var(--text-light);font-size:12px;display:none">高</span><input id="rsbB" type="number" min="1" value="1920" style="width:82px;display:none">
+      </div>
+      <div class="tool-row" style="margin-top:8px">
+        <span style="color:var(--text-light);font-size:12px">输出分辨率</span>
+        <select id="rsbDpi"><option value="72">72 DPI</option><option value="96" selected>96 DPI</option><option value="150">150 DPI</option><option value="300">300 DPI</option><option value="0">自定义…</option></select>
+        <input id="rsbDpiC" type="number" min="1" max="1200" value="300" style="width:74px;display:none">
+        <span id="rsbPhys" style="color:var(--text-light);font-size:12px"></span>
+      </div>
+      <div class="tool-row" style="margin-top:8px">
+        <span style="color:var(--text-light);font-size:12px">格式</span>
+        <select id="rsbFmt"><option value="jpeg">JPG</option><option value="png">PNG</option><option value="webp">WebP</option></select>
+        <span style="color:var(--text-light);font-size:12px">质量</span><input id="rsbQ" type="number" min="10" max="100" value="90" style="width:56px">%
+        <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="rsbNoUp" checked style="width:auto;vertical-align:-2px"> 只缩不放</label>
+        <label class="tool-mini" style="cursor:pointer"><input type="checkbox" id="rsbTag" checked style="width:auto;vertical-align:-2px"> 文件名带尺寸</label>
+      </div>
+      <div class="tool-row" style="margin-top:10px">
+        <button type="button" id="rsbGo">开始批量处理</button>
+        <button type="button" id="rsbDl" style="display:none">打包下载 ZIP</button>
+        <button type="button" id="rsbDlOne" style="display:none">逐张下载</button>
+      </div>
+      <div class="tool-progress" id="rsbProg"></div>
+      <div class="rsb-list" id="rsbList" style="display:none"></div>
+      <div class="rsb-sum" id="rsbSum"></div>
+      <div class="t-tip">一次设定、整批生效：先选调整方式再填像素值，每张图按自身长宽比单独算，不会变形。「只缩不放」保证小图不会被拉大变糊。分辨率（DPI）只写进文件头，像素一个不动 —— 印刷 / 排版软件才会按 300 DPI 认物理尺寸（WebP 不支持写 DPI）。全程在本机浏览器完成，图片不会上传</div>
+    </div>`;
   const fileEl = box.querySelector('#rsFile'), info = box.querySelector('#rsInfo');
   const opts = box.querySelector('#rsOpts'), wEl = box.querySelector('#rsW'), hEl = box.querySelector('#rsH');
   const lock = box.querySelector('#rsLock'), fmt = box.querySelector('#rsFmt'), qEl = box.querySelector('#rsQ');
   const presets = box.querySelector('#rsPresets'), prevWrap = box.querySelector('#rsPrevWrap'), prev = box.querySelector('#rsPrev');
   const go = box.querySelector('#rsGo'), out = box.querySelector('#rsOut');
+  // ——— 批量处理 ———
+  const tabOne = box.querySelector('#rsTabOne'), tabMany = box.querySelector('#rsTabMany');
+  const oneEl = box.querySelector('#rsOne'), manyEl = box.querySelector('#rsMany');
+  const filesEl = box.querySelector('#rsFiles'), cntEl = box.querySelector('#rsbCount');
+  const modeEl = box.querySelector('#rsbMode'), aEl = box.querySelector('#rsbA'), bEl = box.querySelector('#rsbB');
+  const lblA = box.querySelector('#rsbLblA'), lblB = box.querySelector('#rsbLblB');
+  const dpiEl = box.querySelector('#rsbDpi'), dpiC = box.querySelector('#rsbDpiC'), physEl = box.querySelector('#rsbPhys');
+  const fmtB = box.querySelector('#rsbFmt'), qB = box.querySelector('#rsbQ');
+  const noUp = box.querySelector('#rsbNoUp'), tagEl = box.querySelector('#rsbTag');
+  const goB = box.querySelector('#rsbGo'), dlB = box.querySelector('#rsbDl'), dl1B = box.querySelector('#rsbDlOne');
+  const clearB = box.querySelector('#rsbClear'), progB = box.querySelector('#rsbProg');
+  const listEl = box.querySelector('#rsbList'), sumEl = box.querySelector('#rsbSum');
   let state = null; // { img, w, h, name }
+  let bsItems = [], bsResults = []; // 清单 / 处理结果（{ name, data }）
   fileEl.onchange = async () => {
     const f = fileEl.files && fileEl.files[0];
     if (!f) return;
@@ -2956,6 +3197,185 @@ function buildToolResize() {
     } catch (e) { out.textContent = '生成失败：' + (e && e.message ? e.message : e); }
     go.disabled = false;
   };
+
+  // ================= 批量处理：改像素 + 改分辨率，一次设定整批跑 =================
+  const setTab = (many) => {
+    tabOne.classList.toggle('on', !many);
+    tabMany.classList.toggle('on', many);
+    oneEl.style.display = many ? 'none' : '';
+    manyEl.style.display = many ? '' : 'none';
+    if (many) info.textContent = '';
+  };
+  tabOne.onclick = () => setTab(false);
+  tabMany.onclick = () => setTab(true);
+  // 每种调整方式各自记住上次填的像素值 —— 来回切方式时不会把「50%」当成「50px」
+  const BS_DEF = { long: [1920, 1920], short: [1200, 1200], width: [1080, 1080], height: [1080, 1080], pct: [50, 50], px: [1200, 900], fit: [1920, 1920] };
+  const bsVal = {};
+  RS_MODES.forEach(m => { bsVal[m.v] = (BS_DEF[m.v] || [1920, 1920]).slice(); });
+  let curMode = 'long';
+  const dpiVal = () => {
+    const v = parseInt(dpiEl.value, 10);
+    return v > 0 ? v : (parseInt(dpiC.value, 10) || 96);
+  };
+  const optVal = () => {
+    const a = parseInt(aEl.value, 10), b = parseInt(bEl.value, 10), m = modeEl.value;
+    const o = { noUp: !!noUp.checked };
+    if (m === 'px' || m === 'fit') { o.w = a; o.h = b; }
+    else if (m === 'pct') o.pct = a;
+    else o.n = a;
+    return o;
+  };
+  const planOf = it => rsPlanSize(modeEl.value, optVal(), it.w, it.h);
+  const syncPhys = () => {
+    let sample = null;
+    for (const x of bsItems) if (x.w > 0) { sample = x; break; }
+    if (!sample) { physEl.textContent = ''; return; }
+    const p = rsPlanSize(modeEl.value, optVal(), sample.w, sample.h), d = dpiVal();
+    physEl.textContent = `以 ${sample.w}×${sample.h} 为例 → ${p.w}×${p.h} px · ${d} DPI 下约 ${rsPhysCm(p.w, p.h, d)}`;
+  };
+  const syncModeUI = () => {
+    const m = modeEl.value;
+    const two = (m === 'px' || m === 'fit');
+    lblB.style.display = two ? '' : 'none';
+    bEl.style.display = two ? '' : 'none';
+    const mod = RS_MODES.filter(x => x.v === m)[0] || RS_MODES[0];
+    lblA.textContent = mod.one + (m === 'pct' ? '（%）' : '（px）');
+    lblB.textContent = (m === 'fit' ? '框高' : '高') + '（px）';
+    syncPhys(); renderList();
+  };
+  const renderList = () => {
+    listEl.style.display = bsItems.length ? '' : 'none';
+    listEl.innerHTML = '';
+    cntEl.textContent = bsItems.length ? `已选 ${bsItems.length} 张` : '';
+    bsItems.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'rsb-item';
+      const th = document.createElement('img');
+      th.className = 'rsb-thumb';
+      if (it.thumb) th.src = it.thumb;
+      const meta = document.createElement('div');
+      meta.className = 'rsb-meta';
+      const nm = document.createElement('div');
+      nm.className = 'rsb-name'; nm.textContent = it.name;
+      const dim = document.createElement('div');
+      dim.className = 'rsb-dim' + (it.state === 'done' ? ' done' : it.state === 'err' ? ' err' : '');
+      if (it.note) dim.textContent = it.note;
+      else if (it.w > 0) { const p = planOf(it); dim.textContent = `${it.w}×${it.h} → ${p.w}×${p.h} px`; }
+      else dim.textContent = '读图失败（格式可能不支持）';
+      meta.appendChild(nm); meta.appendChild(dim);
+      const del = document.createElement('span');
+      del.className = 'rsb-del'; del.textContent = '✕'; del.title = '移出清单';
+      del.onclick = () => { bsItems.splice(i, 1); renderList(); syncPhys(); };
+      row.appendChild(th); row.appendChild(meta); row.appendChild(del);
+      listEl.appendChild(row);
+    });
+  };
+  const thumbOf = (img) => {
+    try {
+      const t = document.createElement('canvas');
+      t.width = 76; t.height = 76;
+      const c = t.getContext('2d');
+      if (!c || !t.toDataURL) return '';
+      c.fillStyle = '#f2f4f6'; c.fillRect(0, 0, 76, 76);
+      const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+      const k = Math.min(76 / Math.max(1, sw), 76 / Math.max(1, sh));
+      const dw = Math.max(1, sw * k), dh = Math.max(1, sh * k);
+      c.drawImage(img, (76 - dw) / 2, (76 - dh) / 2, dw, dh);
+      return t.toDataURL('image/jpeg', 0.72);
+    } catch (_) { return ''; }
+  };
+  const addFiles = async (list) => {
+    const pick = pickImgFiles(list);
+    progB.textContent = pick.skipped.length ? skipSummary(pick.skipped) : '读取中…';
+    for (const f of pick.ok) {
+      const it = { file: f, name: fileBaseName(f) || fileRelName(f), w: 0, h: 0, thumb: '', state: '', note: '' };
+      try {
+        const img = await blobToImage(f);
+        it.w = img.naturalWidth || img.width; it.h = img.naturalHeight || img.height;
+        it.thumb = thumbOf(img);
+      } catch (e) { it.state = 'err'; it.note = '读图失败（浏览器解不了这个格式）'; }
+      bsItems.push(it);
+    }
+    bsItems.sort((a, b) => naturalCompare(a.name, b.name));
+    bsResults = []; dlB.style.display = 'none'; dl1B.style.display = 'none'; sumEl.textContent = '';
+    renderList(); syncPhys();
+    if (!pick.skipped.length) progB.textContent = '';
+  };
+  filesEl.onchange = () => { addFiles(filesEl.files || []); filesEl.value = ''; };
+  bindDropFiles(manyEl, list => addFiles(list));
+  clearB.onclick = () => {
+    bsItems = []; bsResults = [];
+    renderList(); syncPhys();
+    progB.textContent = ''; sumEl.textContent = '';
+    dlB.style.display = 'none'; dl1B.style.display = 'none';
+  };
+  modeEl.onchange = () => {
+    bsVal[curMode] = [parseInt(aEl.value, 10) || 0, parseInt(bEl.value, 10) || 0];
+    curMode = modeEl.value;
+    const v = bsVal[curMode] || [1920, 1920];
+    aEl.value = v[0] || 1920; bEl.value = v[1] || 1920;
+    syncModeUI();
+  };
+  aEl.oninput = syncPhys; bEl.oninput = syncPhys;
+  aEl.onchange = renderList; bEl.onchange = renderList;
+  dpiEl.onchange = () => { dpiC.style.display = parseInt(dpiEl.value, 10) > 0 ? 'none' : ''; syncPhys(); };
+  dpiC.oninput = syncPhys;
+  noUp.onchange = () => { syncPhys(); renderList(); };
+  goB.onclick = async () => {
+    if (!bsItems.length) { progB.textContent = '先选图片：可多选，也支持把整个文件夹拖进来'; return; }
+    const mode = modeEl.value, opt = optVal();
+    const type = fmtB.value === 'png' ? 'image/png' : fmtB.value === 'webp' ? 'image/webp' : 'image/jpeg';
+    const q = Math.min(1, Math.max(0.1, (parseInt(qB.value, 10) || 90) / 100));
+    const dpi = dpiVal();
+    goB.disabled = true; dlB.style.display = 'none'; dl1B.style.display = 'none';
+    sumEl.textContent = ''; progB.textContent = '准备中…';
+    bsResults = [];
+    const used = {};
+    let inBytes = 0, outBytes = 0, ok = 0;
+    for (let i = 0; i < bsItems.length; i++) {
+      const it = bsItems[i];
+      it.state = ''; it.note = '';
+      progB.textContent = `处理中 ${i + 1}/${bsItems.length}：${it.name}`;
+      renderList();
+      await sleep0();
+      try {
+        const img = await blobToImage(it.file);
+        const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+        const p = rsPlanSize(mode, opt, sw, sh);
+        let blob = await rsRenderBlob(img, p.w, p.h, type, q);
+        blob = await rsBlobWithDpi(blob, type, dpi);
+        const data = new Uint8Array(await blob.arrayBuffer());
+        const nm = rsUniqName(rsOutName(it.name, p.w, p.h, type, !!tagEl.checked), used);
+        bsResults.push({ name: nm, data: data, mime: type });
+        it.state = 'done'; it.note = `${sw}×${sh} → ${p.w}×${p.h} px · ${fmtKB(blob.size)}`;
+        inBytes += (it.file && it.file.size) || 0; outBytes += blob.size; ok++;
+      } catch (e) { it.state = 'err'; it.note = '失败：' + ((e && e.message) || e); }
+      renderList();
+    }
+    goB.disabled = false;
+    renderList();
+    if (!bsResults.length) { progB.textContent = '没有一张处理成功'; return; }
+    dlB.style.display = ''; dl1B.style.display = '';
+    progB.textContent = `完成 ${ok}/${bsItems.length} 张`;
+    const rate = inBytes > 0 ? (outBytes < inBytes ? `省 ${Math.round((1 - outBytes / inBytes) * 100)}%` : `增大 ${Math.round((outBytes / inBytes - 1) * 100)}%`) : '';
+    const fmtName = type === 'image/png' ? 'PNG' : type === 'image/webp' ? 'WebP' : 'JPG';
+    sumEl.textContent = `原合计 ${fmtKB(inBytes)} → 输出 ${fmtKB(outBytes)}${rate ? '（' + rate + '）' : ''} · ${fmtName} · ${dpi} DPI`
+      + (type === 'image/webp' ? '（WebP 不支持写 DPI，已跳过）' : '');
+  };
+  dlB.onclick = () => {
+    if (!bsResults.length) return;
+    const zip = zipStore(bsResults);
+    saveBytes(zip, `图片Resize_${stampNow()}_${bsResults.length}张.zip`, 'application/zip');
+    progB.textContent = `已打包 ${bsResults.length} 张`;
+  };
+  dl1B.onclick = async () => {
+    for (let i = 0; i < bsResults.length; i++) {
+      saveBytes(bsResults[i].data, bsResults[i].name, bsResults[i].mime);
+      if (i % 5 === 4) await sleep0(); // 让浏览器喘口气，免得触发「下载过多」拦截
+    }
+    progB.textContent = `已逐个下载 ${bsResults.length} 张`;
+  };
+  syncModeUI();
 bindDropImage(box, fileEl);
   return box;
 }
@@ -6574,7 +6994,7 @@ bindDropImage(box, imgIn);
 
 const TOOLS = [
   { id: 'size', name: '尺寸换算', icon: '📏', desc: '英寸 / 厘米换算', build: buildToolSize },
-  { id: 'resize', name: '图片Resize', icon: '🖼️', desc: '改尺寸/格式', build: buildToolResize },
+  { id: 'resize', name: '图片Resize', icon: '🖼️', desc: '批量改像素 / 分辨率', build: buildToolResize },
   { id: 'compress', name: '文件压缩', icon: '🗜️', desc: 'PPT / PDF / 图片瘦身', build: buildToolCompress },
   { id: 'palette', name: 'ColoroReview', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
   { id: 'colorconv', name: '色值转换', icon: '🎨', desc: '色值 ↔ 色号 / 传图识色', build: buildToolColor },
@@ -13941,6 +14361,8 @@ if (typeof globalThis !== 'undefined') {
     pantoneCPrint, pantoneCSpecial, coatedKind, lookupPantone,
     drawWatermarkOn, wmPos, bindDropImage, isFileDrag,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
+    RS_MODES, rsPlanSize, rsPhysCm, rsDrawScaled, rsRenderBlob, rsBlobWithDpi, rsOutName, rsUniqName,
+    pngChunkBytes, pngSetDpiBytes, jpegSetDpiBytes, rsSetDpiBytes,
     containerEstimate, CONTAINERS, zoneOffsetMin, TZ_CITIES, paletteFromPixels, rgbToHex,
     ctState, ctPlanSingle, ctPlanMixed, ctPlanZones, ctSimulate, ctScene, ctDraw, ctMergeLayers, ctBestOri, ctDispose, CT_MODES, ctMode,
     ctOris, ctOriAllow, ctAllowClone, ctAllowText, CT_FAMS, CT_ALLOW_ALL, ctRectFits,
