@@ -738,6 +738,20 @@
   .pal-copy:hover { background: #fff; color: var(--c-sales, #3498db); }
   .pal-base { display: none; }
   .pal-cell.on .pal-base { display: block; font-size: 9.5px; font-weight: 700; color: var(--c-sales, #3498db); padding: 3px 0 5px; letter-spacing: .5px; }
+  /* 上传图片预览（与色板并排，右侧） */
+  .pal-top { display: flex; align-items: stretch; gap: 12px; margin-top: 12px; }
+  .pal-top .pal-grid { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+  .pal-prev { flex: 0 0 236px; min-width: 150px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
+  .pal-prev-box { flex: 1 1 auto; min-height: 76px; display: flex; align-items: center; justify-content: center; padding: 6px;
+    background-color: #fdfefe;
+    background-image: linear-gradient(45deg, #eef1f4 25%, transparent 25%), linear-gradient(-45deg, #eef1f4 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #eef1f4 75%), linear-gradient(-45deg, transparent 75%, #eef1f4 75%);
+    background-size: 12px 12px; background-position: 0 0, 0 6px, 6px -6px, -6px 0; }
+  .pal-prev-box img { display: block; max-width: 100%; max-height: 150px; object-fit: contain; box-shadow: 0 1px 4px rgba(20,30,40,.12); }
+  .pal-prev-meta { flex: 0 0 auto; padding: 5px 8px 6px; border-top: 1px solid var(--border); background: #fbfcfd; text-align: center; }
+  .pal-prev-meta b { display: block; font-size: 11px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  .pal-prev-meta i { display: block; font-style: normal; font-size: 10px; color: var(--text-light); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 720px) { .pal-top { flex-wrap: wrap; } .pal-prev { flex: 1 1 100%; } .pal-prev-box img { max-height: 180px; } }
   /* 配色建议 */
   .scheme-list { margin-top: 14px; }
   .scheme-hint { font-size: 12px; color: var(--text-light); margin-bottom: 8px; }
@@ -5776,16 +5790,25 @@ function buildToolPalette() {
     <div class="tool-row"><input type="file" id="plFile" accept="image/*">
       <button id="plPaste" title="读取剪贴板里的图片（截图后直接点这里）">📋 粘贴图片</button>
       <span class="drop-tip"><i class="tip-idle">或把图片拖进来 / 按 ⌘(Ctrl)+V 粘贴</i><i class="tip-hot">松开鼠标即可</i></span><span class="tool-out" id="plOut"></span></div>
-    <div class="pal-grid" id="palGrid"></div>
+    <div class="pal-top">
+      <div class="pal-grid" id="palGrid"></div>
+      <div class="pal-prev" id="plPrev" style="display:none" title="上传的图片预览">
+        <div class="pal-prev-box"><img id="plPrevImg" alt="上传图片预览"></div>
+        <div class="pal-prev-meta"><b id="plPrevSize"></b><i id="plPrevName"></i></div>
+      </div>
+    </div>
     <div id="plEval" class="eval-box" style="display:none"></div>
     <div id="plSchemes" class="scheme-list"></div>
     <div class="tool-row" id="plSheetRow" style="margin-top:12px;display:none">
       <button id="plDl">⬇️ 下载配色建议图 PNG</button>
       <span class="tool-out" id="plDlOut"></span>
     </div>
-    <div class="t-tip">提取图片 5 个主色（自动跳过透明背景），先对图片配色打分点评（好在哪、差在哪）。<b>点击任一色块即以它为主色</b>重出配色建议，选中的色块会高亮标「主色」，且每套方案的第一块就是它（导出图上同样排首位）；色块右上角 ⧉ 单独复制 HEX。配色建议按 Coloro 色相/明度/彩度逻辑生成 5 套方案，可下载成一张配色建议图。</div>`;
+    <div class="t-tip">提取图片 5 个主色（自动跳过透明背景），先对图片配色打分点评（好在哪、差在哪）。<b>点击任一色块即以它为主色</b>重出配色建议，选中的色块会高亮标「主色」，且每套方案的第一块就是它（导出图上同样排首位）；色块右上角 ⧉ 单独复制 HEX。右侧同步显示上传图片的预览与原始像素 / 体积。配色建议按 Coloro 色相/明度/彩度逻辑生成 5 套方案，可下载成一张配色建议图。</div>`;
   const fileEl = box.querySelector('#plFile'), grid = box.querySelector('#palGrid'), out = box.querySelector('#plOut');
   const pasteBtn = box.querySelector('#plPaste');
+  const prevBox = box.querySelector('#plPrev'), prevImg = box.querySelector('#plPrevImg');
+  const prevSizeEl = box.querySelector('#plPrevSize'), prevNameEl = box.querySelector('#plPrevName');
+  let prevUrl = ''; // 预览用的 objectURL（换图/关面板时释放，别一直占着内存）
   const evalBox = box.querySelector('#plEval');
   const schemeWrap = box.querySelector('#plSchemes');
   const sheetRow = box.querySelector('#plSheetRow'), dlBtn = box.querySelector('#plDl'), dlOut = box.querySelector('#plDlOut');
@@ -5808,6 +5831,24 @@ function buildToolPalette() {
     } catch (_) {}
     if (!ok) { try { prompt('请手动复制色号：', hex); ok = true; } catch (_) {} }
     return ok;
+  };
+  // —— 右侧预览：把刚上传/粘贴的图片显示出来（顺带标一下原始像素与体积）——
+  const showPrev = (f, img, name) => {
+    if (prevUrl) { try { URL.revokeObjectURL(prevUrl); } catch (_) {} prevUrl = ''; }
+    if (!f || !prevImg) { if (prevBox) prevBox.style.display = 'none'; return; }
+    try {
+      prevUrl = URL.createObjectURL(f);
+      prevImg.src = prevUrl;
+      const px = (img && img.naturalWidth) ? img.naturalWidth + ' × ' + img.naturalHeight + ' px' : '';
+      const kb = f.size ? fmtKB(f.size) : '';
+      if (prevSizeEl) prevSizeEl.textContent = px + (px && kb ? ' · ' : '') + kb;
+      if (prevNameEl) {
+        const nm = String(name || f.name || '图片');
+        prevNameEl.textContent = nm;
+        prevNameEl.title = nm;
+      }
+      if (prevBox) prevBox.style.display = '';
+    } catch (_) { if (prevBox) prevBox.style.display = 'none'; }
   };
   // —— 换主色：重出 5 套方案 + 重生成建议图（不重新采样原图）——
   const applyBase = hex => {
@@ -5877,10 +5918,12 @@ function buildToolPalette() {
     evalBox.style.display = 'none'; evalBox.innerHTML = '';
     schemeWrap.innerHTML = ''; sheetRow.style.display = 'none'; dlOut.textContent = ''; sheetBlob = null;
     st = null; selHex = '';
+    showPrev(null); // 先收起旧图，避免换图瞬间还看到上一张
     if (!f) return;
     out.textContent = '正在提取主色…';
     try {
       const img = await blobToImage(f);
+      showPrev(f, img, name);
       const MAX = 320; // 采样尺寸，足够还原主色
       const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
       const cv = document.createElement('canvas');
