@@ -722,13 +722,13 @@
   .fx-grp td { background: #f7f9fb; color: var(--text-light); font-size: 11px; font-weight: 700; letter-spacing: 1px; padding: 6px 9px; }
   /* 取色板 */
   .pal-grid { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
-  .pal-cell { width: 118px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
+  .pal-cell { width: 118px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: #fff; transition: all .15s; text-align: center; }
   .pal-cell:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--c-sales, #3498db); }
   .pal-chip { height: 54px; display: block; }
-  .pal-hex { display: block; font-size: 11.5px; font-weight: 700; padding: 5px 0 1px; font-variant-numeric: tabular-nums; }
-  .pal-pct { display: block; font-size: 10.5px; color: var(--text-light); padding-bottom: 6px; }
+  .pal-hex { display: block; font-size: 11.5px; font-weight: 700; padding: 4px 0 1px; font-variant-numeric: tabular-nums; }
+  .pal-pct { display: block; font-size: 10.5px; color: var(--text-light); padding-bottom: 3px; }
   .pal-code { display: block; font-size: 9.5px; color: #5b6b73; font-variant-numeric: tabular-nums; letter-spacing: .2px; white-space: nowrap; }
-  .pal-name { display: block; font-size: 10px; color: var(--text-light); padding-top: 2px; line-height: 1.4; white-space: nowrap; }
+  .pal-name { display: block; font-size: 10px; color: var(--text-light); padding-top: 1px; line-height: 1.4; white-space: nowrap; }
   /* 选中的「配色基准色」 */
   .pal-cell.on { border-color: var(--c-sales, #3498db); box-shadow: 0 0 0 2px rgba(52,152,219,.32); }
   .pal-chip { position: relative; }
@@ -737,10 +737,13 @@
   .pal-cell:hover .pal-copy { opacity: 1; }
   .pal-copy:hover { background: #fff; color: var(--c-sales, #3498db); }
   .pal-base { display: none; }
-  .pal-cell.on .pal-base { display: block; font-size: 9.5px; font-weight: 700; color: var(--c-sales, #3498db); padding: 3px 0 5px; letter-spacing: .5px; }
-  /* 上传图片预览（与色板并排，右侧） */
-  .pal-top { display: flex; align-items: stretch; gap: 12px; margin-top: 12px; }
-  .pal-top .pal-grid { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+  /* 「★ 配色基准」贴在色块内底部：不额外占一行 → 5 张卡片等高、保持方形 */
+  .pal-cell.on .pal-base { display: block; position: absolute; left: 50%; bottom: 5px; transform: translateX(-50%);
+    font-size: 9.5px; font-weight: 700; color: #2c3e50; background: rgba(255,255,255,.92); border-radius: 999px;
+    padding: 1px 7px; letter-spacing: .3px; white-space: nowrap; box-shadow: 0 1px 3px rgba(20,30,40,.18); }
+  /* 上传图片预览（紧贴色板右侧；色板不拉宽 → 不留大空白，预览才挨得着） */
+  .pal-top { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; }
+  .pal-top .pal-grid { flex: 0 1 auto; min-width: 0; margin-top: 0; }
   .pal-prev { flex: 0 0 236px; min-width: 150px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
   .pal-prev-box { flex: 1 1 auto; min-height: 76px; display: flex; align-items: center; justify-content: center; padding: 6px;
     background-color: #fdfefe;
@@ -751,7 +754,8 @@
   .pal-prev-meta { flex: 0 0 auto; padding: 5px 8px 6px; border-top: 1px solid var(--border); background: #fbfcfd; text-align: center; }
   .pal-prev-meta b { display: block; font-size: 11px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
   .pal-prev-meta i { display: block; font-style: normal; font-size: 10px; color: var(--text-light); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  @media (max-width: 720px) { .pal-top { flex-wrap: wrap; } .pal-prev { flex: 1 1 100%; } .pal-prev-box img { max-height: 180px; } }
+  /* 面板放不下「色板 + 预览」（色板 626 + 间距 + 预览 236 ≈ 880）时，预览整行落到色板下方 */
+  @media (max-width: 960px) { .pal-top { flex-wrap: wrap; } .pal-prev { flex: 0 0 100%; } .pal-prev-box img { max-height: 180px; } }
   /* 配色建议 */
   .scheme-list { margin-top: 14px; }
   .scheme-hint { font-size: 12px; color: var(--text-light); margin-bottom: 8px; }
@@ -5944,12 +5948,11 @@ function buildToolPalette() {
         cell.className = 'pal-cell';
         cell.dataset.hex = hex;
         cell.title = '点击「以它为主色」重出配色建议';
-        cell.innerHTML = `<span class="pal-chip" style="background:${hex}"><i class="pal-copy" title="复制 ${hex}">⧉</i></span>
+        cell.innerHTML = `<span class="pal-chip" style="background:${hex}"><i class="pal-copy" title="复制 ${hex}">⧉</i><b class="pal-base">★ 配色基准</b></span>
           <span class="pal-hex">${hex}</span>
           <span class="pal-code">Coloro ${info.code}</span>
           <span class="pal-name">${esc(info.name)}${c.derived ? ' · 延展' : ''}</span>
-          <span class="pal-pct">${c.derived ? '同色系延展' : (c.pct * 100).toFixed(1) + '%'}</span>
-          <span class="pal-base">★ 配色基准</span>`;
+          <span class="pal-pct">${c.derived ? '同色系延展' : (c.pct * 100).toFixed(1) + '%'}</span>`;
         cell.onclick = () => { applyBase(hex); };
         cell.querySelectorAll('.pal-copy').forEach(btn => {
           btn.onclick = async e => {
