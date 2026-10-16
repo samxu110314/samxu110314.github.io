@@ -2826,9 +2826,36 @@ function dayNum(ds) { return parseDay(ds).getTime(); }
 function isoDay(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
 
 // ---- 1) 尺寸换算（英寸 ↔ 厘米，含常用画框尺寸） ----
+// 毫米 ↔ 英寸分数（画框行业标注：24-5/8" = 625.4mm 一类）
+function tsGcd(a, b) { while (b) { const t = a % b; a = b; b = t; } return a; }
+// 毫米 → 英寸分数。denom ∈ {8,16,32,64}（分数精度），返回 {text, inches, whole, num, den}
+function tsMmToInchFrac(mm, denom) {
+  const den = [8, 16, 32, 64].indexOf(denom) >= 0 ? denom : 16;
+  const n = Math.round((mm / 25.4) * den);
+  let whole = Math.floor(n / den), num = n % den, d = den;
+  const g = num ? tsGcd(num, d) : 1;
+  if (g > 1) { num /= g; d /= g; }
+  let text = String(whole);
+  if (num) text += '-' + num + '/' + d;
+  return { text, inches: n / den, whole, num, den: d };
+}
+// 英寸分数 → 毫米。接受 24-5/8 / 24 5/8 / 5/8 / 24.625 / 24（可带 " ″ ”），返回 {inches, mm} 或 null
+function tsParseInchFrac(str) {
+  const s = String(str == null ? '' : str).replace(/[”"″]/g, '').trim();
+  const mf = s.match(/^(?:(\d+(?:\.\d+)?)\s*[-\s]\s*)?(\d+)\s*\/\s*(\d+)$/); // 含分数
+  const mn = mf ? null : s.match(/^(\d+(?:\.\d+)?)$/);                       // 纯数字
+  if (!mf && !mn) return null;
+  let inches;
+  if (mf) {
+    const den = parseFloat(mf[3]);
+    if (!den) return null;
+    inches = (mf[1] != null ? parseFloat(mf[1]) : 0) + parseFloat(mf[2]) / den;
+  } else inches = parseFloat(mn[1]);
+  return { inches, mm: +(inches * 25.4).toFixed(1) };
+}
 function buildToolSize() {
   const box = document.createElement('div');
-  box.innerHTML = `<h4>📏 尺寸换算（英寸 ↔ 厘米）</h4>
+  box.innerHTML = `<h4>📏 尺寸换算（英寸 ↔ 厘米 / 毫米 ↔ 英寸分数）</h4>
     <div class="tool-row">
       <input id="tsIn" type="number" step="0.001" style="width:110px" placeholder="英寸">
       <span style="color:var(--text-light)">in</span>
@@ -2837,8 +2864,22 @@ function buildToolSize() {
       <span style="color:var(--text-light)">cm</span>
       <span class="tool-out" id="tsOut"></span>
     </div>
+    <div class="tool-row" style="margin-top:8px">
+      <input id="tsMm" type="number" step="0.1" style="width:110px" placeholder="毫米">
+      <span style="color:var(--text-light)">mm</span>
+      <span style="color:var(--text-light)">=</span>
+      <span class="tool-out" id="tsFracOut" style="font-weight:600"></span>
+    </div>
+    <div class="tool-row" style="margin-top:6px">
+      <input id="tsFrac" type="text" style="width:110px" placeholder="24-5/8">
+      <span style="color:var(--text-light)">"</span>
+      <span style="color:var(--text-light)">=</span>
+      <span class="tool-out" id="tsMmOut" style="font-weight:600"></span>
+      <span style="color:var(--text-light);font-size:12px;margin-left:6px">分数精度</span>
+    </div>
+    <div class="tool-row" id="tsDens" style="margin-top:4px"></div>
     <div class="tool-row" id="tsSizes" style="margin-top:10px"></div>
-    <div class="t-tip">常用画框尺寸（英寸 → 厘米），点击任一尺寸自动填入上方换算</div>`;
+    <div class="t-tip">毫米 ↔ 英寸分数（如 24-5/8"）：分数自动约分、就近取整，误差不超过半个分数单位；输入分数会同步填到上方英寸/厘米。常用画框尺寸点击任一自动填入换算</div>`;
   const inEl = box.querySelector('#tsIn'), cmEl = box.querySelector('#tsCm'), out = box.querySelector('#tsOut');
   const sync = (from) => {
     if (from === 'in') { const v = parseFloat(inEl.value); cmEl.value = isNaN(v) ? '' : (v * 2.54).toFixed(2); }
@@ -2847,6 +2888,33 @@ function buildToolSize() {
   };
   inEl.oninput = () => sync('in');
   cmEl.oninput = () => sync('cm');
+  // —— 毫米 ↔ 英寸分数 ——
+  const mmEl = box.querySelector('#tsMm'), fracEl = box.querySelector('#tsFrac');
+  const fracOut = box.querySelector('#tsFracOut'), mmOut = box.querySelector('#tsMmOut');
+  let tsDen = 16;
+  const denRow = box.querySelector('#tsDens');
+  const denChips = [];
+  [8, 16, 32, 64].forEach(d => {
+    const c = document.createElement('span');
+    c.className = 'tool-mini ts-den';
+    c.textContent = '1/' + d;
+    c.onclick = () => { tsDen = d; denChips.forEach(x => x.style.background = ''); c.style.background = 'var(--accent-bg, #dbe7ff)'; syncMm(); };
+    denChips.push(c); denRow.appendChild(c);
+  });
+  if (denChips[1]) denChips[1].style.background = 'var(--accent-bg, #dbe7ff)';
+  const syncMm = () => {
+    const v = parseFloat(mmEl.value);
+    if (isNaN(v)) { fracOut.textContent = ''; return; }
+    fracOut.textContent = tsMmToInchFrac(v, tsDen).text + '" (' + (Math.round(v * 10) / 10) + 'mm)';
+  };
+  const syncFrac = () => {
+    const p = tsParseInchFrac(fracEl.value);
+    if (!p) { mmOut.textContent = ''; return; }
+    mmOut.textContent = p.mm + 'mm';
+    inEl.value = p.inches.toFixed(3); cmEl.value = (p.inches * 2.54).toFixed(2); out.textContent = '';
+  };
+  mmEl.oninput = syncMm;
+  fracEl.oninput = syncFrac;
   const sizes = box.querySelector('#tsSizes');
   [['5×7', 5, 7], ['8×10', 8, 10], ['11×14', 11, 14], ['16×20', 16, 20], ['20×24', 20, 24], ['24×36', 24, 36], ['A4', null, null], ['A3', null, null]].forEach(([name, w, h]) => {
     const chip = document.createElement('span');
@@ -7168,7 +7236,7 @@ bindDropImage(box, imgIn);
 }
 
 const TOOLS = [
-  { id: 'size', name: '尺寸换算', icon: '📏', desc: '英寸 / 厘米换算', build: buildToolSize },
+  { id: 'size', name: '尺寸换算', icon: '📏', desc: '英寸 / 厘米 / 毫米 ↔ 英寸分数', build: buildToolSize },
   { id: 'resize', name: '图片Resize', icon: '🖼️', desc: '批量改像素 / 分辨率', build: buildToolResize },
   { id: 'compress', name: '文件压缩', icon: '🗜️', desc: 'PPT / PDF / 图片瘦身', build: buildToolCompress },
   { id: 'palette', name: 'ColoroReview', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
@@ -14529,6 +14597,7 @@ if (typeof globalThis !== 'undefined') {
     naturalCompare, longestRun, medianOf, pairFrameFiles, frameOutName, sanitizeName, tagSize, stampNow, sortImgFiles, pickImgFiles, skipSummary, fileRelName, fileBaseName,
     sniffImageKind, decodeToCanvas, canvasOfSize, IMG_EXT_OK_RE,
     buildToolSize, buildToolResize, buildToolCompress, buildToolPalette, buildToolDate, buildToolContainer, buildToolTime, buildToolRate, buildToolCalc,
+    tsMmToInchFrac, tsParseInchFrac, tsGcd,
     buildToolQr, buildToolWatermark, buildToolColor,
     qrEncode, qrCanvas, qrCapacity, qrPickVersion, utf8Bytes,
     code128Encode, eanEncode, eanCheck, bcEncode, bcCanvas, C128_BITS,
