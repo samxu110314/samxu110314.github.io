@@ -6744,10 +6744,56 @@ function wmPos(w, h, iw, ih, pos, pad) {
     default: return { x: x1, y: y1 };
   }
 }
+function wmFileKind(file) {
+  const name = String(file && file.name || '').toLowerCase();
+  const type = String(file && file.type || '').toLowerCase();
+  if (type === 'application/pdf' || /\.pdf$/.test(name)) return 'pdf';
+  if (type.indexOf('image/') === 0 || /\.(jpe?g|png|webp|gif|bmp|avif)$/.test(name)) return 'image';
+  return '';
+}
+function wmPdfPageText(page, total) { return `第 ${page} / ${total} 页`; }
+function wmPdfScale(vp) { return Math.max(0.1, Math.min(2, 2400 / Math.max(1, vp.width, vp.height))); }
+async function wmLoadPdf(buf) {
+  await loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', 'pdfjsLib');
+  globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  return await globalThis.pdfjsLib.getDocument({ data: buf }).promise;
+}
+async function wmPdfPageCanvas(doc, pageNum, scale) {
+  const page = await doc.getPage(pageNum);
+  const vp1 = page.getViewport({ scale: 1 });
+  const vp = page.getViewport({ scale: scale || wmPdfScale(vp1) });
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.ceil(vp.width)); cv.height = Math.max(1, Math.ceil(vp.height));
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  page.cleanup();
+  return { canvas: cv, width: vp1.width, height: vp1.height };
+}
+async function watermarkPdfFile(buf, opt, onProg) {
+  const doc = await wmLoadPdf(buf);
+  await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', 'jspdf');
+  const jsPDF = globalThis.jspdf.jsPDF;
+  let pdf = null;
+  try {
+    for (let p = 1; p <= doc.numPages; p++) {
+      const rendered = await wmPdfPageCanvas(doc, p);
+      const cv = rendered.canvas, ctx = cv.getContext('2d');
+      drawWatermarkOn(ctx, cv.width, cv.height, opt);
+      if (!pdf) pdf = new jsPDF({ unit: 'pt', format: [rendered.width, rendered.height], orientation: rendered.width > rendered.height ? 'landscape' : 'portrait' });
+      else pdf.addPage([rendered.width, rendered.height], rendered.width > rendered.height ? 'landscape' : 'portrait');
+      pdf.addImage(cv.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, rendered.width, rendered.height);
+      if (onProg) onProg(p, doc.numPages);
+    }
+    return pdf.output('blob');
+  } finally {
+    try { const closing = doc.destroy(); if (closing && closing.catch) closing.catch(() => {}); } catch (_) {}
+  }
+}
 function buildToolWatermark() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>💧 图片水印 <small id="wmInfo" style="color:var(--text-light);font-weight:400"></small></h4>
-    <div class="tool-row"><input type="file" id="wmFile" accept="image/*"><span class="drop-tip"><i class="tip-idle">或把图片拖进来</i><i class="tip-hot">松开鼠标即可</i></span><span style="color:var(--text-light);font-size:12px">支持 JPG / PNG，水印在本地合成，图片不会上传</span></div>
+    <div class="tool-row"><input type="file" id="wmFile" accept="image/*,application/pdf,.pdf"><span class="drop-tip"><i class="tip-idle">或把图片 / PDF 拖进来</i><i class="tip-hot">松开鼠标即可</i></span><span style="color:var(--text-light);font-size:12px">支持 JPG / PNG / PDF，多页 PDF 逐页添加水印，文件不会上传</span></div>
     <div id="wmOpts" style="display:none">
       <div class="tool-row" style="margin-top:10px">
         <select id="wmKind"><option value="text">文字水印</option><option value="logo">图片水印（Logo）</option></select>
@@ -6770,14 +6816,19 @@ function buildToolWatermark() {
         <span id="wmTileWrap"><span class="wm-t">角度</span><input id="wmAngle" type="number" value="-30" style="width:64px">°
         <span class="wm-t">间距</span><input id="wmGap" type="range" min="0" max="200" value="60" style="width:96px"></span>
       </div>
+      <div id="wmPdfNav" class="tool-row" style="display:none;margin-top:10px">
+        <button id="wmPagePrev">← 上一页</button><span id="wmPageInfo" style="font-weight:600;min-width:110px;text-align:center"></span><button id="wmPageNext">下一页 →</button>
+        <span style="color:var(--text-light);font-size:12px">预览可翻页，导出会处理全部页面</span>
+      </div>
       <div class="tool-row" style="margin-top:10px">
         <button id="wmPng">⬇️ 下载 PNG</button>
         <button id="wmJpg">⬇️ 下载 JPG</button>
+        <button id="wmPdf" style="display:none">⬇️ 下载水印 PDF</button>
         <span class="tool-out" id="wmOut"></span>
       </div>
       <div id="wmPrevWrap" class="wm-canvas-box" style="display:none"></div>
     </div>
-    <div class="t-tip">平铺模式适合样册图/上架图防盗图；描边能让浅色文字在亮底上仍然清晰。导出为原图尺寸。</div>`;
+    <div class="t-tip">平铺模式适合样册图/上架图防盗图；描边能让浅色文字在亮底上仍然清晰。图片导出为原图尺寸；PDF 导出为逐页高清图版（文字转为图片）。</div>`;
   const fileEl = box.querySelector('#wmFile'), opts = box.querySelector('#wmOpts'), info = box.querySelector('#wmInfo');
   const kind = box.querySelector('#wmKind'), textEl = box.querySelector('#wmText'), logoEl = box.querySelector('#wmLogo');
   const textWrap = box.querySelector('#wmTextWrap'), logoWrap = box.querySelector('#wmLogoWrap');
@@ -6787,8 +6838,11 @@ function buildToolWatermark() {
   const posEl = box.querySelector('#wmPos'), angleEl = box.querySelector('#wmAngle'), gapEl = box.querySelector('#wmGap');
   const tileWrap = box.querySelector('#wmTileWrap');
   const prevWrap = box.querySelector('#wmPrevWrap'), out = box.querySelector('#wmOut');
-  const btnPng = box.querySelector('#wmPng'), btnJpg = box.querySelector('#wmJpg');
+  const btnPng = box.querySelector('#wmPng'), btnJpg = box.querySelector('#wmJpg'), btnPdf = box.querySelector('#wmPdf');
+  const pdfNav = box.querySelector('#wmPdfNav'), pageInfo = box.querySelector('#wmPageInfo');
+  const pagePrev = box.querySelector('#wmPagePrev'), pageNext = box.querySelector('#wmPageNext');
   let img = null, logo = null, baseName = 'image';
+  let sourceKind = '', pdfDoc = null, pdfBuf = null, pdfPage = 1, renderSeq = 0, loadSeq = 0, busy = false;
   const curOpt = () => ({
     kind: kind.value, text: textEl.value, logo: logo,
     fontPct: parseFloat(sizeEl.value) || 6, logoPct: parseFloat(sizeEl.value) || 20,
@@ -6804,12 +6858,46 @@ function buildToolWatermark() {
     drawWatermarkOn(ctx, cv.width, cv.height, curOpt());
     return cv;
   };
-  const render = () => {
+  const syncSourceUI = () => {
+    const isPdf = sourceKind === 'pdf';
+    pdfNav.style.display = isPdf ? '' : 'none';
+    btnPdf.style.display = isPdf ? '' : 'none';
+    btnPng.style.display = isPdf ? 'none' : '';
+    btnJpg.style.display = isPdf ? 'none' : '';
+    if (isPdf && pdfDoc) {
+      btnPdf.textContent = `⬇️ 下载水印 PDF（全部 ${pdfDoc.numPages} 页）`;
+      pageInfo.textContent = wmPdfPageText(pdfPage, pdfDoc.numPages);
+      pagePrev.disabled = pdfPage <= 1;
+      pageNext.disabled = pdfPage >= pdfDoc.numPages;
+    }
+  };
+  const render = async () => {
+    const seq = ++renderSeq;
+    if (sourceKind === 'pdf') {
+      if (!pdfDoc) return;
+      try {
+        const rendered = await wmPdfPageCanvas(pdfDoc, pdfPage);
+        if (seq !== renderSeq) return;
+        const cv = rendered.canvas;
+        drawWatermarkOn(cv.getContext('2d'), cv.width, cv.height, curOpt());
+        prevWrap.innerHTML = '';
+        prevWrap.appendChild(cv);
+        prevWrap.style.display = '';
+        syncSourceUI();
+      } catch (e) { if (seq === renderSeq) out.textContent = 'PDF 页面读取失败'; }
+      return;
+    }
     if (!img) return;
     const cv = makeCanvas();
     prevWrap.innerHTML = '';
     prevWrap.appendChild(cv);
     prevWrap.style.display = '';
+  };
+  const resetSource = () => {
+    renderSeq++;
+    if (pdfDoc) { try { const closing = pdfDoc.destroy(); if (closing && closing.catch) closing.catch(() => {}); } catch (_) {} }
+    img = null; pdfDoc = null; pdfBuf = null; pdfPage = 1; sourceKind = '';
+    prevWrap.innerHTML = ''; prevWrap.style.display = 'none';
   };
   const syncKind = () => {
     const isLogo = kind.value === 'logo';
@@ -6833,20 +6921,58 @@ function buildToolWatermark() {
     if (!f) return;
     try { logo = await blobToImage(f); render(); } catch (e) { out.textContent = 'Logo 读取失败'; }
   };
+  pagePrev.onclick = () => { if (pdfDoc && pdfPage > 1) { pdfPage--; render(); } };
+  pageNext.onclick = () => { if (pdfDoc && pdfPage < pdfDoc.numPages) { pdfPage++; render(); } };
   fileEl.onchange = async () => {
     const f = fileEl.files && fileEl.files[0];
     if (!f) return;
-    out.textContent = '';
+    const ticket = ++loadSeq;
+    resetSource();
+    out.textContent = ''; info.textContent = ''; opts.style.display = 'none';
+    const nextKind = wmFileKind(f);
+    baseName = (f.name || 'image').replace(/\.[^.]+$/, '') || 'image';
     try {
-      img = await blobToImage(f);
-      baseName = (f.name || 'image').replace(/\.[^.]+$/, '');
-      info.textContent = `（原图 ${img.naturalWidth}×${img.naturalHeight} · ${fmtKB(f.size)}）`;
+      if (nextKind === 'pdf') {
+        out.textContent = 'PDF 读取中…';
+        const buf = await f.arrayBuffer();
+        const doc = await wmLoadPdf(buf.slice(0));
+        if (ticket !== loadSeq) { try { doc.destroy(); } catch (_) {} return; }
+        pdfDoc = doc; pdfBuf = buf; sourceKind = 'pdf'; pdfPage = 1;
+        info.textContent = `（PDF 共 ${doc.numPages} 页 · ${fmtKB(f.size)}）`;
+      } else if (nextKind === 'image') {
+        const nextImg = await blobToImage(f);
+        if (ticket !== loadSeq) return;
+        img = nextImg; sourceKind = 'image';
+        info.textContent = `（原图 ${img.naturalWidth}×${img.naturalHeight} · ${fmtKB(f.size)}）`;
+      } else {
+        throw new Error('unsupported');
+      }
       opts.style.display = '';
-      render();
-    } catch (e) { out.textContent = '图片读取失败'; }
-    fileEl.value = '';
+      out.textContent = '';
+      syncSourceUI();
+      await render();
+    } catch (e) {
+      if (ticket === loadSeq) {
+        resetSource(); opts.style.display = 'none';
+        out.textContent = nextKind === 'pdf' ? 'PDF 读取失败，请确认文件未加密且格式正常' : nextKind === 'image' ? '图片读取失败' : '请选择 JPG / PNG 图片或 PDF 文件';
+      }
+    } finally { fileEl.value = ''; }
   };
   const doDownload = async (fmt) => {
+    if (busy) return;
+    if (fmt === 'pdf') {
+      if (!pdfDoc || !pdfBuf) return;
+      busy = true; btnPdf.disabled = true; pagePrev.disabled = true; pageNext.disabled = true;
+      try {
+        const total = pdfDoc.numPages;
+        const blob = await watermarkPdfFile(pdfBuf.slice(0), curOpt(), (p, n) => { out.textContent = `正在添加水印：第 ${p}/${n} 页…`; });
+        if (!blob) throw new Error('export');
+        downloadBlob(blob, `${baseName}_watermark.pdf`);
+        out.textContent = `✓ 已下载 ${total} 页水印 PDF · ${fmtKB(blob.size)}`;
+      } catch (e) { out.textContent = 'PDF 导出失败，请重试'; }
+      finally { busy = false; btnPdf.disabled = false; syncSourceUI(); }
+      return;
+    }
     if (!img) return;
     const cv = makeCanvas();
     if (!cv) return;
@@ -6858,7 +6984,8 @@ function buildToolWatermark() {
   };
   btnPng.onclick = () => doDownload('png');
   btnJpg.onclick = () => doDownload('jpg');
-bindDropImage(box, fileEl);
+  btnPdf.onclick = () => doDownload('pdf');
+  bindDropImage(box, fileEl);
   return box;
 }
 
@@ -7266,7 +7393,7 @@ const TOOLS = [
   { id: 'palette', name: 'ColoroReview', icon: '🎯', desc: '提图取色 + 配色点评', build: buildToolPalette },
   { id: 'colorconv', name: '色值转换', icon: '🎨', desc: '色值 ↔ 色号 / 传图识色', build: buildToolColor },
   { id: 'qr', name: '二维码/条形码', icon: '🔳', desc: '二维码 + Code128/EAN', build: buildToolQr },
-  { id: 'watermark', name: '图片水印', icon: '💧', desc: '文字 / Logo 打标', build: buildToolWatermark },
+  { id: 'watermark', name: '图片水印', icon: '💧', desc: '图片 / PDF 加水印', build: buildToolWatermark },
   { id: 'date', name: '日期计算', icon: '📅', desc: '日期推算与差值', build: buildToolDate },
   { id: 'container', name: '装柜大师', icon: '🚢', desc: '混装 3D 预演 · 20GP/40GP/40HQ', build: buildToolContainer },
   { id: 'tz', name: '全球时差', icon: '🕐', desc: '多城市时间对照', build: buildToolTime },
@@ -14628,6 +14755,7 @@ if (typeof globalThis !== 'undefined') {
     parseColorStr, rgbToHsl, hslToRgb, rgbToHsv, nearestPantone, pantoneTable, pantoneC,
     pantoneCPrint, pantoneCSpecial, coatedKind, lookupPantone,
     drawWatermarkOn, wmPos, bindDropImage, isFileDrag,
+    wmFileKind, wmPdfPageText, wmPdfScale, wmLoadPdf, wmPdfPageCanvas, watermarkPdfFile,
     fmtKB, downloadBlob, loadScript, reencodeJpeg,
     RS_MODES, rsPlanSize, rsPhysCm, rsDrawScaled, rsRenderBlob, rsBlobWithDpi, rsOutName, rsUniqName,
     pngChunkBytes, pngSetDpiBytes, jpegSetDpiBytes, rsSetDpiBytes,
