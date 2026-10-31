@@ -14384,7 +14384,7 @@ function buildToolFrameSearch() {
   const box = document.createElement('div');
   box.innerHTML = `<h4>🗂️ 框条档案检索 <small style="color:var(--text-light);font-weight:400">（全库文件名索引 · 模糊搜 · 直接给路径 · 档案每周自动更新）</small></h4>
     <div class="fs-bar">
-      <input class="fs-inp" id="fsQ" placeholder="搜文件名 / 路径关键词，空格分隔多个词（例：金属 布纹）" autocomplete="off">
+      <input class="fs-inp" id="fsQ" placeholder="输入模具/框条型号开始检索" autocomplete="off">
       <button class="cu-mini" id="fsGo">搜索</button>
       <label class="cu-mini" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="宽松模式：字可以不连着（搜「金属布纹」也能命中「金属拉丝布纹」）"><input type="checkbox" id="fsLoose" style="margin:0"> 宽松</label>
       <select class="fs-sel" id="fsTop"><option value="">全部分类</option></select>
@@ -14441,8 +14441,7 @@ function buildToolFrameSearch() {
       '<div><div class="fs-nm">' + fsMark(FS_NM[i], terms) + '</div>' +
       '<div class="fs-pth">📁 ' + fsEsc(dir || '（资料库根目录）') + '</div></div>' +
       '<div class="fs-meta">' + fmtKB(FS_SZ[i]) + ' · ' + fsDayToStr(FS_DY[i]) +
-      '<div class="fs-btns"><button class="fs-cp" data-cp="full">复制完整路径</button>' +
-      '<button class="fs-cp" data-cp="dir">复制所在目录</button></div></div></div>';
+      '<div class="fs-btns"><button class="fs-cp" data-cp="full">复制完整路径</button></div></div></div>';
   }
   function renderMore() {
     const list = $('fsList'), more = $('fsMoreBox');
@@ -14460,6 +14459,14 @@ function buildToolFrameSearch() {
     if (!FS_N) return;
     const raw = $('fsQ').value || '';
     terms = raw.trim().split(/[\s,，]+/).map(fsNorm).filter(Boolean);
+    if (!terms.length) {
+      // 没搜就不出明细：列表、加载更多都收起来，只留档案概况
+      res = []; shown = 0;
+      const list0 = $('fsList'), more0 = $('fsMoreBox');
+      list0.innerHTML = ''; list0.style.display = 'none'; more0.style.display = 'none';
+      status('共 ' + FS_N.toLocaleString() + ' 个文件 · 档案更新于 ' + ((FS_DATA && FS_DATA.gen) ? FS_DATA.gen : '—') + ' · 输入关键词后点「搜索」开始检索');
+      return;
+    }
     const loose = $('fsLoose').checked;
     const topSel = $('fsTop').value, extSel = $('fsExt').value, mode = $('fsSort').value;
     const t0 = (performance && performance.now) ? performance.now() : Date.now();
@@ -14529,11 +14536,7 @@ function buildToolFrameSearch() {
     if (!b) return;
     const row = b.closest('.fs-row');
     const i = parseInt(row.getAttribute('data-i'), 10);
-    const dir = FS_DIRS[FS_DI[i]] || '';
-    const root = (FS_DATA && FS_DATA.root ? FS_DATA.root.replace(/\/+$/, '') : '');
-    const txt = b.getAttribute('data-cp') === 'dir'
-      ? (root ? root + '/' : '') + dir
-      : fsFullPath(i);
+    const txt = fsFullPath(i);
     const old = b.textContent;
     copyText(txt).then(function () {
       b.textContent = '已复制 ✓';
