@@ -885,6 +885,28 @@
     .cu-cut .cu-side { grid-template-columns: 1fr; }
     .cu-cut .cu-side > .cu-grp:last-child { grid-column: auto; }
   }
+  /* ===== 框条档案检索（全库文件名索引 · 模糊搜索） ===== */
+  .fs-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .fs-inp { flex: 1 1 300px; min-width: 190px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 13.5px; color: var(--text); background: #fff; }
+  .fs-inp:focus { outline: none; border-color: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,.13); }
+  .fs-sel { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: inherit; font-size: 12.5px; color: var(--text); background: #fff; max-width: 240px; }
+  .fs-chipbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .fs-chip { border: 1px solid var(--border); background: #f4f7fa; border-radius: 11px; padding: 3px 10px; font-size: 11.5px; cursor: pointer; font-family: inherit; color: var(--text-light); }
+  .fs-chip:hover { border-color: #9ec9ea; color: #1c6ea4; }
+  .fs-chip.on { background: #e8f2fb; border-color: #9ec9ea; color: #1c6ea4; font-weight: 600; }
+  .fs-list { margin-top: 11px; border: 1px solid var(--border); border-radius: 10px; overflow: auto; max-height: 440px; background: #fff; }
+  .fs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 8px 11px; border-bottom: 1px solid #eef1f4; align-items: center; }
+  .fs-row:last-child { border-bottom: 0; }
+  .fs-row:hover { background: #f7fbff; }
+  .fs-nm { font-size: 13px; color: var(--text); font-weight: 600; word-break: break-all; line-height: 1.4; }
+  .fs-pth { font-size: 11.5px; color: var(--text-light); margin-top: 2px; word-break: break-all; line-height: 1.45; }
+  .fs-meta { font-size: 11px; color: #98a4ae; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+  .fs-meta .fs-btns { margin-top: 4px; }
+  .fs-cp { border: 1px solid var(--border); background: #fff; border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; font-family: inherit; color: var(--text-light); margin-left: 5px; }
+  .fs-cp:hover { border-color: #3498db; color: #3498db; }
+  .fs-mark { background: #ffe9a8; color: #7a5200; border-radius: 2px; }
+  .fs-stat { font-size: 12px; color: var(--text-light); margin-top: 9px; min-height: 17px; }
+  .fs-more-box { margin-top: 10px; text-align: center; }
   /* ===== 产品抠图：同样「预览占满整行 + 参数在下方」，四组（裁剪边距 / 识别参数 /
      识别方式 / 输出），中间那组是横铺的滑块，所以中间列留弹性宽度，两侧固定。 */
   /* ⚠️ 两侧的组**不能写死列宽**（原来是 196px / 176px / 172px）。
@@ -1505,7 +1527,7 @@
 
   <div class="toolbox" id="cutbox" style="display:none">
     <div class="tool-head">
-      <span class="tool-label">✂️ 一键抠图</span>
+      <span class="tool-label">✂️ 一键抠图 · 🗂️ 框条档案检索</span>
       <span class="tool-note">批量读文件夹 · 自动去背景 · 原像素导出 PNG · 全部在本地运行</span>
     </div>
     <div class="tool-grid" id="cutChips"></div>
@@ -14208,11 +14230,334 @@ function buildToolProdCut() {
   return box;
 }
 
+// ================= 工具：框条档案检索（全库文件名索引 · 模糊搜索） =================
+// 数据源：同目录 frame-index.json（由 tools/build_frame_index.py 扫描 NAS「框条新品资料库」生成，每周自动更新一次）
+const FS_URL = 'frame-index.json';
+let FS_DATA = null, FS_PROM = null;
+let FS_N = 0, FS_NM = null, FS_LP = null, FS_LN = null, FS_SZ = null, FS_DY = null,
+  FS_TP = null, FS_EX = null, FS_DI = null, FS_DIRS = null, FS_EPOCH = 0;
+
+function fsEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+// 归一化：去大小写 + 去所有空白（索引里存的也是这个形态，所以「ABC 123」能命中「ABC123.jpg」）
+function fsNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ''); }
+// 索引里 mtime 存的是「距 2020-01-01 的天数」（比 10 位时间戳省一半字节），这里还原成日期
+function fsDayToStr(day) {
+  if (!day && day !== 0) return '';
+  const d = new Date((FS_EPOCH + day * 86400 + 43200) * 1000);
+  const p = (n) => (n < 10 ? '0' + n : '' + n);
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+function fsFullPath(i) {
+  const dir = FS_DIRS[FS_DI[i]] || '';
+  const root = (FS_DATA && FS_DATA.root ? FS_DATA.root.replace(/\/+$/, '') : '');
+  return (root ? root + '/' : '') + (dir ? dir + '/' : '') + FS_NM[i];
+}
+// 把条目展开成几张平行表：搜索只比字符串，10 万条也是毫秒级
+function fsBuildIndex(d) {
+  const dirs = d.dirs || [], f = d.f || [];
+  const n = f.length;
+  FS_DATA = d; FS_DIRS = dirs; FS_EPOCH = d.epoch || Math.round(new Date(2020, 0, 1).getTime() / 1000);
+  FS_N = n;
+  FS_NM = new Array(n); FS_LP = new Array(n); FS_LN = new Array(n);
+  FS_SZ = new Array(n); FS_DY = new Array(n); FS_TP = new Array(n);
+  FS_EX = new Array(n); FS_DI = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const it = f[i], di = it[0] | 0, nm = it[1] || '';
+    const dir = dirs[di] || '';
+    FS_DI[i] = di; FS_NM[i] = nm; FS_SZ[i] = it[2] | 0; FS_DY[i] = it[3] | 0;
+    FS_LN[i] = fsNorm(nm);
+    FS_LP[i] = fsNorm((dir ? dir + '/' : '') + nm);
+    FS_TP[i] = dir ? dir.split('/')[0] : '';
+    const dot = nm.lastIndexOf('.');
+    FS_EX[i] = dot > 0 ? nm.slice(dot + 1).toLowerCase() : '';
+  }
+}
+// 宽松匹配：字符按顺序出现即可（搜「金属布纹」也能命中「金属拉丝布纹」）
+function fsSeqHit(hay, needle) {
+  if (!needle) return true;
+  let i = 0;
+  for (let j = 0; j < hay.length && i < needle.length; j++) if (hay.charCodeAt(j) === needle.charCodeAt(i)) i++;
+  return i === needle.length;
+}
+function fsScoreOf(i, terms) {
+  let sc = 0;
+  for (let k = 0; k < terms.length; k++) {
+    const t = terms[k];
+    if (!t) continue;
+    const ln = FS_LN[i], lp = FS_LP[i];
+    if (ln === t) sc += 1000;
+    else if (ln.lastIndexOf(t, 0) === 0) sc += 300;
+    else if (ln.indexOf(t) > 0) sc += 120;
+    else if (lp.indexOf(t) >= 0) sc += 40;
+    else sc += 12;
+  }
+  const dd = FS_DIRS[FS_DI[i]];
+  sc -= (dd ? dd.split('/').length : 0) * 1.5;
+  sc -= Math.min(FS_NM[i].length, 120) * 0.05;
+  return sc;
+}
+// 命中筛选：文件名优先、路径兜底；loose 打开时再退到「字符顺序出现」
+function fsSearch(terms, loose, topSel, extSel, cap) {
+  const out = [], nt = terms.length;
+  for (let i = 0; i < FS_N; i++) {
+    if (topSel && FS_TP[i] !== topSel) continue;
+    if (extSel && FS_EX[i] !== extSel) continue;
+    let ok = true;
+    for (let k = 0; k < nt; k++) {
+      const t = terms[k];
+      if (!t) continue;
+      const ln = FS_LN[i];
+      if (ln.indexOf(t) >= 0) continue;
+      const lp = FS_LP[i];
+      if (lp.indexOf(t) >= 0) continue;
+      if (loose && fsSeqHit(lp, t)) continue;
+      ok = false; break;
+    }
+    if (!ok) continue;
+    out.push(i);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+function fsSortRes(res, terms, mode) {
+  if (mode === 'time') { res.sort(function (a, b) { return FS_DY[b] - FS_DY[a]; }); return res; }
+  if (mode === 'size') { res.sort(function (a, b) { return FS_SZ[b] - FS_SZ[a]; }); return res; }
+  if (!terms.length) { res.sort(function (a, b) { return FS_DY[b] - FS_DY[a]; }); return res; }
+  const sc = new Array(res.length);
+  for (let k = 0; k < res.length; k++) sc[k] = fsScoreOf(res[k], terms);
+  const ord = res.map(function (v, k) { return k; });
+  ord.sort(function (a, b) { return sc[b] - sc[a] || a - b; });
+  return ord.map(function (k) { return res[k]; });
+}
+// 命中词高亮（找不到就不标，宽松命中本来就对不上原文位置）
+function fsMark(text, terms) {
+  if (!terms || !terms.length) return fsEsc(text);
+  const low = String(text).toLowerCase(), hits = [];
+  for (let k = 0; k < terms.length; k++) {
+    const t = terms[k];
+    if (!t) continue;
+    let from = 0, i;
+    while ((i = low.indexOf(t, from)) >= 0) {
+      hits.push([i, i + t.length]); from = i + t.length;
+      if (hits.length > 40) break;
+    }
+  }
+  if (!hits.length) return fsEsc(text);
+  hits.sort(function (a, b) { return a[0] - b[0]; });
+  const segs = []; let cur = hits[0];
+  for (let k = 1; k < hits.length; k++) {
+    if (hits[k][0] <= cur[1]) cur[1] = Math.max(cur[1], hits[k][1]);
+    else { segs.push(cur); cur = hits[k]; }
+  }
+  segs.push(cur);
+  let out = '', pos = 0;
+  for (let k = 0; k < segs.length; k++) {
+    out += fsEsc(text.slice(pos, segs[k][0])) + '<span class="fs-mark">' + fsEsc(text.slice(segs[k][0], segs[k][1])) + '</span>';
+    pos = segs[k][1];
+  }
+  return out + fsEsc(text.slice(pos));
+}
+
+function buildToolFrameSearch() {
+  const box = document.createElement('div');
+  box.innerHTML = `<h4>🗂️ 框条档案检索 <small style="color:var(--text-light);font-weight:400">（全库文件名索引 · 模糊搜 · 直接给路径 · 档案每周自动更新）</small></h4>
+    <div class="fs-bar">
+      <input class="fs-inp" id="fsQ" placeholder="搜文件名 / 路径关键词，空格分隔多个词（例：金属 布纹）" autocomplete="off">
+      <button class="cu-mini" id="fsGo">搜索</button>
+      <label class="cu-mini" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="宽松模式：字可以不连着（搜「金属布纹」也能命中「金属拉丝布纹」）"><input type="checkbox" id="fsLoose" style="margin:0"> 宽松</label>
+      <select class="fs-sel" id="fsTop"><option value="">全部分类</option></select>
+      <select class="fs-sel" id="fsExt"><option value="">全部类型</option></select>
+      <select class="fs-sel" id="fsSort"><option value="rel">按相关度</option><option value="time">按修改时间</option><option value="size">按大小</option></select>
+      <button class="cu-mini" id="fsCsv">导出 CSV</button>
+      <label class="cu-mini" style="cursor:pointer" title="本地直接打开看板（file://）读不到 json，用这个按钮选 frame-index.json">📄 载入档案<input type="file" id="fsFile" accept=".json,application/json" style="display:none"></label>
+    </div>
+    <div class="fs-chipbar" id="fsQuick"></div>
+    <div class="fs-stat" id="fsStat">正在载入档案…</div>
+    <div class="fs-list" id="fsList" style="display:none"></div>
+    <div class="fs-more-box" id="fsMoreBox" style="display:none"><button class="cu-mini" id="fsMore">加载更多</button></div>`;
+
+  const $ = (id) => box.querySelector('#' + id);
+  const QUICK = ['角样', '段样', '布纹', '金属', '金色', '银色', '喷泥', '实木', 'MDF', '铝合金', 'PS', '截面图', '样册'];
+  const PAGE = 60, CAP = 30000;
+  let res = [], shown = 0, terms = [], timer = null;
+
+  function status(txt, isErr) {
+    const s = $('fsStat');
+    s.textContent = txt;
+    s.style.color = isErr ? '#b03a2e' : '';
+  }
+  function copyText(t) {
+    const fb = function () {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) { }
+      ta.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(t).catch(fb);
+    }
+    fb(); return Promise.resolve();
+  }
+  function fillSelects() {
+    const tc = {}, ec = {};
+    for (let i = 0; i < FS_N; i++) {
+      tc[FS_TP[i]] = (tc[FS_TP[i]] || 0) + 1;
+      if (FS_EX[i]) ec[FS_EX[i]] = (ec[FS_EX[i]] || 0) + 1;
+    }
+    const tops = Object.keys(tc).sort(function (a, b) { return tc[b] - tc[a]; });
+    const exts = Object.keys(ec).sort(function (a, b) { return ec[b] - ec[a]; }).slice(0, 18);
+    const tsel = $('fsTop'), esel = $('fsExt');
+    tsel.innerHTML = '<option value="">全部分类</option>' + tops.map(function (k) {
+      return '<option value="' + fsEsc(k) + '">' + fsEsc(k || '（根目录）') + '（' + tc[k] + '）</option>';
+    }).join('');
+    esel.innerHTML = '<option value="">全部类型</option>' + exts.map(function (k) {
+      return '<option value="' + fsEsc(k) + '">.' + fsEsc(k) + '（' + ec[k] + '）</option>';
+    }).join('');
+    $('fsQuick').innerHTML = '<span class="cu-empty" style="align-self:center">常用：</span>' +
+      QUICK.map(function (w) { return '<button class="fs-chip" data-w="' + fsEsc(w) + '">' + fsEsc(w) + '</button>'; }).join('');
+  }
+  function rowHtml(i) {
+    const dir = FS_DIRS[FS_DI[i]] || '';
+    return '<div class="fs-row" data-i="' + i + '">' +
+      '<div><div class="fs-nm">' + fsMark(FS_NM[i], terms) + '</div>' +
+      '<div class="fs-pth">📁 ' + fsEsc(dir || '（资料库根目录）') + '</div></div>' +
+      '<div class="fs-meta">' + fmtKB(FS_SZ[i]) + ' · ' + fsDayToStr(FS_DY[i]) +
+      '<div class="fs-btns"><button class="fs-cp" data-cp="full">复制完整路径</button>' +
+      '<button class="fs-cp" data-cp="dir">复制所在目录</button></div></div></div>';
+  }
+  function renderMore() {
+    const list = $('fsList'), more = $('fsMoreBox');
+    if (!res.length) {
+      list.style.display = 'none'; more.style.display = 'none'; list.innerHTML = ''; return;
+    }
+    list.style.display = '';
+    const chunk = res.slice(shown, shown + PAGE);
+    list.insertAdjacentHTML('beforeend', chunk.map(rowHtml).join(''));
+    shown += chunk.length;
+    more.style.display = shown < res.length ? '' : 'none';
+    $('fsMore').textContent = '加载更多（还有 ' + (res.length - shown) + ' 条）';
+  }
+  function run() {
+    if (!FS_N) return;
+    const raw = $('fsQ').value || '';
+    terms = raw.trim().split(/[\s,，]+/).map(fsNorm).filter(Boolean);
+    const loose = $('fsLoose').checked;
+    const topSel = $('fsTop').value, extSel = $('fsExt').value, mode = $('fsSort').value;
+    const t0 = (performance && performance.now) ? performance.now() : Date.now();
+    res = fsSearch(terms, loose, topSel, extSel, CAP);
+    const hit = res.length;
+    res = fsSortRes(res, terms, mode);
+    shown = 0;
+    $('fsList').innerHTML = '';
+    const t1 = (performance && performance.now) ? performance.now() : Date.now();
+    const ms = Math.max(1, Math.round(t1 - t0));
+    const gen = (FS_DATA && FS_DATA.gen) ? FS_DATA.gen : '—';
+    let txt = '共 ' + FS_N.toLocaleString() + ' 个文件 · 档案更新于 ' + gen;
+    if (terms.length || topSel || extSel) {
+      txt += ' · 命中 ' + hit.toLocaleString() + ' 条' + (hit >= CAP ? '（已截到上限，建议再细化关键词）' : '') + ' · ' + ms + ' ms';
+    }
+    status(txt);
+    renderMore();
+  }
+  function ensure() {
+    if (FS_N) return Promise.resolve(FS_DATA);
+    if (FS_PROM) return FS_PROM;
+    if (typeof fetch !== 'function') {
+      status('这个环境读不到档案文件，请用上面的「📄 载入档案」按钮选 frame-index.json', true);
+      return Promise.reject(new Error('no fetch'));
+    }
+    status('正在载入档案索引（首次几秒，之后同页面内不再重复载入）…');
+    FS_PROM = fetch(FS_URL, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (d) {
+      fsBuildIndex(d);
+      return d;
+    }).catch(function (e) {
+      FS_PROM = null;
+      status('档案载入失败（' + e.message + '）。本地 file:// 打开时用上面的「📄 载入档案」按钮选 frame-index.json。', true);
+      throw e;
+    });
+    return FS_PROM;
+  }
+
+  $('fsGo').onclick = run;
+  $('fsQ').oninput = function () {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(run, 180);
+  };
+  $('fsQ').onkeydown = function (e) { if (e.key === 'Enter') { if (timer) clearTimeout(timer); run(); } };
+  $('fsLoose').onchange = run;
+  $('fsTop').onchange = run;
+  $('fsExt').onchange = run;
+  $('fsSort').onchange = run;
+  $('fsMore').onclick = renderMore;
+  $('fsQuick').onclick = function (e) {
+    const b = e.target.closest ? e.target.closest('.fs-chip') : null;
+    if (!b) return;
+    $('fsQ').value = b.getAttribute('data-w');
+    run();
+  };
+  $('fsFile').onchange = function (e) {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = function () {
+      try {
+        fsBuildIndex(JSON.parse(String(fr.result)));
+        fillSelects(); run();
+      } catch (err) { status('这个文件读不出来：' + err.message, true); }
+    };
+    fr.readAsText(f, 'utf-8');
+  };
+  $('fsList').onclick = function (e) {
+    const b = e.target.closest ? e.target.closest('.fs-cp') : null;
+    if (!b) return;
+    const row = b.closest('.fs-row');
+    const i = parseInt(row.getAttribute('data-i'), 10);
+    const dir = FS_DIRS[FS_DI[i]] || '';
+    const root = (FS_DATA && FS_DATA.root ? FS_DATA.root.replace(/\/+$/, '') : '');
+    const txt = b.getAttribute('data-cp') === 'dir'
+      ? (root ? root + '/' : '') + dir
+      : fsFullPath(i);
+    const old = b.textContent;
+    copyText(txt).then(function () {
+      b.textContent = '已复制 ✓';
+      setTimeout(function () { b.textContent = old; }, 1200);
+    });
+  };
+  $('fsCsv').onclick = function () {
+    if (!res.length) { status('没有可导出的结果', true); return; }
+    const cell = function (v) {
+      const s = String(v == null ? '' : v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = ['文件名,所在目录,完整路径,大小(字节),修改日期'];
+    for (let k = 0; k < res.length; k++) {
+      const i = res[k], dir = FS_DIRS[FS_DI[i]] || '';
+      lines.push([FS_NM[i], dir, fsFullPath(i), FS_SZ[i], fsDayToStr(FS_DY[i])].map(cell).join(','));
+    }
+    saveBytes('\ufeff' + lines.join('\r\n'), '框条档案检索_' + res.length + '条.csv', 'text/csv;charset=utf-8');
+    status('已导出 ' + res.length + ' 条到 CSV（Excel 可直接打开）');
+  };
+
+  // 数据就绪后（不管面板是什么时候建的）都把下拉、首屏列表填上；重复调用幂等
+  ensure().then(function (d) { fillSelects(); run(); return d; }).catch(function () { });
+  return box;
+}
+
 // ================= 抠图区块（在「实用功能中心」上方，同级） =================
 const CUTS = [
   // icon 只在 sprite 里没有对应 symbol 时兜底；框条抠图已有 ic-framecut（真实样张缩略图）所以走 SVG
   { id: 'framecut', name: '框条抠图', icon: '✂️', desc: '正面去背景 · 原像素 PNG', build: buildToolFrameCut },
   { id: 'prodcut', name: '产品抠图', badge: '调试中', icon: '🖼️', desc: '去背景 · 批量透明 PNG', build: buildToolProdCut },
+  { id: 'framesearch', name: '框条档案检索', icon: '🗂️', desc: '全库文件名 · 模糊搜 · 给路径', build: buildToolFrameSearch },
 ];
 let activeCut = null;
 function renderCutbox() {
@@ -14731,7 +15076,7 @@ if (typeof globalThis !== 'undefined') {
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
-    renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut,
+    renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut, buildToolFrameSearch, fsBuildIndex, fsSearch, fsScoreOf, fsNorm, fsSeqHit, fsSortRes, fsMark, fsDayToStr, fsFullPath, getFS: () => ({ n: FS_N, nm: FS_NM, dirs: FS_DIRS }),
     detectStripBox, detectStripBoxRobust, detectByMaskBBox, prepareFrame, deskewCut,
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg, narrowByStrongS,
