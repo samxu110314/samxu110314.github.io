@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-框条档案索引生成器
-==================
-扫描 NAS 上的「框条新品资料库」，把所有文件名 + 所在目录导出成看板可用的
-frame-index.json，供看板里的「框条档案检索」工具做模糊搜索。
+框条档案索引生成器（多档案版）
+==============================
+按下面的 ARCHIVES 配置逐个扫描 NAS 目录，各生成一个索引 json，供看板
+「档案检索」工具的各子档案做模糊搜索。
 
 用法：
-    python3 build_frame_index.py                 # 扫描并写入 ../frame-index.json
-    python3 build_frame_index.py --dry           # 只统计不写文件
-    python3 build_frame_index.py --root /path    # 换根目录
+    python3 build_frame_index.py                  # 按 ARCHIVES 全量建档（跳过未挂载/不存在的根目录）
+    python3 build_frame_index.py --archive zlk    # 只建某个档案（用 ARCHIVES 里的 id）
+    python3 build_frame_index.py --root /path --out /tmp/x.json   # 临时单目录扫描（调试用）
+    python3 build_frame_index.py --dry            # 只统计不写文件
+
+新增子档案：在 ARCHIVES 里加一行（id/name/root/out），再在看板 index.html 的
+FS_ARCHIVES 里加对应一行即可；文件夹放入文件后下次运行自动建档。
 
 数据结构（刻意做紧凑，10 万条也能秒开）：
     {
@@ -25,9 +29,14 @@ import time
 import argparse
 from datetime import datetime
 
-# 资料库在 NAS 上的挂载路径（本机固定）
-DEFAULT_ROOT = "/Volumes/英科再生2/MARKETING/14.市场部内部文件/框条新品资料库"
-OUT_NAME = "frame-index.json"
+BASE = "/Volumes/英科再生2/MARKETING/14.市场部内部文件"
+
+# 档案注册表：id 要和看板 FS_ARCHIVES 里的 id 一致；root 不存在时自动跳过（不报错）
+ARCHIVES = [
+    {"id": "zlk",  "name": "框条新品资料库", "root": BASE + "/框条新品资料库", "out": "frame-index.json"},
+    {"id": "ztk",  "name": "框条总图库",     "root": BASE + "/框条总图库",     "out": "gallery-index.json"},
+    {"id": "zhjs", "name": "展会检索",       "root": BASE + "/展会检索",       "out": "expo-index.json"},
+]
 
 # mtime 用「距 2020-01-01 的天数」存，比 10 位时间戳省一半字节
 EPOCH = datetime(2020, 1, 1).timestamp()
@@ -38,7 +47,7 @@ SKIP_PREFIX = ("._", "~$")
 
 
 def scan(root):
-    """遍历目录树，返回 (dirs 列表, 文件条目列表)"""
+    """遍历目录树，返回 (dirs 列表, 文件条目列表, 文件数)"""
     dir_index = {}
     dirs = []
     files = []
@@ -72,22 +81,15 @@ def scan(root):
     return dirs, files, n
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=DEFAULT_ROOT)
-    ap.add_argument("--out", default=None)
-    ap.add_argument("--dry", action="store_true")
-    a = ap.parse_args()
-
-    root = a.root
-    out = a.out or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), OUT_NAME)
-
-    if not os.path.isdir(root):
-        print(json.dumps({"ok": False, "err": "资料库未挂载或路径不存在: " + root}, ensure_ascii=False))
-        sys.exit(2)
-
+def build_one(arch, out_path, dry=False):
+    """扫一个档案并写索引；返回结果 dict（ok/total/...）"""
+    root = arch["root"]
     t0 = time.time()
+    if not os.path.isdir(root):
+        return {"id": arch["id"], "name": arch["name"], "ok": False,
+                "skip": "根目录不存在（未挂载或尚未创建）", "root": root}
     dirs, files, total = scan(root)
+    secs = round(time.time() - t0, 1)
 
     payload = {
         "v": 1,
@@ -98,21 +100,56 @@ def main():
         "dirs": dirs,
         "f": files,
     }
+    if dry:
+        return {"id": arch["id"], "name": arch["name"], "ok": True,
+                "total": total, "dirs": len(dirs), "secs": secs, "dry": True}
 
-    if a.dry:
-        print(json.dumps({"ok": True, "total": total, "dirs": len(dirs),
-                          "secs": round(time.time() - t0, 1)}, ensure_ascii=False))
-        return
-
-    tmp = out + ".tmp"
+    tmp = out_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
-    os.replace(tmp, out)
+    os.replace(tmp, out_path)
 
-    mb = os.path.getsize(out) / 1048576.0
-    print(json.dumps({"ok": True, "total": total, "dirs": len(dirs),
-                      "secs": round(time.time() - t0, 1),
-                      "mb": round(mb, 2), "out": out}, ensure_ascii=False))
+    mb = os.path.getsize(out_path) / 1048576.0
+    return {"id": arch["id"], "name": arch["name"], "ok": True,
+            "total": total, "dirs": len(dirs), "secs": secs,
+            "mb": round(mb, 2), "out": out_path}
+
+
+def main():
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--archive", default=None, help="只建 ARCHIVES 里某个 id")
+    ap.add_argument("--root", default=None, help="临时单目录扫描（覆盖 ARCHIVES）")
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--dry", action="store_true")
+    a = ap.parse_args()
+
+    # 临时单目录模式（保持旧用法兼容）
+    if a.root:
+        arch = {"id": "tmp", "name": "临时扫描", "root": a.root}
+        out = a.out or os.path.join(here, "frame-index.json")
+        print(json.dumps(build_one(arch, out, a.dry), ensure_ascii=False))
+        return
+
+    targets = ARCHIVES
+    if a.archive:
+        targets = [x for x in ARCHIVES if x["id"] == a.archive]
+        if not targets:
+            print(json.dumps({"ok": False, "err": "ARCHIVES 里没有 id=" + a.archive}, ensure_ascii=False))
+            sys.exit(2)
+
+    results = []
+    for arch in targets:
+        out_path = a.out or os.path.join(here, arch["out"])
+        r = build_one(arch, out_path, a.dry)
+        results.append(r)
+        print(json.dumps(r, ensure_ascii=False), flush=True)
+
+    built = [r for r in results if r.get("ok")]
+    skipped = [r for r in results if not r.get("ok")]
+    print(json.dumps({"done": True, "built": len(built), "skipped": len(skipped),
+                      "total_files": sum(r.get("total", 0) for r in built)},
+                     ensure_ascii=False))
 
 
 if __name__ == "__main__":
