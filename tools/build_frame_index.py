@@ -34,7 +34,7 @@ BASE = "/Volumes/英科再生2/MARKETING/14.市场部内部文件"
 # 档案注册表：id 要和看板 FS_ARCHIVES 里的 id 一致；root 不存在时自动跳过（不报错）
 ARCHIVES = [
     {"id": "zlk",  "name": "框条新品资料库", "root": BASE + "/框条新品资料库", "out": "frame-index.json"},
-    {"id": "ztk",  "name": "框条总图库",     "root": BASE + "/框条总图库",     "out": "gallery-index.json"},
+    {"id": "ztk",  "name": "框条总图库",     "root": BASE + "/框条段样总图/框条总图(上海+山东)", "out": "gallery-index.json"},
     {"id": "zhjs", "name": "展会检索",       "root": BASE + "/展会检索",       "out": "expo-index.json"},
 ]
 

@@ -14292,9 +14292,11 @@ function fsFullPath(i) {
   return (root ? root + '/' : '') + (dir ? dir + '/' : '') + FS_NM[i];
 }
 // 把条目展开成几张平行表：搜索只比字符串，10 万条也是毫秒级
+let FS_LOADED = null;   // 当前真正已载入数据的档案 id（与目标 FS_CUR 区分）
 function fsBuildIndex(d, arch) {
   const dirs = d.dirs || [], f = d.f || [];
   FS_CUR = arch || FS_CUR || FS_ARCHIVES[0];
+  FS_LOADED = FS_CUR.id;
   const n = f.length;
   FS_DATA = d; FS_DIRS = dirs; FS_EPOCH = d.epoch || Math.round(new Date(2020, 0, 1).getTime() / 1000);
   FS_N = n;
@@ -14311,6 +14313,13 @@ function fsBuildIndex(d, arch) {
     const dot = nm.lastIndexOf('.');
     FS_EX[i] = dot > 0 ? nm.slice(dot + 1).toLowerCase() : '';
   }
+}
+// 切换子档案 / 载入失败时清空检索态：保证三个子档案互相隔离，绝不拿 A 档案的数据在 B 档案里出结果
+function fsResetIndex() {
+  FS_DATA = null; FS_N = 0; FS_LOADED = null;
+  FS_NM = null; FS_LP = null; FS_LN = null; FS_SZ = null; FS_DY = null;
+  FS_TP = null; FS_EX = null; FS_DI = null; FS_DIRS = [];
+  FS_EPOCH = Math.round(new Date(2020, 0, 1).getTime() / 1000);
 }
 // 宽松匹配：字符按顺序出现即可（搜「金属布纹」也能命中「金属拉丝布纹」）
 function fsSeqHit(hay, needle) {
@@ -14449,10 +14458,12 @@ function buildToolFrameSearch() {
   function switchArch(a) {
     if (!a || (FS_CUR && FS_CUR.id === a.id)) return;
     FS_PROM = null;
+    fsResetIndex();          // 关键：换档案必须先腾空上一档案的索引，三个子档案各搜各的
     res = []; shown = 0; terms = [];
     $('fsQ').value = '';
     $('fsList').innerHTML = ''; $('fsList').style.display = 'none';
     $('fsMoreBox').style.display = 'none';
+    $('fsQ').placeholder = '输入模具/框条型号开始检索';
     FS_CUR = a;
     fillTabs();
     if (FS_CACHE[a.id]) { fsBuildIndex(FS_CACHE[a.id], a); fillSelects(); run(); }
@@ -14484,7 +14495,7 @@ function buildToolFrameSearch() {
     const dir = FS_DIRS[FS_DI[i]] || '';
     return '<div class="fs-row" data-i="' + i + '">' +
       '<div><div class="fs-nm">' + fsMark(FS_NM[i], terms) + '</div>' +
-      '<div class="fs-pth">📁 ' + fsEsc(dir || '（资料库根目录）') + '</div></div>' +
+      '<div class="fs-pth">📁 ' + fsEsc(dir || '（根目录）') + '</div></div>' +
       '<div class="fs-meta">' + fmtKB(FS_SZ[i]) + ' · ' + fsDayToStr(FS_DY[i]) +
       '<div class="fs-btns"><button class="fs-cp" data-cp="full">复制完整路径</button></div></div></div>';
   }
@@ -14501,7 +14512,12 @@ function buildToolFrameSearch() {
     $('fsMore').textContent = '加载更多（还有 ' + (res.length - shown) + ' 条）';
   }
   function run() {
-    if (!FS_N) return;
+    if (!FS_N) {
+      if (FS_CUR && FS_LOADED !== FS_CUR.id && !$('fsStat').textContent) {
+        status('「' + FS_CUR.name + '」档案尚未生成', true);
+      }
+      return;
+    }
     const raw = $('fsQ').value || '';
     terms = raw.trim().split(/[\s,，]+/).map(fsNorm).filter(Boolean);
     if (!terms.length) {
@@ -14532,7 +14548,7 @@ function buildToolFrameSearch() {
   }
   function ensure() {
     const a = FS_CUR || FS_ARCHIVES[0];
-    if (FS_N && FS_CUR && FS_CUR.id === a.id) return Promise.resolve(FS_DATA);
+    if (FS_N && FS_LOADED === a.id) return Promise.resolve(FS_DATA);
     if (FS_PROM) return FS_PROM;
     if (typeof fetch !== 'function') {
       status('这个环境读不到档案文件，请用「📄 载入档案」按钮选 ' + a.url, true);
@@ -14549,8 +14565,10 @@ function buildToolFrameSearch() {
     }).catch(function (e) {
       FS_PROM = null;
       if (FS_CUR && FS_CUR.id === a.id) {
+        fsResetIndex();   // 没载入成功就保持空态，上一档案的数据绝不残留
         if (e.message === 'not-built') {
           status('「' + a.name + '」档案尚未生成：文件夹路径配置好并放入文件后，每周一 9:00 自动扫描建档；急用可点「📄 载入档案」手动导入索引 json。', true);
+          $('fsQ').placeholder = '该子档案尚未建档';
         } else {
           status('「' + a.name + '」档案载入失败（' + e.message + '）。本地 file:// 打开时用「📄 载入档案」按钮选 ' + a.url + '。', true);
         }
@@ -15144,7 +15162,7 @@ if (typeof globalThis !== 'undefined') {
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
-    renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut, buildToolFrameSearch, fsBuildIndex, fsSearch, fsScoreOf, fsNorm, fsSeqHit, fsSortRes, fsMark, fsDayToStr, fsFullPath, getFS: () => ({ n: FS_N, nm: FS_NM, dirs: FS_DIRS }), FS_ARCHIVES,
+    renderCutbox, CUTS, getActiveCut: () => activeCut, buildToolFrameCut, buildToolProdCut, buildToolFrameSearch, fsBuildIndex, fsSearch, fsScoreOf, fsNorm, fsSeqHit, fsSortRes, fsMark, fsDayToStr, fsFullPath, getFS: () => ({ n: FS_N, nm: FS_NM, dirs: FS_DIRS }), FS_ARCHIVES, fsResetIndex,
     detectStripBox, detectStripBoxRobust, detectByMaskBBox, prepareFrame, deskewCut,
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg, narrowByStrongS,
