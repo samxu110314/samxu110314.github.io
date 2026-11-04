@@ -35,7 +35,7 @@ BASE = "/Volumes/英科再生2/MARKETING/14.市场部内部文件"
 ARCHIVES = [
     {"id": "zlk",  "name": "框条新品资料库", "root": BASE + "/框条新品资料库", "out": "frame-index.json"},
     {"id": "ztk",  "name": "框条总图库",     "root": BASE + "/框条段样总图/框条总图(上海+山东)", "out": "gallery-index.json"},
-    {"id": "zhjs", "name": "展会检索",       "root": BASE + "/展会检索",       "out": "expo-index.json"},
+    {"id": "zhjs", "name": "展会资料检索",       "root": BASE + "/展会检索",       "out": "expo-index.json"},
 ]
 
 # mtime 用「距 2020-01-01 的天数」存，比 10 位时间戳省一半字节
