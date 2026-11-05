@@ -8920,9 +8920,14 @@ function deskewCut(cv, box, angleDeg) {
   // 【为什么非留不可】上面按占用度把画布裁到刚好等于条带，于是返回的框四条边全部贴着画布边界；
   //   而「裁剪边距 −（往外放）」需要框外的像素，clampNudge 又把值夹回 ≥0 ——
   //   结果就是四个方向**只能加不能减**（用户原话），「留白」也一起失效。
-  // 【留多少】按条带尺寸取 3.5%（16~240px），再逐边按**源图边界**收 —— 源图外没有像素，
-  //   留了也只是透明块。余量默认被裁掉（自动结果不变），只在用户往外放时才看得到。
-  const bleed0 = Math.max(16, Math.min(240, Math.round(Math.max(X1 - X0, Y1 - Y0) * 0.035)));
+  // 【留多少】2026-11-05 前：按条带尺寸取 3.5%（16~240px）。实测不够 —— DSC02774 这类
+  //   「掩码只认了条带的一段」（上木纹认出、布纹+下木纹沿在掩码外）的照片，画布只含
+  //   掩码条带+余量，用户把红线往下放，到画布底就被钳住（输入 −171 钳回、拖拽钳到
+  //   画布底），布纹大半根本不在画布里，无像素可框（用户原话「下方还有图像，裁切不动了」）。
+  //   改成 **12%（16~600px）**：掩码网格仍锚在条带画布上（fullW/fullH/ox/oy 随 bl/bt
+  //   平移，采样一一对应，见下面警告），余量默认被裁掉（自动结果不变），只在往外放时才看得到。
+  //   再逐边按**源图边界**收 —— 源图外没有像素，留了也只是透明块。
+  const bleed0 = Math.max(16, Math.min(600, Math.round(Math.max(X1 - X0, Y1 - Y0) * 0.12)));
   // 画布坐标 u 与源坐标 q 的关系（A≈0 时）：u = q − cx − X0，所以「往左还能取多少源像素」= cx + X0
   const bl = Math.min(bleed0, Math.max(0, Math.floor(cx + X0)));
   const br = Math.min(bleed0, Math.max(0, Math.floor(W - 1 - (cx + X1))));
@@ -12567,7 +12572,10 @@ function buildToolFrameCut() {
       const n = ensureNudge(st.sel);
       const was = n.t + ',' + n.b + ',' + n.l + ',' + n.r;
       n[key] = Math.round(v) || 0;
-      clampNudge(baseBox(), st.cur && st.cur.cutCv, n);
+      // ⚠️ 基准必须是 refBox()（成品框），与拖拽路径（edgeDrag 里的 clampNudge(base=refBox())）
+      //    完全一致 —— 2026-11-05 前这里用 baseBox()（检测框），两路钳制极限差出一截
+      //    （实测 DSC02774 输入框 −171 / 拖拽 −178）：同一个 nudge 值在两条路上含义不同。
+      clampNudge(refBox(), st.cur && st.cur.cutCv, n);
       syncNudge();          // 夹取后的真值要写回输入框（用户可能敲了 −9999 这种）
       // ⚠️ 值没变就**什么都别做**：连发撞上夹取极限时每 25ms 都会进来一次，
       //    以前每次都会重画一遍快速预览 + 重置出真图的防抖 → 真渲染永远排不上，
