@@ -988,6 +988,12 @@
   .cu-eh.tl, .cu-eh.tr, .cu-eh.bl, .cu-eh.br { width: 13px; height: 13px; background: rgba(231,76,60,.6); }
   .cu-eh.tl, .cu-eh.br { cursor: nwse-resize; }
   .cu-eh.tr, .cu-eh.bl { cursor: nesw-resize; }
+  /* 【2026-11-05 单线红框】框条抠图：手柄只当透明热区，真实裁剪边界由 .cu-eline 画**一条**线。
+     旧版每个手柄自带四边 1px 红框 → 一条边出现两条平行红线（用户原话「双线不好确定边缘」）。
+     产品抠图（pdStage）不加 cu-edgesingle，维持旧视觉。 */
+  .cu-edgesingle .cu-eh { background: rgba(231,76,60,0); border: 0; }
+  .cu-edgesingle .cu-eh:hover { background: rgba(231,76,60,.28); }
+  .cu-eline { position: absolute; border: 1px solid rgba(231,76,60,.95); box-sizing: border-box; pointer-events: none; }
   .cu-mini.on { background: #2c7fb8; border-color: #2c7fb8; color: #fff; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
@@ -10186,54 +10192,44 @@ function renderCut(frontCv, box, o) {
   //   refineRingEdge* 服务，已随环改版退役）：环内逐像素直接看 id 的 alpha>8，
   //   未绘制区 alpha=0 → 外放圈自然透明、留白圈强制透明，一条判定全 covers。
   applyPixelAdjust(id.data, w, h, o);
+  // —— 【2026-11-05 单线红框改版】红线内原样导出（cropOnly）——
+  // 用户原话：「导出也只导出红线内的图，而不是导出之前自动识别的图」。
+  // 手动调过边（拖红框 / ± 边距 / 留白）的图，红线矩形里的内容**原样保留**：
+  // 不跑 maskToAlpha、不跑 alphaTightBox / alphaTightCols / alphaEndsBy* / trimEnds ——
+  // 掩码认不出的内容（黑边、深色框条）被抹掉的那类报障，从机制上不可能再发生：
+  // 预览里红线框住什么，导出就是什么（调色照常生效）。
+  //   · 照片有像素（alpha>8）就保留 —— 摆正画布未绘制区 alpha=0，旋转出界的角自然透明。
+  //   · 留白圈（nudgeBox 之外、pad 扩出来的那一圈）仍强制透明 —— 「留白」的既有语义。
+  //   · 未手动调过的图不走这条路（进来的是检测框，照旧走下面的自动识别 + 抠背景）。
+  if (o.cropOnly) {
+    const ngb = o.nudgeBox || null;
+    if (o.transparent) {
+      for (let y = 0; y < h; y++) {
+        const cy = box.y0 + y;
+        for (let x = 0; x < w; x++) {
+          const inNg = !ngb || (cy >= ngb.y0 && cy <= ngb.y1 && box.x0 + x >= ngb.x0 && box.x0 + x <= ngb.x1);
+          id.data[(y * w + x) * 4 + 3] = (inNg && id.data[(y * w + x) * 4 + 3] > 8) ? 255 : 0;
+        }
+      }
+    }
+    if (o.outBox) { o.outBox.x0 = box.x0; o.outBox.y0 = box.y0; o.outBox.x1 = box.x1; o.outBox.y1 = box.y1; }
+    cx.putImageData(id, 0, 0);
+    return out;
+  }
   if (o.transparent && box.mask) {
     const rawA = new Uint8Array(w * h);
     const a = maskToAlpha(box.mask, box, w, h, lum, rawA);
-    // —— 手动框多出来的那一圈（环）：【2026-11-05 黑边报障改版】分两圈区别对待 ——
-    // 【旧做法为什么被推翻】旧版环内一律「以掩码为准」（rawA）。但掩码带模型只认「与背景色差大的
-    //   亮色主体」—— 实测 DSC02668（奶牛纹框条，上下黑边）：掩码/收边链把自动成品框收到
-    //   只有纹路带（3678×284），黑边整体被当成阴影/背景。用户把红框往外拖把黑边框进来，
-    //   环内掩码说「背景」→ 照抹：上黑边整条透明、下黑边按掩码网格斑驳成块 —— 用户原话
-    //   「裁切即可见，保存的图就是裁切好的图」。环信任的掩码正是让自动框切掉黑边的那份证据，
-    //   拿它仲裁「用户特意框进来的东西」永远修不好这一类报障。
-    // 【新做法：环内所见即所得】
-    //   · 外放圈（用户框 nudgeBox 内、自动成品框 ringBox 外）＝ 用户特意框进来的 →
-    //     **照片有像素就保留**（alpha>8，摆正画布未绘制区 alpha=0，旋转出界的角自然透明）。
-    //     红框里看得到的黑边/桌面，导出就有；掩码好不好不再影响用户框内的内容。
-    //   · 留白圈（nb 与 nudgeBox 的差，即 pad 扩出来的）＝ 「留白」语义 → 一律透明
-    //     （留白 = 成品四周加透明边，与旧版掩码判定的实际效果一致，但不吃照片像素的斑驳）。
-    //   · ringBox 内照旧走掩码 + 收边链（自动框内抠背景的行为一点没变，回归风险最小）。
-    if (o.ringBox) {
-      const rb = o.ringBox, ngb = o.nudgeBox || null;
-      for (let y = 0; y < h; y++) {
-        const cy = box.y0 + y, outY = (cy < rb.y0 || cy > rb.y1);
-        for (let x = 0; x < w; x++) {
-          const cx = box.x0 + x;
-          if (outY || cx < rb.x0 || cx > rb.x1) {
-            let keep;
-            if (!ngb) keep = !!rawA[y * w + x];              // 没有 nudgeBox 信息（理论不到）：退回旧判定
-            else {
-              const inNg = (cy >= ngb.y0 && cy <= ngb.y1 && cx >= ngb.x0 && cx <= ngb.x1);
-              keep = inNg ? (id.data[(y * w + x) * 4 + 3] > 8) : false;   // 外放圈=照片原样 / 留白圈=透明
-            }
-            a[y * w + x] = keep ? 255 : 0;
-          }
-        }
-      }
-      // 旧版这里还有 refineRingEdgeLR/TB + fillAlphaRuns/Cols + feather：那是给「环=掩码」
-      //   的粗网格台阶/麻点擦屁股的。环改成照片原样后没有台阶也没有麻点，全部不需要了。
-    }
+    // 【2026-11-05 单线红框改版】昨天黑边报障加的「环=照片原样」逻辑（o.ringBox / nudgeBox
+    //   两圈判定）已被上面的 cropOnly 分支取代并删除：掩码不再仲裁**任何**用户框进来的
+    //   内容 —— 手动框整框所见即所得，黑边/深色框条被掩码抹掉的那类问题从根上消失。
     // 最后一步：裁到 alpha 的实际范围。检测框被「接触阴影」撑高的部分、以及紧挨产品
     // 却与它不相连的桌面/别的样品，都要在这一步丢掉 —— 用户的原话是「先找到框条主体再裁切」。
-    //
-    // ⚠️ o.fixed = 这个框已经被用户手动调过了（见下面 outBox 的注释）：**四边全部原样保留**。
-    //    这里必须整段跳过，不能只跳一部分 —— 自动收边是「按框宽的百分比找端头」，
-    //    框一变它的判断就跟着变：实测把框往右放 150px，导出反而**窄了 150px**
-    //    （alphaTightCols / alphaEndsByTone 在更靠内的位置切掉了），
-    //    用户看到的就是「往外放按钮不管用」。
-    const bb = o.fixed ? null : alphaTightBox(a, w, h);
+    // 【2026-11-05 单线红框改版】旧版这里还有「fixed 参数」（手动调过边就整段跳过自动收边，防
+    //   alphaTightCols/alphaEndsByTone 把外放的框又切窄）——手动路现在在上面的 cropOnly
+    //   分支就直接返回了，走不到这里，fixed 机制随之删除。
+    const bb = alphaTightBox(a, w, h);
     const useB = !!(bb && bb.rows >= 8 && bb.rows < h);
-    const bc = o.fixed ? null : alphaTightCols(a, w, h, useB ? bb.y0 : 0, useB ? bb.y1 : h - 1);
+    const bc = alphaTightCols(a, w, h, useB ? bb.y0 : 0, useB ? bb.y1 : h - 1);
     const y0 = useB ? bb.y0 : 0;
     const y1 = useB ? bb.y1 : h - 1;
     // 三个横向判据取最紧的那个：alphaTightCols 管「与主体隔着空隙的孤立块」，
@@ -10241,21 +10237,17 @@ function renderCut(frontCv, box, o) {
     // alphaEndsByTone 管「与主体同为满高、只靠亮度台阶分得开的」（见各自注释）。
     let x0 = bc ? bc.x0 : 0;
     let x1 = bc ? bc.x1 : w - 1;
-    if (!o.fixed) {
-      const be = alphaEndsByEdges(rawA, w, h, y0, y1);
-      if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
-      const bt = alphaEndsByTone(rawA, lum, w, h, y0, y1);
-      if (bt) { if (bt.x0 > x0) x0 = bt.x0; if (bt.x1 < x1) x1 = bt.x1; }
-      // —— 两端默认再裁（整批共用，默认 100px，界面在「两端再裁」组里，0 = 关闭） ——
-      // 上面前三道判据找的都是**亮度台阶**。可是有不少照片的产品端头外面挂着的是
-      // 同一张桌面的一小截：同高、同色、和产品连成一片，压根没有台阶可找
-      //（用户的原话：「有的框条两端还是有空余」）。与其再堆第四个判据，不如给一条安全带 ——
-      // 识别完两端各固定再切一刀，用户可调、可清零、也能用「−」逐张往外放回来。
-      // ⚠️ 这段在 `if (!o.fixed)` 里：用户手动调过边（o.fixed）时框里已经含着这一刀，
-      //    这里再切一次就成了双倍 —— 也就是「调边那一栏的数字和导出尺寸对不上」。
-      const t = trimEnds(x0, x1, Math.max(0, Math.round(o.endTrim || 0)));
-      x0 = t[0]; x1 = t[1];
-    }
+    const be = alphaEndsByEdges(rawA, w, h, y0, y1);
+    if (be) { if (be.x0 > x0) x0 = be.x0; if (be.x1 < x1) x1 = be.x1; }
+    const bt = alphaEndsByTone(rawA, lum, w, h, y0, y1);
+    if (bt) { if (bt.x0 > x0) x0 = bt.x0; if (bt.x1 < x1) x1 = bt.x1; }
+    // —— 两端默认再裁（整批共用，默认 100px，界面在「两端再裁」组里，0 = 关闭） ——
+    // 上面前三道判据找的都是**亮度台阶**。可是有不少照片的产品端头外面挂着的是
+    // 同一张桌面的一小截：同高、同色、和产品连成一片，压根没有台阶可找
+    //（用户的原话：「有的框条两端还是有空余」）。与其再堆第四个判据，不如给一条安全带 ——
+    // 识别完两端各固定再切一刀，用户可调、可清零、也能用「−」逐张往外放回来。
+    const t = trimEnds(x0, x1, Math.max(0, Math.round(o.endTrim || 0)));
+    x0 = t[0]; x1 = t[1];
     if (y0 !== 0 || y1 !== h - 1 || x0 !== 0 || x1 !== w - 1) {
       const cy0 = Math.max(0, y0 - 1), cy1 = Math.min(h - 1, y1 + 1);
       const cx0 = Math.max(0, x0 - 1), cx1 = Math.min(w - 1, x1 + 1);
@@ -12013,7 +12005,7 @@ function buildToolFrameCut() {
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>拖动图中红框四条边 / 四个角即可调整裁切（直接拖、不用点任何按钮），下面数值会同步变 · <b>只作用于本张</b></span>
+            <span>拖动红色单线框的四边 / 四角即可调整裁切（直接拖、不用点任何按钮），<b>导出 = 红线内原样</b> · 下面数值会同步变 · 只作用于本张</span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
           </div>
@@ -12389,6 +12381,8 @@ function buildToolFrameCut() {
     set(hs.tr, { left: (x1 - 7) + 'px', top: (y0 - 6) + 'px' });
     set(hs.bl, { left: (x0 - 6) + 'px', top: (y1 - 7) + 'px' });
     set(hs.br, { left: (x1 - 7) + 'px', top: (y1 - 7) + 'px' });
+    // 【2026-11-05 单线红框】真实裁剪边界 = 这一条红线框（手柄只是热区，不带自己的边线）
+    set(edgeUI.line, { left: x0 + 'px', top: y0 + 'px', width: w + 'px', height: h + 'px' });
     $('fcBoxInfo').textContent = (cur.box ? '' : '未自动定位到框条 · 直接拖四边往里收 · ')
       + `裁剪区 ${b.x0},${b.y0} → ${b.x1},${b.y1}（${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} px = 导出尺寸）` + (cur.low ? ' · ' + cur.note : '');
     return b;
@@ -12403,7 +12397,9 @@ function buildToolFrameCut() {
       if (!(k > 0) || !isFinite(k)) k = 1;
       stage.innerHTML = '';
       const wrap = document.createElement('div');
-      wrap.className = 'cu-edgewrap';
+      // 【2026-11-05 单线红框】cu-edgesingle：手柄只是透明热区（旧版每个手柄自带四边红框
+      //   = 一条边两条平行红线，用户原话「双线不好确定边缘」）；真实裁剪边界由 cu-eline 画。
+      wrap.className = 'cu-edgewrap cu-edgesingle';
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round(W * k));
       cv.height = Math.max(1, Math.round(H * k));
@@ -12419,8 +12415,12 @@ function buildToolFrameCut() {
         wrap.appendChild(d);
         hs[side] = d;
       });
+      // 单线红框：画在真实裁剪边界上（edgeLayout 同步位置），pointer-events:none 不挡拖拽
+      const line = document.createElement('div');
+      line.className = 'cu-eline';
+      wrap.appendChild(line);
       stage.appendChild(wrap);
-      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs };
+      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs, line: line };
       st.liveCanvas = cv;
     }
     edgeUI.cv.style.filter = toneFilter(st.opt);
@@ -12723,7 +12723,7 @@ function buildToolFrameCut() {
       }
       if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
       // 逐张的边距（手动调边 / ± 按钮）：以「自动收边后的框」为基准，与预览走同一套
-      //（基准为什么不是检测框、以及 o.fixed 为什么必须加，见 refBox / renderCut 的注释）。
+      //（基准为什么不是检测框，见 refBox 的注释）。
       // 没有手动值就完全按自动结果 —— 与预览逐像素一致。
       const nz = nudgeOf(i);
       const manual = !!((nz && (nz.t || nz.b || nz.l || nz.r)) || st.opt.pad);
@@ -12733,9 +12733,8 @@ function buildToolFrameCut() {
         renderCut(cutCv, box, Object.assign({}, st.opt, { outBox: ob }));   // 先量出基准
         const rb = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
         const nb = applyNudge({ x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1, mask: box.mask }, cutCv, nz);
-        // 【2026-11-05 黑边报障】还要把「不含留白的用户框」传给 renderCut：
-        //   环（自动成品框之外）要分成两圈区别对待 —— 外放圈（用户框内）照片原样保留，
-        //   留白圈（pad 扩出来的）保持透明。没有这个框 renderCut 分不出两圈。
+        // 还要把「不含留白的用户框」（ngb）传给 renderCut 的 cropOnly：留白圈（pad 扩出来的）
+        //   仍要透明，「留白」的语义不能丢。
         // ⚠️ 不能直接用 nb：nb 含 pad（applyNudge 里 x0−pad）。留白加在 nudge 之外，要减回去。
         // ⚠️ 不能直接用 nb：nb 含 pad（applyNudge 里 x0−pad）。ngb 按 pad=0 的同一套夹取
         //    现算一遍（不能在夹取结果上线性补 pad —— max/min 夹过之后补不回去）。
@@ -12743,10 +12742,11 @@ function buildToolFrameCut() {
           x0: Math.max(0, rb.x0 + (nz.l | 0)), y0: Math.max(0, rb.y0 + (nz.t | 0)),
           x1: Math.min(cutCv.width - 1, rb.x1 - (nz.r | 0)), y1: Math.min(cutCv.height - 1, rb.y1 - (nz.b | 0)),
         };
-        // ⚠️ ringBox 必须和预览那条路**一模一样**（drawPreview 里同名参数）：
-        //    少了它，导出会把「手动多出来的那一圈」里的产品抹成透明，而预览（或反过来）不会
-        //    → 又变成「预览对、下载不对」。这是 2026-09-21 那次报障的同一条根因。
-        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { fixed: true, ringBox: rb, nudgeBox: ngb }));
+        // 【2026-11-05 单线红框改版】cropOnly：导出 = 红线（nb）内**原样**的图 ——
+        //    照片有像素就保留，不再过掩码/收边链；预览红框就是 nb（drawPreview 同一条
+        //    applyNudge 路），红线里看到什么，保存下来的就是什么。用户原话：
+        //    「导出也只导出红线内的图，而不是导出之前自动识别的图」。
+        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { cropOnly: true, nudgeBox: ngb }));
       }
       if (!out) out = renderCut(cutCv, box, st.opt);
       const bytes = await canvasToPngBytes(out);
