@@ -8855,7 +8855,7 @@ function detectByMaskBBox(cv, force) {
 // —— 自动摆正：倾斜拍出来的框条先转正再裁 ——
 // box.angle = 框条相对水平的倾角（度，正 = 右端偏低）。返回转正后的画布 +
 // 该画布上的裁切框（恰好包住框条、四角不留背景），前景掩码按同一几何关系重采样。
-function deskewCut(cv, box, angleDeg) {
+function deskewCut(cv, box, angleDeg, bleedMin) {
   const msk = box.mask;
   if (!msk) return null;
   const A = -angleDeg * Math.PI / 180, ca = Math.cos(A), sa = Math.sin(A);
@@ -8927,7 +8927,12 @@ function deskewCut(cv, box, angleDeg) {
   //   改成 **12%（16~600px）**：掩码网格仍锚在条带画布上（fullW/fullH/ox/oy 随 bl/bt
   //   平移，采样一一对应，见下面警告），余量默认被裁掉（自动结果不变），只在往外放时才看得到。
   //   再逐边按**源图边界**收 —— 源图外没有像素，留了也只是透明块。
-  const bleed0 = Math.max(16, Math.min(600, Math.round(Math.max(X1 - X0, Y1 - Y0) * 0.12)));
+  // 【2026-11-05 二次扩容：按需 bleedMin】12% 仍不够 —— DSC02774 用户要把布纹下方的
+  //   下木纹沿（掩码完全没认出的部分）框进来，−590 已顶到画布底。与其把所有图的画布
+  //   都虚胖 3~4 倍（批量明显变慢），不如**按需**：面板检测到「红线想要的位置超出画布」
+  //   时，带 bleedMin 用原图重切这一张（见 buildToolFrameCut 的 recutForNudge），
+  //   想要多少给多少（上限 3000，仍逐边按源边界收）。平时不触发，零额外开销。
+  const bleed0 = Math.max(16, bleedMin | 0, Math.min(600, Math.round(Math.max(X1 - X0, Y1 - Y0) * 0.12)));
   // 画布坐标 u 与源坐标 q 的关系（A≈0 时）：u = q − cx − X0，所以「往左还能取多少源像素」= cx + X0
   const bl = Math.min(bleed0, Math.max(0, Math.floor(cx + X0)));
   const br = Math.min(bleed0, Math.max(0, Math.floor(W - 1 - (cx + X1))));
@@ -8988,7 +8993,9 @@ function deskewCut(cv, box, angleDeg) {
 }
 // 统一入口：检测 →（可选）摆正 → 给出「可直接裁的画布 + 该画布上的裁切框」。
 // opt.deskew 是否自动摆正；opt.angle 手动角度（null/NaN 表示每张各自自动检测）；
-// opt.det 传入已有的检测结果可跳过重复检测（面板改角度时用）
+// opt.det 传入已有的检测结果可跳过重复检测（面板改角度时用）；
+// opt.bleedMin 摆正画布的最小余量（px）—— 「按需扩画布」用：红线想放到掩码外更远处时，
+//   面板带更大的 bleedMin 重切这一张（默认 0 = 12% 档，见 deskewCut 的注释）
 function prepareFrame(cv, opt) {
   const o = opt || {};
   const r = (o.det && o.det.box !== undefined) ? o.det : detectStripBoxRobust(cv);
@@ -9002,14 +9009,21 @@ function prepareFrame(cv, opt) {
   res.angle = ang;
   if (o.deskew === false || Math.abs(ang) < 0.15) {
     res.box = tightenBoxByEdges(cv, r.box);
+    res.bleedBox = res.box;   // 未摆正没有余量画布，平移基准 = 框本身
     return res;
   }
-  const d = deskewCut(cv, r.box, ang);
+  const d = deskewCut(cv, r.box, ang, o.bleedMin);
   if (d && d.cv.width > 1 && d.cv.height > 1) {
     // 摆正后条带已经是横的，再用长边把框收到正好包住产品（去掉了阴影与被撑高的部分）
     res.cv = d.cv; res.box = tightenBoxByEdges(d.cv, d.box) || d.box;
     res.rotated = true; res.xf = d.xf;
+    // 【按需扩画布】d.box = 纯几何的「画布 − 余量」框：余量加多少它就平移多少，行为确定。
+    //   重切前后的画布平移量 (dx,dy) 必须用它算 —— res.box 经过 tightenBoxByEdges（按边缘
+    //   亮度收框），不同画布上收的位置差 ≠ 画布平移量（实测 DSC02774 差出 198px，
+    //   补偿用它会让红线整体跳一段）。见 recutForNudge。
+    res.bleedBox = d.box;
   }
+  if (!res.bleedBox) res.bleedBox = res.box;
   return res;
 }
 
@@ -12220,9 +12234,10 @@ function buildToolFrameCut() {
     if (!cur || !cur.cv) return;
     if (!cur.det || reDetect) cur.det = detectStripBoxRobust(cur.cv);
     if (cur.cutCv && cur.cutCv !== cur.cv) releaseCv(cur.cutCv);
-    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: st.opt.angle, det: cur.det });
+    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: st.opt.angle, det: cur.det, bleedMin: (st.meta[st.sel] && st.meta[st.sel].bleed) || 0 });
     cur.cutCv = p.cv; cur.box = p.box; cur.low = p.low; cur.note = p.note;
     cur.detAngle = p.detAngle; cur.angle = p.angle; cur.rotated = p.rotated; cur.xf = p.xf;
+    cur.bleedBox = p.bleedBox;
     cur.tightBox = null;    // 画布/角度变了 → 「自动收边后的框」这个基准作废，下次渲染重新量
     const info = $('fcAngleInfo');
     if (info) {
@@ -12232,6 +12247,64 @@ function buildToolFrameCut() {
           : (Math.abs(p.angle) >= 0.15 ? '（未摆正）' : ''));
     }
     drawPreview();
+  }
+  // ===== 按需扩画布（2026-11-05 DSC02774 二次报障）=====
+  // 掩码只认条带的一段时（上木纹认出、布纹+下木纹沿不认），画布只含掩码条带+12% 余量；
+  // 用户把红线往外放，到画布边就被钳住 —— 之前输入 −2000 钳回 −171/−593，怎么拖都到不了。
+  // 【思路】不再把所有图的画布虚胖 3~4 倍，而是**谁需要就给谁扩**：
+  //   输入框 / 拖拽松手时算「红线想要的位置超出画布多少」（wantedShortfall），
+  //   超了就带更大的 bleedMin 用**内存里的原图**（cur.cv）同步重切这一张，
+  //   画布扩大记进 meta[i].bleed（改角度 / 批量导出都带同值，见 applyFrameOpts / processOne）。
+  // 【坐标系】bleed 四边一起扩 → 条带在画布里的位置平移 (dx,dy) = 新旧检测框左上角差；
+  //   nudge 的语义是「相对成品框的偏移」，基准平移了 nudge 就要反向补偿，否则红线会跳。
+  // 【想要值】clampNudge 会把 nudge 钳回画布内 —— 用户输入 −2000 时 nudge 里的值已不是
+  //   他想要的。所以触发点都在 clamp **之前**把想要值拷下来，重切完成后写回（画布已够，
+  //   再 clamp 不会动它），红线一步到位。
+  function wantedShortfall(base, cv, n, pad) {
+    if (!base || !cv || !n) return { t: 0, b: 0, l: 0, r: 0 };
+    const p = Math.round(pad || 0);
+    return {
+      t: Math.max(0, -(base.y0 + n.t - p)),
+      b: Math.max(0, (base.y1 - n.b + p) - (cv.height - 1)),
+      l: Math.max(0, -(base.x0 + n.l - p)),
+      r: Math.max(0, (base.x1 - n.r + p) - (cv.width - 1)),
+    };
+  }
+  let recutT = 0, recutDesired = null;
+  function scheduleRecut(desired) {
+    recutDesired = desired;
+    if (recutT) clearTimeout(recutT);
+    recutT = setTimeout(() => { recutT = 0; recutForNudge(); }, 350);
+  }
+  function recutForNudge() {
+    const cur = st.cur, i = st.sel;
+    const desired = recutDesired; recutDesired = null;
+    if (!cur || !cur.cv || !cur.cutCv || !desired) return;
+    const sf = wantedShortfall(refBox(), cur.cutCv, desired, st.opt.pad);
+    const want = Math.max(sf.t, sf.b, sf.l, sf.r);
+    if (want <= 0) return;                     // 画布已经够（可能上一轮重切过了）
+    const oldBb = cur.bleedBox || cur.box;
+    const m0 = st.meta[i] || (st.meta[i] = { status: '待处理', cls: '', outName: '' });
+    // 新余量 = 还想要的量 + 15% 条带宽的缓冲（免得放一点扩一次）；上限 3000，源图边界再收口
+    const bleed = Math.min(3000, Math.max(m0.bleed || 0, want + Math.round(0.15 * (oldBb.x1 - oldBb.x0 + 1)) + 40));
+    if (cur.cutCv && cur.cutCv !== cur.cv) releaseCv(cur.cutCv);
+    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: st.opt.angle, det: cur.det, bleedMin: bleed });
+    cur.cutCv = p.cv; cur.box = p.box; cur.low = p.low; cur.note = p.note;
+    cur.detAngle = p.detAngle; cur.angle = p.angle; cur.rotated = p.rotated; cur.xf = p.xf;
+    cur.bleedBox = p.bleedBox;
+    cur.tightBox = null;                       // 基准作废，下次渲染重新量
+    m0.bleed = bleed;
+    // 条带在新画布里平移了多少 → nudge 反向补偿（保持红线视觉位置不动）。
+    // ⚠️ 必须用 bleedBox（deskewCut 的纯几何框）算 —— cur.box 经过 tightenBoxByEdges，
+    //    不同画布上收的位置差 ≠ 画布平移量（实测差 198px，用它补偿红线会跳）。
+    const dx = p.bleedBox.x0 - oldBb.x0, dy = p.bleedBox.y0 - oldBb.y0;
+    const n = ensureNudge(i);
+    if (dx || dy) { n.l -= dx; n.r += dx; n.t -= dy; n.b += dy; }
+    // 写回用户想要的值（补偿到新坐标系），此时画布已够，clamp 不会再动它
+    n.t = desired.t - dy; n.b = desired.b + dy; n.l = desired.l - dx; n.r = desired.r + dx;
+    clampNudge(refBox(), cur.cutCv, n);
+    log(`第 ${i + 1} 张：红线到了画布边缘 → 画布已扩展（余量 ${bleed}px），可以继续往外放`);
+    syncNudge(); drawPreview(); renderRows();
   }
   // —— 逐张的裁剪边距 ——
   // 自动识别是「统计找主体」，个别照片的端头难免多带一点桌面/别的样品；
@@ -12451,7 +12524,7 @@ function buildToolFrameCut() {
     //    他截图里那个「下 −33 / 上 −238」就是被这样放大出来的（他实际只拖了一点点）。
     const n = ensureNudge(st.sel);
     const n0 = { t: n.t | 0, b: n.b | 0, l: n.l | 0, r: n.r | 0 };
-    let dirty = false;
+    let dirty = false, desired = null;
     const move = (e) => {
       const dx = (e.clientX - sx) / k, dy = (e.clientY - sy) / k;
       // 记号见 applyNudge 上面那段：正数 = 往里收，所以右/下要取反
@@ -12459,7 +12532,9 @@ function buildToolFrameCut() {
       if (side.indexOf('r') >= 0) n.r = n0.r - Math.round(dx);
       if (side.indexOf('t') >= 0) n.t = n0.t + Math.round(dy);
       if (side.indexOf('b') >= 0) n.b = n0.b - Math.round(dy);
+      const wanted = { t: n.t, b: n.b, l: n.l, r: n.r };   // clamp 前的「想要值」——按需扩画布用
       clampNudge(base, cur.cutCv, n);
+      desired = wanted;
       dirty = true;
       edgeLayout();
       syncNudge();
@@ -12470,6 +12545,11 @@ function buildToolFrameCut() {
       if (!dirty) return;
       renderRows();
       log(`第 ${st.sel + 1} 张：手动调边 → 上 ${n.t} 下 ${n.b} 左 ${n.l} 右 ${n.r}（只作用于本张）`);
+      // 按需扩画布：松手时想要的位置超出画布 → 防抖后带更大余量重切本张（recutForNudge）
+      if (desired && cur.cutCv) {
+        const sf = wantedShortfall(refBox(), cur.cutCv, desired, st.opt.pad);
+        if (Math.max(sf.t, sf.b, sf.l, sf.r) > 0) scheduleRecut(desired);
+      }
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -12572,10 +12652,16 @@ function buildToolFrameCut() {
       const n = ensureNudge(st.sel);
       const was = n.t + ',' + n.b + ',' + n.l + ',' + n.r;
       n[key] = Math.round(v) || 0;
+      const wanted = { t: n.t, b: n.b, l: n.l, r: n.r };   // clamp 前的「想要值」——按需扩画布用
       // ⚠️ 基准必须是 refBox()（成品框），与拖拽路径（edgeDrag 里的 clampNudge(base=refBox())）
       //    完全一致 —— 2026-11-05 前这里用 baseBox()（检测框），两路钳制极限差出一截
       //    （实测 DSC02774 输入框 −171 / 拖拽 −178）：同一个 nudge 值在两条路上含义不同。
       clampNudge(refBox(), st.cur && st.cur.cutCv, n);
+      // 按需扩画布：想要的位置超出画布 → 防抖后带更大余量重切本张（recutForNudge）
+      if (st.cur && st.cur.cutCv) {
+        const sf = wantedShortfall(refBox(), st.cur.cutCv, wanted, st.opt.pad);
+        if (Math.max(sf.t, sf.b, sf.l, sf.r) > 0) { scheduleRecut(wanted); }
+      }
       syncNudge();          // 夹取后的真值要写回输入框（用户可能敲了 −9999 这种）
       // ⚠️ 值没变就**什么都别做**：连发撞上夹取极限时每 25ms 都会进来一次，
       //    以前每次都会重画一遍快速预览 + 重置出真图的防抖 → 真渲染永远排不上，
@@ -12652,10 +12738,13 @@ function buildToolFrameCut() {
   $('fcEdgeAll').onclick = () => {
     const n = nudgeOf(st.sel);
     if (!n) { log('本张还没有手动边距 —— 先把这张调好，再点「套用到全部图片」'); return; }
+    // 本张若因外放扩过画布（meta.bleed），一并带上 —— 目标张画布不够的话同样的边距放不出去
+    const cb = (st.meta[st.sel] && st.meta[st.sel].bleed) || 0;
     for (let i = 0; i < st.files.length; i++) {
       ensureNudge(i);
       const t = st.meta[i].nudge;
       t.t = n.t; t.b = n.b; t.l = n.l; t.r = n.r;
+      if (cb) st.meta[i].bleed = Math.max(st.meta[i].bleed || 0, cb);
     }
     renderRows();
     log(`已把手动边距（上 ${n.t} / 下 ${n.b} / 左 ${n.l} / 右 ${n.r} px）套用到全部 ${st.files.length} 张`);
@@ -12726,7 +12815,7 @@ function buildToolFrameCut() {
         const dec = await loadCv(f);
         cv = dec.cv;
         if (dec.note) log(`第 ${i + 1} 张：${dec.note}`);
-        const p = prepareFrame(cv, { deskew: st.opt.deskew, angle: st.opt.angle });
+        const p = prepareFrame(cv, { deskew: st.opt.deskew, angle: st.opt.angle, bleedMin: (st.meta[i] && st.meta[i].bleed) || 0 });
         cutCv = p.cv; box = p.box; low = p.low; note = p.note;
       }
       if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
