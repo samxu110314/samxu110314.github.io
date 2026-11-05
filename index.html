@@ -394,6 +394,12 @@
   .recent-tag { font-size: 11px; color: #fff; background: #98a2ac; padding: 2px 9px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
   .recent-t { font-weight: 600; font-size: 14px; flex: 1; min-width: 160px; word-break: break-word; color: #5a646e; }
   .recent-meta { font-size: 11px; color: #8b939b; white-space: nowrap; }
+  .recent-revert {
+    font-size: 11px; color: #6b757e; background: #fff; border: 1px solid #d4d9de;
+    border-radius: 20px; padding: 3px 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all .15s;
+  }
+  .recent-revert:hover { color: #1e8449; border-color: #1e8449; background: #f0faf4; }
   .recent-toggle { margin-top: 10px; padding: 7px 16px; border: 1px solid var(--border); background: #fff; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; color: var(--text); font-family: inherit; }
   .recent-toggle:hover { border-color: #b9d5ee; }
 
@@ -2095,6 +2101,34 @@ function inputProgress(task) {
   applyProgress(task, n);
 }
 
+// ================= 误完成恢复 =================
+// 把已完成任务退回原任务栏：状态变「进行中」、进度从 100 回落到 90、清除完成时间。
+// 减进度路径（输入 <100 或点 −）由 applyProgress 自动归位；本函数供「已完成看板」一键退回。
+function revertDoneTask(task) {
+  if (!task || task.status !== 'done') return false;
+  task.status = 'doing';
+  if (task.progress >= 100) task.progress = 90;
+  task.doneAt = null;
+  return true;
+}
+// 「近期已完成」列的卡片是只读渲染（buildTaskEl 第3参 true），
+// 这里单独把减进度入口接回去：点进度数字输入 / 点 − 按钮，低于 100 即自动离开已完成列。
+function enableDoneRevert(card, task) {
+  if (!card || !task || task.status !== 'done') return card;
+  const num = card.querySelector('.progress-num');
+  if (num) {
+    num.style.cursor = 'pointer';
+    num.title = '点击输入进度：低于 100 即退回原任务栏（进行中）';
+    num.onclick = () => { inputProgress(task); saveData(); renderBoard(); };
+  }
+  const minus = card.querySelector('.p-btn');
+  if (minus) {
+    minus.title = '进度 -5%：低于 100 即退回原任务栏';
+    minus.onclick = () => { adjustProgress(task, -5); saveData(); renderBoard(); };
+  }
+  return card;
+}
+
 // ================= 任务看板渲染 =================
 function setTaskDatesOpen(task, v) { task._dp = v; }
 
@@ -2831,7 +2865,7 @@ function buildRecentColumn(cols = COLUMNS) {
       tag.style.background = '#98a2ac';
       tag.textContent = it.col ? it.col.title : '已完成';
       parent.appendChild(tag);
-      parent.appendChild(buildTaskEl(it.t, it.col, true));
+      parent.appendChild(enableDoneRevert(buildTaskEl(it.t, it.col, true), it.t));
     };
     visible.forEach(it => appendItem(it, list));
     if (folded.length) {
@@ -14754,6 +14788,13 @@ function renderDoneView() {
       el.innerHTML = `<span class="recent-tag">${esc(col.title)}</span>`
         + `<span class="recent-t">${esc(t.title)}</span>`
         + `<span class="recent-meta">✓ ${t.doneAt ? '完成于 ' + fmtDate(t.doneAt) : '较早前完成'}${plan}${t.sub && t.sub.length ? ' · 含 ' + t.sub.length + ' 项子任务' : ''}</span>`;
+      const rv = document.createElement('button');
+      rv.type = 'button';
+      rv.className = 'recent-revert';
+      rv.textContent = '↩ 退回原列';
+      rv.title = '误标完成？点击退回原任务栏（变为进行中 90%）';
+      rv.onclick = () => { if (revertDoneTask(t)) { saveData(); renderBoard(); renderDoneView(); } };
+      el.appendChild(rv);
       return el;
     };
     const list = $('recentList');
@@ -15159,6 +15200,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.__WB = {
     getCOLUMNS: () => COLUMNS,
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
+    revertDoneTask, enableDoneRevert, applyProgress, setStatus, inputProgress, adjustProgress,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
