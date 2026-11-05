@@ -9049,6 +9049,18 @@ function maskToAlpha(mask, box, w, h, lum, rawOut) {
   const t2 = snapAlphaBand(t, lum, w, h);
   // 再补一道「不靠梯度」的直线化：白底白产品的边是软过渡，上一步会整条放弃
   const t3 = straightenBand(t2, w, h);
+  // 【调试钩子 2026-11-05】黑边被吃分诊用：用户路径 fcDbg 恒为 null，零开销。
+  //   探针把它设成函数即可拿到掩码 → 二值 alpha → 各级收边的逐字节中间结果。
+  if (globalThis.__WB && typeof globalThis.__WB.fcDbg === 'function') {
+    try {
+      globalThis.__WB.fcDbg({
+        w: w, h: h,
+        raw: rawOut && rawOut.length === a.length ? rawOut.slice() : null,
+        a: a.slice(), t: t.slice(), t2: t2.slice(), t3: t3.slice(),
+        mask: { u8: mask.u8.slice(), aw: mask.aw, ah: mask.ah, fullW: mask.fullW, fullH: mask.fullH, ox: mask.ox || 0, oy: mask.oy || 0 },
+      });
+    } catch (_) {}
+  }
   return featherAlpha(t3, w, h, 1);
 }
 // —— 收边：把 alpha 按几何重建成「上下边是直线、中间实心」的长条 ——
@@ -9567,490 +9579,10 @@ function featherAlpha(a, w, h, r) {
   return out;
 }
 
-// —— 手动外放环的边界细化（治「锯齿状残缺」）——
-// 【用户报障 2026-09-22 第六次】「现在可以保存了，但是会出现这种锯齿状残缺」。
-// 环里的 alpha 取自「掩码逐像素判定」，而掩码是**分析尺度的粗网格**：
-//   _DSC5671 实测 900×147 覆盖 6989×1138 的检测框 → 一格 ≈ 7.7×7.7 原像素。
-// 产品那条斜的/弯的边于是被量化成等宽台阶（实测台阶高正好 8px = 一格），
-// 放大看就是锯齿。实测上沿剖面：x=0..1200 是 86/94，x=6200.. 是 86/102 ——
-//   条带在照片里是**弓形**（中间比两端高约 90px，广角/镜头畸变），台阶就出现在这些跳变处。
-// 收边链里那两个几何步骤都救不了这种形状，因为它们都是**直线**判据：
-//   snapAlphaBand 的残差门（`mad > tol` 就 return a）会把弓形边整个挡掉；
-//   straightenBand 的「长段偏差一律保留」同样放过它（它只治短的缺口/高光斑）。
-// 这里的做法：在掩码给的那条边附近 ±win 内，沿**从外往里**的方向找最外面的强亮度梯度
-//（产品物理边缘就是一个亮度台阶），取亚像素位置（抛物线插值）→ 得到一条跟着真实边走的曲线，
-// 再沿边做中值 + 均值平滑（去掉单列毛刺），最后按曲线重铺环里那一条带。
-// 拿不到梯度（白底白、边太软）的位置退回掩码值 —— 不会比现在更差。
-// ⚠️ 涂抹范围严格夹在环内，绝不碰自动框内部。
-// ⚠️ 顺序：必须在 fillAlphaRuns/fillAlphaCols **之前** —— 重铺可能带出 1~2px 的小缝，交给它们补。
-function snapProfileAt(prof, lo, hi, outer, basePos, win, minG) {
-  const j0 = Math.max(lo + 1, basePos - win), j1 = Math.min(hi - 1, basePos + win);
-  if (j1 - j0 < 3) return NaN;
-  const g = (j) => (j > lo && j < hi) ? Math.abs(prof(j + 1) - prof(j - 1)) : 0;
-  let mx = 0;
-  for (let j = j0; j <= j1; j++) { const v = g(j); if (v > mx) mx = v; }
-  if (mx < minG) return NaN;                 // 这一段没有可用的边（软过渡/白底白）
-  const lim = mx * 0.6;
-  for (let k = 0; k <= j1 - j0; k++) {
-    const j = outer > 0 ? j0 + k : j1 - k;   // 从「外面」那一端往产品里扫，第一个强梯度就是物理边缘
-    if (g(j) >= lim) {
-      const ga = g(j - 1), gb = g(j + 1), den = ga - 2 * g(j) + gb;
-      const off = Math.abs(den) > 1e-9 ? Math.max(-1, Math.min(1, 0.5 * (ga - gb) / den)) : 0;
-      return j + off;                        // 亚像素
-    }
-  }
-  return NaN;
-}
-// 一维边沿曲线的稳健平滑：先中值去毛刺，再均值让台阶变斜线。NaN = 该处无效，不参与。
-// `lim`：平滑结果相对原值的**最大偏移**（传 0/undefined = 不限）。
-// 【为什么需要它 / 用户第七次报】上一版没有限幅，于是「左边一列 26、右边 119」这种**真实阶跃**
-//   被均值窗拉成一条跨 6 列的假斜坡（每列跳 14px）—— 用户看到的「锯齿」正是它：
-//   不是掩码格子，而是**平滑把阶跃抹出来的斜边**。量化台阶只有一格（≈cell），
-//   所以把偏移限在 2×cell 之内：台阶照样被拉斜，真实阶跃原样保留。
-function smoothEdgeCurve(v, mWin, aWin, lim) {
-  const n = v.length;
-  const med = new Float64Array(n).fill(NaN), out = new Float64Array(n).fill(NaN);
-  const buf = [];
-  for (let i = 0; i < n; i++) {
-    buf.length = 0;
-    for (let k = Math.max(0, i - mWin); k <= Math.min(n - 1, i + mWin); k++) if (!isNaN(v[k])) buf.push(v[k]);
-    if (buf.length >= 3) { buf.sort((p, q) => p - q); med[i] = buf[buf.length >> 1]; }
-  }
-  for (let i = 0; i < n; i++) {
-    let s = 0, c = 0;
-    for (let k = Math.max(0, i - aWin); k <= Math.min(n - 1, i + aWin); k++) if (!isNaN(med[k])) { s += med[k]; c++; }
-    if (c < 2) continue;
-    const avg = s / c;
-    out[i] = (lim > 0 && !isNaN(v[i]))
-      ? Math.max(v[i] - lim, Math.min(v[i] + lim, avg))
-      : avg;
-  }
-  return out;
-}
-// —— 环内那条边的两道保险（第九轮：用户报「预览的问题，随机出现的残缺」）——
-// 【现象】预览里产品上沿被啃出一块**矩形缺口**（吃进产品内部），缺口里还立着**细尖刺**，
-//   而且「随机出现」—— 同一批样张里只有几张有。放大看：缺口深 60~100 原像素、宽 30~40 列。
-// 【为什么只有手动外放过的图有】自动路径量不出来：probe_fctopedge 扫 38 张自动成品，
-//   上沿逐列轮廓全是齐平直线（缺肉 0 列 / 尖刺 0 列）—— 因为 maskToAlpha 里的 tightenBand
-//   会把 alpha 重建成「[top,bot] 实心带」，掩码自己的掉块被顺手补掉了。而手动调过边时，
-//   renderCut 在 maskToAlpha **之后**把环内 alpha 换成 rawA（掩码逐像素判定），
-//   tightenBand 的成果在环里被整个丢掉 → 掩码的掉块就露出来了。
-// 【真正的根因（插桩实测 DSC08578、上外放 120px）】环内那条边由 refineRingEdge* 逐列重铺，
-//   重铺的第一道是「在掩码给的 t0 附近 ±win 里找强梯度」(pass1)，拿不到就
-//   「在整个环里从外往里再找一遍」(pass2)。问题出在**两道都以 0.05 当门槛**：
-//     · 这批样张是白/象牙白框条摆在浅色桌面上，产品上沿**几乎没有亮度台阶**；实测环内逐列
-//       最强梯度 p90 只有 0.093，而产品**内部**的雕花/划痕也有 0.08 —— 0.05 这个门槛
-//       把「纹理噪声」当成了「产品边」。
-//     · 于是同一列会在「整环都是产品(0)」和「环里有 80px 背景(95)」之间随机二选一，
-//       相邻列能差 80px → 矩形缺口；偶尔一列落回另一侧 → 细尖刺。
-//     · 逐列数据（x=1320..1400）：s1 恒为 NaN，s2 在 −1/65/75/95/116 之间乱跳，
-//       e 就是 0 与 65..95 的二值乱跳 —— 与截图形状完全一致。
-// 【修法】两道，原则都是「宁可退回粗判，也不要在噪声上做细判」：
-//   ① 帧级闸门 ringGradGate：先量这一圈里逐列的最强梯度，取**中位**。中位低于 RING_EDGE_MED
-//      说明**整个环里没有产品边**（只有明暗渐变/纹理/划痕）→ 把 minG 提到 Infinity，
-//      两道梯度搜索全部作废，直接走 ringFillVote 的整侧亮度投票。
-//      ⚠️ 为什么是**中位**而不是 p90：p90 会被「产品**表面自己**的划痕/反光」顶上去 ——
-//         实测 DSC08578 上外放 240px 时环内 p90 = 0.627、max = 1.000（全是划痕的梯度），
-//         而中位只有 0.074。中位问的才是对的问题：「**大多数列**都在同一个深度上有一条边吗？」
-//         产品上沿横贯整条框条，所以有真边时中位必然高；划痕在深度上是随机的，只有少数列
-//         碰得上 → 中位低。（用 p90 时闸门根本关不上，DSC08578 的缺口纹丝不动 —— 实测过。）
-//      精确打击，实测（逐列环内最强梯度的中位）：
-//         没有边的 7 张 × 外放 120：DSC08576 0.000、DSC08572 0.011、_DSC5658 0.014、
-//           _DSC5665 0.017、DSC08580 0.019、DSC08584 0.019、_DSC5678 0.048
-//         出残缺的 DSC08578：外放 120 → 0.048、外放 240 → 0.074
-//         有真边的 2 张：_DSC5657 0.176（外放 120 与 400 **完全一致**）、_DSC5674 0.118
-//         两簇之间是 0.074 ~ 0.118 的空档，0.10 落在正中（两侧各留 ~26% 裕度）。
-//      ⚠️ 闸门**开着**时（有真边的那两张）minG 仍是 0.05，行为与改动前逐字节一致 → 零回归。
-//   ② 边的稳健重建 robustEdgeCurve（宽中位 → 窄中位 → 有限幅均值）——
-//      旧版这一层是 fixEdgeOutliers：它的「邻域一致」门槛（max−min ≤ 2×lim）恰好
-//      **在邻域里存在大野值时成立** → 该修的地方拒不修正；残留的野值随后又被
-//      smoothEdgeCurve 的均值窗摊成「3 列平台 + 1 列尖刺」（落盘实测，见 robustEdgeCurve 注释）。
-//      中位对任意幅度、任意符号的野值免疫，不需要任何门槛，且对斜坡/真实台阶保形。
-//      ⚠️ 更早试过的 fixEdgeNotches（「邻居高度一致才动手」的中位）已经删掉：
-//      它在 _DSC5678 上把 133 列**真实**的 120 当成深坑、反向补出一整条产品。
-// ⚠️ `keep`：每列的「垂直方向确实还有产品」证据（上/下环取自动框里 20% 深那一行的 alpha，
-//    左右环取对应那一列）。少了它，产品端头之外那一段（环里只有零星误判的像素）也会被改。
-const RING_EDGE_MED = 0.10;   // 「环里到底有没有产品边」的帧级门槛（判据用**中位**，取值依据见上面 ①）
-// 一列的「环内最强梯度」——与 snapProfileAt 里的 g(j) 同一个度量，所以可以直接当证据用。
-function ringMaxGradProf(prof, lo, hi) {
-  let mx = 0;
-  for (let j = Math.max(1, lo + 1); j <= hi - 1; j++) {
-    const g = Math.abs(prof(j + 1) - prof(j - 1));
-    if (g > mx) mx = g;
-  }
-  return mx;
-}
-// 帧级闸门：中位 ≥ 门槛 → 照旧用 minG（0.05）；否则整圈没有边 → Infinity（snapProfileAt 一律给 NaN）
-function ringGradGate(mg, n, minG) {
-  const v = [];
-  for (let i = 0; i < n; i++) if (!isNaN(mg[i])) v.push(mg[i]);
-  if (v.length < 8) return Infinity;
-  v.sort((a, b) => a - b);
-  return v[v.length >> 1] >= RING_EDGE_MED ? minG : Infinity;
-}
-// 一维宽中位（原地）。给「区域亮度」这类本就平滑的量去逐列抖动 —— 见 ringToneRefs 的注释。
-function ringMedSmooth(v, n, R) {
-  const src = Float64Array.from(v);
-  const buf = [];
-  for (let i = 0; i < n; i++) {
-    buf.length = 0;
-    for (let k = Math.max(0, i - R); k <= Math.min(n - 1, i + R); k++) if (!isNaN(src[k])) buf.push(src[k]);
-    if (buf.length >= 3) { buf.sort((p, q) => p - q); v[i] = buf[buf.length >> 1]; }
-  }
-  return v;
-}
-// —— 环内兜底二判（ringNoEdgePick）用的两个「区域亮度」——
-// 左边是环外沿那一侧的亮度（上环取第 0~2 行、下环取最下 3 行、左环取第 0~2 列、右环取最右 3 列），
-// 右边是自动框深处（30%~50%）的产品参考亮度。两者都是**一片区域**的量，不是一个像素的量。
-// ⚠️ 逐列单独比会在阈值附近翻来覆去：实测 DSC08580@240 有 **40%** 的列落在 |l0−lp| ∈ [0.08,0.16]
-//    （阈值 0.12 正落在中间），相邻列一会儿「保留」一会儿「切掉」，落成一块 500 列宽、228 行高
-//    的透明洞。注意这个洞**比「缺肉列数」这个指标报出来的 38 列严重得多** —— 洞的内部因为
-//    局部基准也是 240，反而不计入「缺肉」，只有两侧的边缘算。所以只看缺肉列数会漏掉它。
-// 做法：先在循环外逐列算好，各自沿列做一次宽中位（半径 = 长边的 1%），再交给 ringNoEdgePick。
-//    判据于是变成「这一**片**区域到底是产品还是背景」，与「环内的边是一条连续曲线」一致。
-//    半径只取 1%（实测把抖动压掉就够，再大就会把产品端头那条**真实**的产品/背景分界糊掉）。
-// edgeRow（可选）：逐列的**实际采样行**。环外端那一行可能落在摆正的余量里（那里是纯黑，
-//   见 renderCut 的 vld），拿它当「环外端亮度」会把整侧的 ringFillVote 投票带偏。
-function ringToneRefsT(lum, w, h, edgeY0, prodA, prodB, edgeRow) {
-  const v = new Float64Array(w), p = new Float64Array(w);
-  for (let x = 0; x < w; x++) {
-    const e0 = edgeRow ? Math.max(0, Math.min(h - 3, edgeRow[x])) : edgeY0;
-    v[x] = (lum[e0 * w + x] + lum[(e0 + 1) * w + x] + lum[(e0 + 2) * w + x]) / 3;
-    let lp = 0, c = 0;
-    for (let y = prodA; y <= prodB && y >= 0 && y < h; y += 3) { lp += lum[y * w + x]; c++; }
-    p[x] = c ? lp / c : v[x];
-  }
-  const R = Math.max(8, Math.round(w * 0.01));
-  ringMedSmooth(v, w, R); ringMedSmooth(p, w, R);
-  return [v, p];
-}
-function ringToneRefsL(lum, w, h, edgeX0, prodA, prodB, edgeCol) {
-  const v = new Float64Array(h), p = new Float64Array(h);
-  for (let y = 0; y < h; y++) {
-    const e0 = edgeCol ? Math.max(0, Math.min(w - 3, edgeCol[y])) : edgeX0;
-    v[y] = (lum[y * w + e0] + lum[y * w + e0 + 1] + lum[y * w + e0 + 2]) / 3;
-    let lp = 0, c = 0;
-    for (let x = prodA; x <= prodB && x >= 0 && x < w; x += 3) { lp += lum[y * w + x]; c++; }
-    p[y] = c ? lp / c : v[y];
-  }
-  const R = Math.max(8, Math.round(h * 0.01));
-  ringMedSmooth(v, h, R); ringMedSmooth(p, h, R);
-  return [v, p];
-}
-// 掩码掉块留下的 NaN 列 —— 由**邻居继承**（线性插值）。
-// 【为什么不能让这些列自己去判】掉块是「掩码在这一列的环里一点前景都没有」，它有两种可能：
-//   (a) 掩码错了（产品上沿低对比处会整列丢前景）；(b) 产品真的在这里结束、环里确实全是背景。
-//   实测两种都真实存在：DSC08584@240 有 1845 列掉块（最长连续 1786 列）、DSC08580@240 有 1823 列，
-//   那里的 rawA（掩码说背景 → 透明）恰好和邻居一致，所以旧写法看不出问题；
-//   而 DSC08578@120 的 41 列（t0 从第 0 列起连续 53 列为 −1）rawA 是透明、邻居却是「保留」
-//   → 矩形缺口（用户报的正是这个）。
-//   反过来让它们独立表态也不行：试过直接走 ringNoEdgePick 的亮度二判，DSC08576 立刻冒出
-//   18 列缺口（它的邻居全是 0，二判却给出 120）。
-//   环内的边是一条**连续曲线**，左右邻居都说了同一件事时，中间那几列的答案只能是它 ——
-//   继承是唯一在 (a)(b) 两种情形下都对的做法，而且它不可能凭空造出新的形态。
-function fillEdgeNaNs(e, w) {
-  const nx = new Int32Array(w).fill(-1);          // 每个位置右边最近的有效列
-  let last = -1;
-  for (let x = w - 1; x >= 0; x--) { if (!isNaN(e[x])) last = x; nx[x] = last; }
-  let prev = -1;
-  for (let x = 0; x < w; x++) {
-    if (!isNaN(e[x])) { prev = x; continue; }
-    const a = prev, b = nx[x];
-    if (a < 0) { if (b >= 0) e[x] = e[b]; continue; }          // 开头整段：用右边最近的
-    if (b < 0) { e[x] = e[a]; continue; }                      // 结尾整段：用左边最近的
-    e[x] = e[a] + (e[b] - e[a]) * (x - a) / (b - a);           // 中间：线性插值
-  }
-  return e;
-}
-// —— 环内「边」的稳健重建（第九轮第二次报障：「手动调边以后还是会出现显示问题」）——
-// 逐列梯度搜索给出的 e 有两个成分（实测 DSC08578 上外放 400，dbg5 落盘）：
-//   ① 一条 83→10 的斜坡（环里的边本身略微倾斜，属真实）；
-//   ② 叠在上面的 1~3 列、幅度 200~260 的**孤立野值**（背景里的短边抢到了该列的最强梯度）。
-// 旧的 fixEdgeOutliers + smoothEdgeCurve 挡不住它们：
-//   · fixEdgeOutliers 的「邻域一致」门槛 max-min ≤ 2*lim 恰好在邻域里存在大野值时成立 → 拒不修正；
-//   · smoothEdgeCurve 随后把**残留的野值**用均值窗摊开，又被 lim 截住 —— 落盘实测
-//     es = … 91.3×3@51 243.6×1@54 251.2×1@55 251×1@56 91.3×3@57 …，
-//     即「3 列平台 + 两侧 1 列尖刺」，正是用户看到的**细尖刺**。
-// 改成：宽中位 → 窄中位 → 有限幅的均值。
-//   · 中位对任意幅度、任意符号的野值免疫（不需要任何门槛），且对斜坡/真实台阶保形；
-//   · 两级中位之后信号已无野值，均值只负责把 1px 台阶圆成斜线，限幅不会再削出平台；
-//   · 限幅仍要放大到「环高的一半」：0 与 yTopEnd 之间的差能有几百 px，
-//     限在 2*cell（≈12px）只会留下「硬墙」，硬墙就是用户说的矩形缺口。
-function medFiltRing(v, w, R, keep) {
-  const out = new Float64Array(v);
-  if (R < 1) return out;
-  const buf = [];
-  for (let i = 0; i < w; i++) {
-    if (isNaN(v[i])) continue;
-    if (keep && !keep[i]) continue;                       // 证据不足的列：不参与也不被改
-    buf.length = 0;
-    for (let k = i - R; k <= i + R; k++) {
-      if (k < 0 || k >= w || k === i) continue;
-      if (keep && !keep[k]) continue;
-      if (!isNaN(v[k])) buf.push(v[k]);
-    }
-    if (buf.length < R) continue;                          // 两端邻居太少 → 保持原值
-    buf.sort((p, q) => p - q);
-    out[i] = buf[buf.length >> 1];
-  }
-  return out;
-}
-function robustEdgeCurve(e, w, cell, keep, ringSpan) {
-  // ① 宽中位：掐掉成块的野值（半径取「1.5 格 / 0.6% 宽」的较大者；实测坏块宽 1~7 列）
-  const R1 = Math.max(4, Math.round(cell * 1.5), Math.round(w * 0.006));
-  // ② 窄中位：把宽中位在真实台阶边缘留下的 1 列毛刺再抹一遍
-  const R2 = Math.max(2, Math.round(cell * 0.4));
-  const a = medFiltRing(e, w, R1, keep);
-  const b = medFiltRing(a, w, R2, keep);
-  for (let i = 0; i < w; i++) if (isNaN(b[i])) b[i] = e[i];
-  // ③ 均值圆角，限幅放到环高的一半（见上：2*cell 会留下硬墙）
-  return smoothEdgeCurve(b, 1, 3, Math.max(cell * 2, ringSpan * 0.5));
-}
-// 环里「整段没有梯度」时的兜底 —— 只可能是两种：产品一路顶到框边（取 outerEnd），
-// 或者环里整段是背景（取 innerEnd = 自动框的那条边）。用**亮度**分辨（同第六轮）。
-// ⚠️ 关键：这个判断必须**整侧一次**（见 ringFillVote）。逐列独立表态的后果实测如下 ——
-//    DSC08584@240 的 e = 240×64 / 0×463 / 240×518 / 0×146 / 240×72 / NaN×1845 …：
-//    相邻列在 yTopEnd 与 0 之间来回翻，相差 240px，而旧 smoothEdgeCurve 的偏移上限只有
-//    2*cell（≈12px）→ 抹不平 → 一个「填到环外端」的色块紧挨一个「整圈透明」的缺口，
-//    就是用户报的**矩形缺口/色块**（本轮第二次报障的「梳齿」是它的高频版本）。
-// ⚠️ 为什么整侧统一是安全的：这个亮度判据只在「产品与背景同亮度」时失效（白框条 + 白背景），
-//    而那正是「填与不填在视觉上几乎看不出差别」的情形；对比度大的情形判据可靠。
-//    所以统一化只会把「肉眼看不出的差别」抹平，不会把明显该切的切错。
-function ringFillVote(tone0, toneP, n, outerEnd, innerEnd) {
-  let prod = 0, tot = 0;
-  for (let i = 0; i < n; i++) {
-    const a0 = tone0[i], b0 = toneP[i];
-    if (!(a0 >= 0) || !(b0 >= 0)) continue;
-    tot++;
-    if (Math.abs(a0 - b0) < 0.12) prod++;
-  }
-  return (tot && prod * 2 > tot) ? outerEnd : innerEnd;
-}
-// 上/下环：yTopEnd 之上是上环（不含 yTopEnd 行），yBotStart 之下是下环（含 yBotStart 行）
-function refineRingEdgeTB(a, lum, w, h, yTopEnd, yBotStart, cell, vld) {
-  const win = Math.max(6, Math.round(cell * 2));
-  if (yTopEnd > 1) {
-    // 逐列的「照片有效起点」（见 renderCut 的 vld）：环外端可能落在摆正余量里，
-    // 那里是纯黑、不是照片，既不能参与找边，也不能被填成不透明。
-    const vtop = (vld && vld.t) ? vld.t : null;
-    const tRow = vtop ? new Int32Array(w) : null;
-    if (tRow) for (let x = 0; x < w; x++) tRow[x] = vtop[x] < 0 ? Math.max(0, yTopEnd - 3) : vtop[x];
-    const e = new Float64Array(w).fill(NaN);
-    // 帧级闸门（见 RING_EDGE_MED）：这一圈里到底有没有「产品边」？没有就别在噪声上做细判。
-    const mg = new Float64Array(w).fill(NaN);
-    for (let x = 0; x < w; x++) mg[x] = ringMaxGradProf((j) => lum[j * w + x], 0, yTopEnd);
-    const minG = ringGradGate(mg, w, 0.05);
-    const __tr = ringToneRefsT(lum, w, h, 0,
-      yTopEnd + Math.round((h - yTopEnd) * 0.3), yTopEnd + Math.round((h - yTopEnd) * 0.5), tRow);
-    const tone0 = __tr[0], toneP = __tr[1];
-    const fbTop = ringFillVote(tone0, toneP, w, 0, yTopEnd);   // 无梯度证据时整侧统一取值
-    // 【第十次报的收尾】「有证据的列」与「走整侧投票的列」会在同一张图上并排出现，
-    //   两者相差上百 px → 用户看到的矩形缺口。实测 DSC08578@-400：e0 = 0×54 / 82×11 / 0×23 /
-    //   78×19 … 交替（0 是 fbTop，78~82 是梯度搜索），而 x>2400 那一段又整段是 245。
-    //   三条路差 160px，任何局部中值/均值都拉不平 —— 因为证据本身就来自三个不同的物。
-    //   现在的规则：**有证据的列用证据，没证据的列留 NaN 交给 fillEdgeNaNs 从邻居继承**
-    //   （与「掩码掉块列」同一套逻辑）。只有当整侧一列证据都没有时，才用 ringFillVote 的
-    //   整侧统一结论 —— 那种情况（实测 DSC08578@120、DSC08580@120、DSC08584@120）本来
-    //   就是全列同值，天然没有台阶。
-    let evN = 0;
-    for (let x = 0; x < w; x++) {
-      // vt = 该列照片的有效起点。>= yTopEnd 表示「这一列在环里根本没有照片」
-      //（整列都是摆正余量）→ 不可能有产品，保持 NaN 交给邻居继承 + 填充时被 vt 夹成全透明。
-      const vt0 = vtop ? vtop[x] : 0;
-      if (vt0 < 0 || vt0 >= yTopEnd) continue;
-      let t0 = -1;
-      for (let y = vt0; y < yTopEnd; y++) if (a[y * w + x]) { t0 = y; break; }
-      if (t0 < 0) {
-        // 掩码掉块列（见 fillEdgeNaNs）：只跑一次「不锚在掩码上」的整环搜索，真有边就用它；
-        // 拿不到就取整侧的统一结论（见 ringFillVote）—— 逐列自己表态会冒出孤立缺口
-        //（实测 DSC08576 上 18 列：邻居全是 0，它自己判成 120）。
-        const s2 = snapProfileAt((j) => lum[j * w + x], vt0, yTopEnd, 1, yTopEnd, yTopEnd, minG);
-        // ⚠️ 回退值也必须夹在 [vt0, yTopEnd]：fbTop 的「填」端是 0，直接用它等于把
-        //     余量上方的行也当产品（而带证据的列被夹在 vt0）→ 同一张图上两段差 80px 的硬台阶
-        //     （实测 DSC08578@-400：e0 = 0×54 / 82×11 / 0×23 / 78×19 交替）。
-        if (!isNaN(s2)) { e[x] = Math.max(vt0, Math.min(yTopEnd, s2)); evN++; }
-        continue;
-      }
-      // ⚠️ 这里原本是 `t0 <= 0` 就 continue —— 后果是「掩码说产品从框边(第 0 行)开始」的整列
-      //    **一个像素都不细化**。而掩码超调时恰恰常常就是从第 0 行开始（它认为整圈都是产品）：
-      //    实测 _DSC5664 上外放 120px 时有 6768 列里的一大半 t0=0，全部绕过细化、把白背景留下
-      //    （成品不透明 82.4%、保留像素亮度中位 0.617 = 背景色）。改成只跳过「整列无前景」。
-      // 【用户第七次报】「右上角、左下角手动调节后出现锯齿缺陷」—— 窗口只看 t0±win 不够：
-      //   掩码可能**整段超调**。实测 _DSC5664（上外放 119px、摆正 -1.05°）：掩码说上沿在
-      //   t0=22，而该列 y=0..118 的亮度全是 0.64（均匀白桌面），真实产品上沿在 **119**，
-      //   也就是 yTopEnd —— 超调 97px。t0±15 窗口里梯度≈0 → 返回 NaN → 旧代码退回 t0，
-      //   于是掩码的粗网格留下来，再被平滑窗抹成一条每列跳 14px 的假斜坡（就是用户看到的锯齿）。
-      //   两级搜索：① 老窗口；② 整个环内从外往里再找一遍。
-      //   两级都拿不到梯度 = 环里全是均匀背景 = **产品边就在环的里端** →
-      //   直接用 yTopEnd（自动收边框的上边，收边链在原像素上算的，比掩码准得多），
-      //   而不是退回掩码值。这条先验很硬：用户外放的那一圈本来就贴在自动框外面。
-      let s = snapProfileAt((j) => lum[j * w + x], vt0, yTopEnd, 1, t0, win, minG);
-      if (isNaN(s)) s = snapProfileAt((j) => lum[j * w + x], vt0, yTopEnd, 1, yTopEnd, yTopEnd, minG);
-      if (isNaN(s)) continue;         // 没有梯度证据 → 留 NaN，交给 fillEdgeNaNs 从邻居继承
-      e[x] = Math.max(vt0, Math.min(yTopEnd, s));
-      evN++;
-    }
-    // keep = 「该列在自动框里 20% 深处还不透明」= 下面确实有产品（见 robustEdgeCurve）
-    const kRow = Math.min(h - 1, yTopEnd + Math.max(2, Math.round((h - yTopEnd) * 0.2)));
-    const keep = new Uint8Array(w);
-    for (let x = 0; x < w; x++) keep[x] = a[kRow * w + x] ? 1 : 0;
-    if (!evN) e.fill(Math.max(vtop ? 0 : 0, Math.min(yTopEnd, fbTop)));   // 整侧零证据 → 整侧统一取值
-    fillEdgeNaNs(e, w);
-    const es = robustEdgeCurve(e, w, cell, keep, yTopEnd);
-    for (let x = 0; x < w; x++) {
-      if (isNaN(es[x])) continue;
-      const lo = (vtop && vtop[x] >= 0) ? vtop[x] : 0;               // 余量里的行一律透明
-      const y0 = Math.max(lo, Math.min(yTopEnd, Math.round(es[x]))); // 允许 y0=yTopEnd → 环内全透明
-      for (let y = 0; y < y0; y++) a[y * w + x] = 0;
-      for (let y = y0; y < yTopEnd; y++) a[y * w + x] = 255;
-    }
-  }
-  if (yBotStart < h - 1) {
-    const vbot = (vld && vld.b) ? vld.b : null;      // 同上面 TB 上环：环外端可能落在摆正余量里
-    const bRow = vbot ? new Int32Array(w) : null;
-    if (bRow) for (let x = 0; x < w; x++) bRow[x] = vbot[x] < 0 ? yBotStart : vbot[x];
-    const e = new Float64Array(w).fill(NaN);
-    // 帧级闸门：同上面那段（范围是下环）
-    const mg = new Float64Array(w).fill(NaN);
-    for (let x = 0; x < w; x++) mg[x] = ringMaxGradProf((j) => lum[j * w + x], yBotStart, h - 1);
-    const minG = ringGradGate(mg, w, 0.05);
-    const __tr = ringToneRefsT(lum, w, h, h - 3,
-      Math.max(0, yBotStart - Math.round(yBotStart * 0.5)), yBotStart - Math.round(yBotStart * 0.3), bRow);
-    const tone0 = __tr[0], toneP = __tr[1];
-    const fbBot = ringFillVote(tone0, toneP, w, h - 1, yBotStart);   // 同上面 TB 上环
-    let evB = 0;                             // 同上环：有证据用证据，没证据留 NaN 继承
-    for (let x = 0; x < w; x++) {
-      // vb = 该列照片的最后一行有效像素；<= yBotStart 表示环里没有照片 → 不可能有产品
-      const vb0 = vbot ? vbot[x] : h - 1;
-      if (vb0 < 0 || vb0 <= yBotStart) continue;
-      let b0 = -1;
-      for (let y = vb0; y >= yBotStart; y--) if (a[y * w + x]) { b0 = y; break; }
-      if (b0 < 0) {                            // 同上面 TB 上环：掩码掉块列，只跑不锚掩码的整环搜索
-        const s2 = snapProfileAt((j) => lum[j * w + x], yBotStart, vb0, -1, yBotStart, vb0 - yBotStart, minG);
-        if (!isNaN(s2)) { e[x] = Math.max(yBotStart, Math.min(vb0, s2)); evB++; }
-        continue;
-      }
-      // 同上面那段：两级搜索，兜底用 yBotStart（自动框下边）而不是掩码值
-      let s = snapProfileAt((j) => lum[j * w + x], yBotStart, vb0, -1, b0, win, minG);
-      if (isNaN(s)) s = snapProfileAt((j) => lum[j * w + x], yBotStart, vb0, -1, yBotStart, vb0 - yBotStart, minG);
-      if (isNaN(s)) continue;         // 同上面 TB 上环：留 NaN 交给邻居继承
-      e[x] = Math.max(yBotStart, Math.min(vb0, s));
-      evB++;
-    }
-    // keep 取自动框里往上 20% 深处那一行 —— 那里还不透明就说明这一列上面确实有产品。
-    const kRow = Math.max(0, yBotStart - Math.max(2, Math.round(yBotStart * 0.2)));
-    const keep = new Uint8Array(w);
-    for (let x = 0; x < w; x++) keep[x] = a[kRow * w + x] ? 1 : 0;
-    if (!evB) e.fill(Math.max(yBotStart, Math.min(h - 1, fbBot)));   // 整侧零证据 → 整侧统一取值
-    fillEdgeNaNs(e, w);
-    const es = robustEdgeCurve(e, w, cell, keep, h - yBotStart);
-    for (let x = 0; x < w; x++) {
-      if (isNaN(es[x])) continue;
-      const hi = (vbot && vbot[x] >= 0) ? vbot[x] : h - 1;                     // 余量里的行一律透明
-      const y1 = Math.max(yBotStart - 1, Math.min(hi, Math.round(es[x])));     // 允许 y1<yBotStart → 环内全透明
-      for (let y = yBotStart; y <= y1; y++) a[y * w + x] = 255;
-      for (let y = y1 + 1; y < h; y++) a[y * w + x] = 0;
-    }
-  }
-}
-// 左/右环：同 TB，只是换成逐行扫列
-function refineRingEdgeLR(a, lum, w, h, xLeftEnd, xRightStart, cell, vld) {
-  const win = Math.max(6, Math.round(cell * 2));
-  if (xLeftEnd > 1) {
-    const vlft = (vld && vld.l) ? vld.l : null;      // 同 TB：环外端那条列可能是摆正余量
-    const lCol = vlft ? new Int32Array(h) : null;
-    if (lCol) for (let y = 0; y < h; y++) lCol[y] = vlft[y] < 0 ? Math.max(0, xLeftEnd - 3) : vlft[y];
-    const e = new Float64Array(h).fill(NaN);
-    // 帧级闸门：同 TB（范围是左环，逐行）
-    const mg = new Float64Array(h).fill(NaN);
-    for (let y = 0; y < h; y++) mg[y] = ringMaxGradProf((j) => lum[y * w + j], 0, xLeftEnd);
-    const minG = ringGradGate(mg, h, 0.05);
-    const __tr = ringToneRefsL(lum, w, h, 0,
-      xLeftEnd + Math.round((w - xLeftEnd) * 0.3), xLeftEnd + Math.round((w - xLeftEnd) * 0.5), lCol);
-    const tone0 = __tr[0], toneP = __tr[1];
-    const fbL = ringFillVote(tone0, toneP, h, 0, xLeftEnd);   // 同 TB
-    let evL = 0;                             // 同 TB：有证据用证据，没证据留 NaN 继承
-    for (let y = 0; y < h; y++) {
-      // vl0 = 该行照片的第一列有效像素；>= xLeftEnd 表示环里没有照片 → 不可能有产品
-      const vl0 = vlft ? vlft[y] : 0;
-      if (vl0 < 0 || vl0 >= xLeftEnd) continue;
-      let l0 = -1;
-      for (let x = vl0; x < xLeftEnd; x++) if (a[y * w + x]) { l0 = x; break; }
-      if (l0 < 0) {                            // 同 TB：掩码掉块行，只跑不锚掩码的整环搜索
-        const s2 = snapProfileAt((j) => lum[y * w + j], vl0, xLeftEnd, 1, xLeftEnd, xLeftEnd, minG);
-        if (!isNaN(s2)) { e[y] = Math.max(vl0, Math.min(xLeftEnd, s2)); evL++; }
-        continue;
-      }
-      // 两级搜索 + 兜底用 xLeftEnd（自动框左边），理由同 TB —— 掩码在左/右环同样会整段超调
-      let s = snapProfileAt((j) => lum[y * w + j], vl0, xLeftEnd, 1, l0, win, minG);
-      if (isNaN(s)) s = snapProfileAt((j) => lum[y * w + j], vl0, xLeftEnd, 1, xLeftEnd, xLeftEnd, minG);
-      if (isNaN(s)) continue;         // 同 TB：留 NaN 交给邻居继承
-      e[y] = Math.max(vl0, Math.min(xLeftEnd, s));
-      evL++;
-    }
-    // keep 按**行**取：该行在自动框里往右 20% 深处还不透明，说明这一行确实还有产品。
-    const kCol = Math.min(w - 1, xLeftEnd + Math.max(2, Math.round((w - xLeftEnd) * 0.2)));
-    const keep = new Uint8Array(h);
-    for (let y = 0; y < h; y++) keep[y] = a[y * w + kCol] ? 1 : 0;
-    if (!evL) e.fill(Math.max(0, Math.min(xLeftEnd, fbL)));   // 整侧零证据 → 整侧统一取值
-    fillEdgeNaNs(e, h);
-    const es = robustEdgeCurve(e, h, cell, keep, xLeftEnd);
-    for (let y = 0; y < h; y++) {
-      if (isNaN(es[y])) continue;
-      const lo = (vlft && vlft[y] >= 0) ? vlft[y] : 0;               // 余量里的列一律透明
-      const x0 = Math.max(lo, Math.min(xLeftEnd, Math.round(es[y])));
-      for (let x = 0; x < x0; x++) a[y * w + x] = 0;
-      for (let x = x0; x < xLeftEnd; x++) a[y * w + x] = 255;
-    }
-  }
-  if (xRightStart < w - 1) {
-    const vrgt = (vld && vld.r) ? vld.r : null;      // 同 TB
-    const rCol = vrgt ? new Int32Array(h) : null;
-    if (rCol) for (let y = 0; y < h; y++) rCol[y] = vrgt[y] < 0 ? xRightStart : vrgt[y];
-    const e = new Float64Array(h).fill(NaN);
-    // 帧级闸门：同上面那段（范围是右环）
-    const mg = new Float64Array(h).fill(NaN);
-    for (let y = 0; y < h; y++) mg[y] = ringMaxGradProf((j) => lum[y * w + j], xRightStart, w - 1);
-    const minG = ringGradGate(mg, h, 0.05);
-    const __tr = ringToneRefsL(lum, w, h, w - 3,
-      Math.max(0, xRightStart - Math.round(xRightStart * 0.5)), xRightStart - Math.round(xRightStart * 0.3), rCol);
-    const tone0 = __tr[0], toneP = __tr[1];
-    const fbR = ringFillVote(tone0, toneP, h, w - 1, xRightStart);   // 同 TB
-    let evR = 0;                             // 同 TB：有证据用证据，没证据留 NaN 继承
-    for (let y = 0; y < h; y++) {
-      // vr0 = 该行照片的最后一列有效像素；<= xRightStart 表示环里没有照片
-      const vr0 = vrgt ? vrgt[y] : w - 1;
-      if (vr0 < 0 || vr0 <= xRightStart) continue;
-      let r0 = -1;
-      for (let x = vr0; x >= xRightStart; x--) if (a[y * w + x]) { r0 = x; break; }
-      if (r0 < 0) {                            // 同 TB：掩码掉块行，只跑不锚掩码的整环搜索
-        const s2 = snapProfileAt((j) => lum[y * w + j], xRightStart, vr0, -1, xRightStart, vr0 - xRightStart, minG);
-        if (!isNaN(s2)) { e[y] = Math.max(xRightStart, Math.min(vr0, s2)); evR++; }
-        continue;
-      }
-      // 两级搜索 + 兜底用 xRightStart（自动框右边）
-      let s = snapProfileAt((j) => lum[y * w + j], xRightStart, vr0, -1, r0, win, minG);
-      if (isNaN(s)) s = snapProfileAt((j) => lum[y * w + j], xRightStart, vr0, -1, xRightStart, vr0 - xRightStart, minG);
-      if (isNaN(s)) continue;         // 同 TB：留 NaN 交给邻居继承
-      e[y] = Math.max(xRightStart, Math.min(vr0, s));
-      evR++;
-    }
-    // keep 按行取（同左环，方向相反）。
-    const kCol = Math.max(0, xRightStart - Math.max(2, Math.round(xRightStart * 0.2)));
-    const keep = new Uint8Array(h);
-    for (let y = 0; y < h; y++) keep[y] = a[y * w + kCol] ? 1 : 0;
-    if (!evR) e.fill(Math.max(xRightStart, Math.min(w - 1, fbR)));   // 整侧零证据 → 整侧统一取值
-    fillEdgeNaNs(e, h);
-    const es = robustEdgeCurve(e, h, cell, keep, w - xRightStart);
-    for (let y = 0; y < h; y++) {
-      if (isNaN(es[y])) continue;
-      const hi = (vrgt && vrgt[y] >= 0) ? vrgt[y] : w - 1;                     // 余量里的列一律透明
-      const x1 = Math.max(xRightStart, Math.min(hi, Math.round(es[y])));
-      for (let x = xRightStart; x <= x1; x++) a[y * w + x] = 255;
-      for (let x = x1 + 1; x < w; x++) a[y * w + x] = 0;
-    }
-  }
-}
+// 【2026-11-05 环改版】「手动外放环的边界细化」整套机制（snapProfileAt/smoothEdgeCurve/
+// ringMaxGradProf/ringGradGate/ringMedSmooth/ringToneRefsT/L/fillEdgeNaNs/medFiltRing/
+// robustEdgeCurve/ringFillVote）已随「环=掩码」退役：环改为照片原样（外放圈）+
+// 强制透明（留白圈），掩码粗网格台阶不复存在，无需亚像素细化。
 
 // —— 背面文字定位 + 型号识别（tesseract.js，按需从 CDN 加载） ——
 function findTextBlocks(backCv, box) {
@@ -10650,84 +10182,46 @@ function renderCut(frontCv, box, o) {
   // —— 摆正画布的那圈余量（bleed）**不是照片** ——
   // deskewCut 为了「裁剪边距只能加不能减」在条带外留了 3.5% 余量（见它的注释），
   // 那里没有任何绘制，alpha=0；renderCut 一取 getImageData 就变成「亮度 0 的纯黑背景」。
-  // 【用户第十次报】实测 DSC08578（摆正 2.20°、上外放 400px、环高 270）：
-  //   环里那条边的梯度搜索锁到了**照片自己的斜边界**（黑→照片，环内最强梯度，斜率正好等于摆正角）
-  //   → x<2150 的列把一条黑边当产品整段留下，x>2150 的列没有黑边、锁在别处（es≈245），
-  //   两段相差 200+px。这不是任何平滑能修的：两条边的证据来自两个不同的物。
-  // 精确排除：逐列/逐行记下**照片真正覆盖到的**第一行 / 最后一行 / 第一列 / 最后一列。
-  // 只算环要用的那四条边界，代价 O(w·h) 里的一小部分。
-  let vld = null;
-  if (o.ringBox) {
-    const tEnd = Math.max(0, Math.min(h, o.ringBox.y0 - box.y0));            // 上环高（成品坐标）
-    const bStart = Math.max(0, Math.min(h, o.ringBox.y1 - box.y0 + 1));      // 下环起点
-    const lEnd = Math.max(0, Math.min(w, o.ringBox.x0 - box.x0));
-    const rStart = Math.max(0, Math.min(w, o.ringBox.x1 - box.x0 + 1));
-    const op = (x, y) => id.data[(y * w + x) * 4 + 3] > 8;
-    vld = {};
-    if (tEnd > 1 && tEnd < h) {                       // 上环：该列第一行有效像素（-1 = 环内全无效）
-      const a2 = new Int16Array(w).fill(-1);
-      for (let x = 0; x < w; x++) for (let y = 0; y < tEnd; y++) if (op(x, y)) { a2[x] = y; break; }
-      vld.t = a2;
-    }
-    if (bStart > 0 && bStart < h - 1) {               // 下环：该列最后一行有效像素
-      const a2 = new Int16Array(w).fill(-1);
-      for (let x = 0; x < w; x++) for (let y = h - 1; y >= bStart; y--) if (op(x, y)) { a2[x] = y; break; }
-      vld.b = a2;
-    }
-    if (lEnd > 1 && lEnd < w) {                       // 左环：该行第一列有效像素
-      const a2 = new Int16Array(h).fill(-1);
-      for (let y = 0; y < h; y++) for (let x = 0; x < lEnd; x++) if (op(x, y)) { a2[y] = x; break; }
-      vld.l = a2;
-    }
-    if (rStart > 0 && rStart < w - 1) {               // 右环：该行最后一列有效像素
-      const a2 = new Int16Array(h).fill(-1);
-      for (let y = 0; y < h; y++) for (let x = w - 1; x >= rStart; x--) if (op(x, y)) { a2[y] = x; break; }
-      vld.r = a2;
-    }
-  }
+  // 【2026-11-05 环改版后】「照片是否真的覆盖到」不再需要预扫（旧 vld 四边界只为
+  //   refineRingEdge* 服务，已随环改版退役）：环内逐像素直接看 id 的 alpha>8，
+  //   未绘制区 alpha=0 → 外放圈自然透明、留白圈强制透明，一条判定全 covers。
   applyPixelAdjust(id.data, w, h, o);
   if (o.transparent && box.mask) {
     const rawA = new Uint8Array(w * h);
     const a = maskToAlpha(box.mask, box, w, h, lum, rawA);
-    // —— 手动框「多出来的那一圈」：按掩码逐像素判定，别让收边链再抹一遍 ——
-    // 【用户报障 2026-09-21 第四次】「手动调边后点击完成调边，又自动回到没调之前的预览图，
-    //   下载的还是没有手动调的，请修复，手动调边后要保存下来」。
-    // 实测（_DSC5671：检测框 6989×1138、成品 6989×744、掩码网格 900×147 锚在检测框上）：
-    //   成品框顶边**上面**那 300 行，掩码逐行占用一直是 0.70~1.00 —— 掩码认为那里是产品；
-    //   但 maskToAlpha 内部的几何链（tightenBand → snapAlphaBand → straightenBand）会按
-    //   **新传入的那个框**重新找上下沿，把这一圈又抹成 0。于是：用户把框往外拖、调边视图里
-    //   红框明明罩住了产品，导出却是透明的 —— 用户只能认为「我手动调的没保存」。
-    //   （之前只加了一行「⚠️ 落在背景上」的提示，那是把「静默出错」变成「明着出错」，
-    //     并没有把产品还给他。）
-    // 现在：自动框之外、手动框之内这一圈，**以掩码为准** ——
-    //   掩码说是产品的（rawA=255）就保留；掩码说是背景的仍然透明。
-    //   所以「留白 / 放出去一圈透明边」的用法一点没变，而「自动框切掉了一截产品」能靠手动补回来。
-    // ⚠️ 只能放在 maskToAlpha **之后**：放它前面会被 tightenBand 再抹掉；放它前面也拿不到 rawA。
+    // —— 手动框多出来的那一圈（环）：【2026-11-05 黑边报障改版】分两圈区别对待 ——
+    // 【旧做法为什么被推翻】旧版环内一律「以掩码为准」（rawA）。但掩码带模型只认「与背景色差大的
+    //   亮色主体」—— 实测 DSC02668（奶牛纹框条，上下黑边）：掩码/收边链把自动成品框收到
+    //   只有纹路带（3678×284），黑边整体被当成阴影/背景。用户把红框往外拖把黑边框进来，
+    //   环内掩码说「背景」→ 照抹：上黑边整条透明、下黑边按掩码网格斑驳成块 —— 用户原话
+    //   「裁切即可见，保存的图就是裁切好的图」。环信任的掩码正是让自动框切掉黑边的那份证据，
+    //   拿它仲裁「用户特意框进来的东西」永远修不好这一类报障。
+    // 【新做法：环内所见即所得】
+    //   · 外放圈（用户框 nudgeBox 内、自动成品框 ringBox 外）＝ 用户特意框进来的 →
+    //     **照片有像素就保留**（alpha>8，摆正画布未绘制区 alpha=0，旋转出界的角自然透明）。
+    //     红框里看得到的黑边/桌面，导出就有；掩码好不好不再影响用户框内的内容。
+    //   · 留白圈（nb 与 nudgeBox 的差，即 pad 扩出来的）＝ 「留白」语义 → 一律透明
+    //     （留白 = 成品四周加透明边，与旧版掩码判定的实际效果一致，但不吃照片像素的斑驳）。
+    //   · ringBox 内照旧走掩码 + 收边链（自动框内抠背景的行为一点没变，回归风险最小）。
     if (o.ringBox) {
-      const rb = o.ringBox;
+      const rb = o.ringBox, ngb = o.nudgeBox || null;
       for (let y = 0; y < h; y++) {
         const cy = box.y0 + y, outY = (cy < rb.y0 || cy > rb.y1);
         for (let x = 0; x < w; x++) {
           const cx = box.x0 + x;
-          if (outY || cx < rb.x0 || cx > rb.x1) a[y * w + x] = rawA[y * w + x];
+          if (outY || cx < rb.x0 || cx > rb.x1) {
+            let keep;
+            if (!ngb) keep = !!rawA[y * w + x];              // 没有 nudgeBox 信息（理论不到）：退回旧判定
+            else {
+              const inNg = (cy >= ngb.y0 && cy <= ngb.y1 && cx >= ngb.x0 && cx <= ngb.x1);
+              keep = inNg ? (id.data[(y * w + x) * 4 + 3] > 8) : false;   // 外放圈=照片原样 / 留白圈=透明
+            }
+            a[y * w + x] = keep ? 255 : 0;
+          }
         }
       }
-      // 掩码是粗网格，直接拿它逐像素判定 → 斜边/弯边会被量化成一排等宽台阶
-      //（实测台阶高正好等于一格 7.7px，用户看到的就是「锯齿状残缺」）。
-      // 所以按亮度梯度把环里那四条边细化到亚像素并沿边平滑一遍 —— 详见上面 refineRingEdge* 的注释。
-      const ms = box.mask;
-      const cell = ms ? Math.max(2, Math.max(ms.fullW / ms.aw, ms.fullH / ms.ah)) : 8;
-      refineRingEdgeLR(a, lum, w, h,
-        Math.max(0, Math.min(w, rb.x0 - box.x0)),
-        Math.max(0, Math.min(w, rb.x1 - box.x0 + 1)), cell, vld);
-      refineRingEdgeTB(a, lum, w, h,
-        Math.max(0, Math.min(h, rb.y0 - box.y0)),
-        Math.max(0, Math.min(h, rb.y1 - box.y0 + 1)), cell, vld);
-      // 环里掩码的碎洞按同一套规则补一下（横向间隙 / 纵向间隙），再柔化一圈边，
-      // 否则环里会撒着 0/255 的麻点（掩码在阴影区本来就是斑驳的）。
-      fillAlphaRuns(a, w, h);
-      fillAlphaCols(a, w, h);
-      featherAlpha(a, w, h, 1);
+      // 旧版这里还有 refineRingEdgeLR/TB + fillAlphaRuns/Cols + feather：那是给「环=掩码」
+      //   的粗网格台阶/麻点擦屁股的。环改成照片原样后没有台阶也没有麻点，全部不需要了。
     }
     // 最后一步：裁到 alpha 的实际范围。检测框被「接触阴影」撑高的部分、以及紧挨产品
     // 却与它不相连的桌面/别的样品，都要在这一步丢掉 —— 用户的原话是「先找到框条主体再裁切」。
@@ -12616,7 +12110,6 @@ function buildToolFrameCut() {
     busy: false,
     // 【2026-11-05 第二次改版】调边不再是独立模式：主视图常驻「整幅图 + 红框 + 可拖边」，
     // 没有「手动调边 / 完成调边 / 显示裁剪位置」这些按钮（用户原话：都去掉，直接在图上拖）。
-    qcv: null,          // 快速预览用的复用画布
     pvT: 0,             // 真渲染的防抖计时器
     liveCanvas: null,   // 当前显示的预览 canvas（拖滑块时给它加 CSS 滤镜）
   };
@@ -12849,94 +12342,6 @@ function buildToolFrameCut() {
     st.pvT = setTimeout(() => { st.pvT = 0; drawPreview(); }, ms == null ? 160 : ms);
   }
   function flushPreview() { if (st.pvT) { clearTimeout(st.pvT); st.pvT = 0; } }
-  // 快速预览：把**整条 renderCut**（含 mask→alpha 收边链）跑在一张降低分辨率的画布上。
-  // 【为什么必须这么做】以前 drawQuick 是纯 drawImage —— 画出来是**没抠背景的原图**。
-  //   于是「手一动，背景就回来」，而下载下来是抠过的 →（用户 2026-09-21 第三次报）
-  //   「手动调整后…自动又回到识别的区域，下载的也不对」。只要连发把出真图的防抖一直重置，
-  //   这个假画面还会一直留在屏幕上（截图 B 就是这个状态）。
-  // 【为什么不用真渲染当快预览】实测 6791×989 的真渲染要 730ms，而连发是 25ms 一格。
-  // 【为什么整张预览都在低分辨率上做】真尺寸的画布是 6791×989 ≈ 27MB，每步改 1px 高度就得
-  //   重新分配 + 清屏一次（实测连发只能跑到 9 步/秒）。降到 QUICK_W 宽之后这一步彻底没了；
-  //   屏上尺寸用 inline style 顶到与真渲染一致，所以**位置和大小都不会跳**，只是稍微软一点。
-  // 【掩码怎么跟着缩】maskToAlpha 里 sx = mask.aw/mask.fullW，源矩形 = (box.x0−ox)·sx。
-  //   画布缩 S 倍后令 fullW/fullH 也乘 S（等价于把 sx 缩到 1/S）、ox/oy 乘 S，就自动成立：
-  //     sX = (x0·S − ox·S)·(sx/S) = (x0 − ox)·sx   ✓
-  //     sW = (w·S)·(sx/S)          = w·sx          ✓
-  //   —— 正因为这两条，低分辨率版才能复用同一个函数、同一套判据，不需要另写一份。
-  const QUICK_W = 1100;
-  const QUICK_S = (cw) => Math.min(1, QUICK_W / Math.max(1, cw));
-  function quickCut(b) {
-    const cur = st.cur;
-    if (!cur || !cur.cutCv || !b || !b.mask) return null;
-    const cw = b.x1 - b.x0 + 1;
-    const S = QUICK_S(cw);
-    let q = st.qscv;
-    if (!q) q = st.qscv = document.createElement('canvas');
-    const qw = Math.max(8, Math.round(cur.cutCv.width * S)), qh = Math.max(8, Math.round(cur.cutCv.height * S));
-    if (q.width !== qw || q.height !== qh) { q.width = qw; q.height = qh; }
-    const qx = q.getContext('2d');
-    qx.clearRect(0, 0, qw, qh);
-    qx.drawImage(cur.cutCv, 0, 0, qw, qh);
-    const msk = b.mask;
-    const shim = {
-      u8: msk.u8, aw: msk.aw, ah: msk.ah,
-      fullW: (msk.fullW || msk.aw) * S, fullH: (msk.fullH || msk.ah) * S,
-      ox: (msk.ox || 0) * S, oy: (msk.oy || 0) * S,
-    };
-    const b2 = {
-      x0: Math.round(b.x0 * S), y0: Math.round(b.y0 * S),
-      x1: Math.round(b.x1 * S), y1: Math.round(b.y1 * S), mask: shim,
-    };
-    if (b2.x1 <= b2.x0 || b2.y1 <= b2.y0) return null;
-    // 快速预览也要带上「手动多出来的那一圈」的基准，否则拖动中看到的还是透明、松手才出产品
-    // —— 正是用户说的「手一动就回到没调的样子」。坐标同样乘 S（理由见上面 mask 缩放那段）。
-    const rb = refBox();
-    if (rb) {
-      b2.ringBox = {
-        x0: Math.round(rb.x0 * S), y0: Math.round(rb.y0 * S),
-        x1: Math.round(rb.x1 * S), y1: Math.round(rb.y1 * S),
-      };
-    }
-    // 只用来当预览，颜色一律走 CSS 滤镜那套 —— 所以不传调色参数（锐化在低分辨率下也没意义）
-    return renderCut(q, b2, { transparent: true, fixed: true, ringBox: b2.ringBox });
-  }
-  // 改边距时的快速预览。返回值交给 onNudgeChange 决定要不要排真渲染。
-  function drawQuick() {
-    const stage = $('fcStage'), cur = st.cur;
-    if (!cur || !cur.cutCv) return false;
-    const nn = nudgeOf(st.sel);
-    const manual = !!((nn && (nn.t || nn.b || nn.l || nn.r)) || st.opt.pad);
-    // ⚠️ 有手动边距时基准必须是「自动收边后的成品框」。它为空（改过角度 / 改过「两端再裁」）时
-    //    refBox() 会退回**检测框** —— 那画出来的就是「检测框 + 边距」，比正式结果大一大圈，
-    //    正是用户说的「自动又回到识别的区域」。这种情况别硬画，交给真渲染（它会自己把基准量出来）。
-    if (manual && !cur.tightBox) return false;
-    const b = curBox();
-    if (!b) return false;
-    const cw = b.x1 - b.x0 + 1, ch = b.y1 - b.y0 + 1;
-    if (cw < 8 || ch < 8) return false;
-    // 开了「透明背景」→ 直接拿低分辨率成品当预览（颜色和 alpha 出自同一条链，不会再出现
-    // 「屏上有背景、下载下来是透明」这种两套结果）。关掉时导出本来就不透明，照旧画原图。
-    let c = (st.opt.transparent && b.mask) ? quickCut(b) : null;
-    if (!c) {
-      const S = QUICK_S(cw);
-      const dw = Math.max(8, Math.round(cw * S)), dh = Math.max(8, Math.round(ch * S));
-      c = st.qcv || (c = st.qcv = document.createElement('canvas'));
-      if (c.width !== dw || c.height !== dh) { c.width = dw; c.height = dh; }
-      const g = c.getContext('2d');
-      g.clearRect(0, 0, dw, dh);
-      g.drawImage(cur.cutCv, b.x0, b.y0, cw, ch, 0, 0, dw, dh);
-    }
-    // 屏上尺寸算得跟「真渲染被 max-width/max-height 收起后」一样，避免一闪一缩
-    const stageW = Math.max(40, stage.clientWidth - 27);   // .cu-stage 的 padding 12×2 + 边框 1×2
-    const disp = Math.min(stageW / cw, 520 / ch, 1);
-    c.style.width = Math.max(8, Math.floor(cw * disp)) + 'px';
-    c.style.height = Math.max(8, Math.floor(ch * disp)) + 'px';
-    if (stage.firstChild !== c) { stage.innerHTML = ''; stage.appendChild(c); }
-    st.liveCanvas = c;
-    liveTone();
-    $('fcBoxInfo').textContent = `输出 ${cw}×${ch} px（快速预览 · 停手后定稿）`;
-    return true;
-  }
   // 边距变了：主视图就是「整幅图 + 红框」，只需要把覆盖层位置同步一下（不重画图像，跟手）
   function onNudgeChange() {
     syncNudge();
@@ -13328,10 +12733,20 @@ function buildToolFrameCut() {
         renderCut(cutCv, box, Object.assign({}, st.opt, { outBox: ob }));   // 先量出基准
         const rb = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
         const nb = applyNudge({ x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1, mask: box.mask }, cutCv, nz);
+        // 【2026-11-05 黑边报障】还要把「不含留白的用户框」传给 renderCut：
+        //   环（自动成品框之外）要分成两圈区别对待 —— 外放圈（用户框内）照片原样保留，
+        //   留白圈（pad 扩出来的）保持透明。没有这个框 renderCut 分不出两圈。
+        // ⚠️ 不能直接用 nb：nb 含 pad（applyNudge 里 x0−pad）。留白加在 nudge 之外，要减回去。
+        // ⚠️ 不能直接用 nb：nb 含 pad（applyNudge 里 x0−pad）。ngb 按 pad=0 的同一套夹取
+        //    现算一遍（不能在夹取结果上线性补 pad —— max/min 夹过之后补不回去）。
+        const ngb = {
+          x0: Math.max(0, rb.x0 + (nz.l | 0)), y0: Math.max(0, rb.y0 + (nz.t | 0)),
+          x1: Math.min(cutCv.width - 1, rb.x1 - (nz.r | 0)), y1: Math.min(cutCv.height - 1, rb.y1 - (nz.b | 0)),
+        };
         // ⚠️ ringBox 必须和预览那条路**一模一样**（drawPreview 里同名参数）：
         //    少了它，导出会把「手动多出来的那一圈」里的产品抹成透明，而预览（或反过来）不会
         //    → 又变成「预览对、下载不对」。这是 2026-09-21 那次报障的同一条根因。
-        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { fixed: true, ringBox: rb }));
+        if (nb) out = renderCut(cutCv, nb, Object.assign({}, st.opt, { fixed: true, ringBox: rb, nudgeBox: ngb }));
       }
       if (!out) out = renderCut(cutCv, box, st.opt);
       const bytes = await canvasToPngBytes(out);
