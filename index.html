@@ -989,6 +989,17 @@
   .cu-eh.tl, .cu-eh.br { cursor: nwse-resize; }
   .cu-eh.tr, .cu-eh.bl { cursor: nesw-resize; }
   .cu-mini.on { background: #2c7fb8; border-color: #2c7fb8; color: #fff; }
+  /* 手动调边的实时结果预览：拖动时下方同步显示「导出就是这个」的画面。
+     透明处用棋盘格衬底 —— 往外放落在背景上的那一圈当场可见，不用等导出。 */
+  .cu-edgecol { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+  .cu-livebox { text-align: center; max-width: 100%; }
+  .cu-livelabel { font-size: 12px; color: var(--text-light); margin-bottom: 6px; }
+  .cu-livecv {
+    max-width: 100%; max-height: 300px; display: inline-block;
+    background: repeating-conic-gradient(#dfe4e9 0 25%, #ffffff 0 50%) 0 0 / 16px 16px;
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .cu-livehint { font-size: 12px; color: var(--text-light); margin-top: 6px; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
   .code-box canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
@@ -12516,7 +12527,7 @@ function buildToolFrameCut() {
           <div class="cu-stage cu-checker" id="fcStage"><span class="cu-empty">选择文件夹后这里显示样张</span></div>
           <div class="cu-row" style="margin-top:8px">
             <span class="cu-badge" id="fcBoxInfo">裁剪区 —</span>
-            <button class="cu-mini" id="fcEdge" title="在画布上直接拖动四条边，改完点「完成」">✥ 手动调边</button>
+            <button class="cu-mini" id="fcEdge" title="在画布上直接拖动四条边，下方实时显示裁剪结果">✥ 手动调边</button>
             <label style="font-size:12px;color:var(--text-light)"><input type="checkbox" id="fcShowFull"> 显示裁剪位置</label>
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
@@ -12600,7 +12611,7 @@ function buildToolFrameCut() {
     <div class="t-tip">用法：把<b>正面照片</b>导进来（散图、整个文件夹、拖拽都行，不需要拍背面） → 自动找到框条本体、<b>把拍歪的转正</b>、再去背景 →
       在样张上调好锐化 / 亮度 / 对比度 / 饱和度 / 色相（滑块旁边有 − / + 可以一格一格微调，按住不放会连续走）→ 点「开始批量抠图」，其余照片会自动套用同一组参数。
       输出为<b>透明底 PNG，原像素尺寸、不做任何压缩</b>；文件名直接用<b>源文件名</b>（_DSC5653.JPG → _DSC5653.png，重名自动加 -2）。
-      <b>个别照片边缘没识别准</b>时点「✥ 手动调边」，在画布上直接拖红框的四条边和四个角——比填数字直观，<b>而且只改这一张</b>（改完想统一，点「套用到全部图片」）；
+      <b>个别照片边缘没识别准</b>时点「✥ 手动调边」，在画布上直接拖红框的四条边和四个角——比填数字直观，<b>而且只改这一张</b>（下方会实时显示裁剪结果，透明处是棋盘格；「完成调边」只是退出调边模式，想统一改，点「套用到全部图片」）；
       也可以用下方「裁剪边距」的四向 ± / 输入框精确到 px：<b>+ 是往里多切、− 是往外少切</b>（框外还留着原图，最多能外放 3.5%），两个方向都有效。
       <b>往外放出来的那一圈，只要识别认为那里还是产品就会原样保留</b>（自动切多了、想把条带的一截拿回来，就靠这个）；
       只有识别判定为背景的地方才是透明的（读数里会报出来）。
@@ -12620,6 +12631,7 @@ function buildToolFrameCut() {
     edge: false,        // 手动调边模式
     qcv: null,          // 快速预览用的复用画布
     pvT: 0,             // 真渲染的防抖计时器
+    lvT: 0,             // 调边实时结果的防抖计时器（拖动中走 quickCut，松手出真渲染）
     liveCanvas: null,   // 当前显示的预览 canvas（拖滑块时给它加 CSS 滤镜）
   };
   const log = (s) => { const el = $('fcLog'); el.textContent += (el.textContent ? '\n' : '') + s; el.scrollTop = el.scrollHeight; };
@@ -13003,6 +13015,9 @@ function buildToolFrameCut() {
       let k = Math.min(1, avail / W, 460 / H);
       if (!(k > 0) || !isFinite(k)) k = 1;
       stage.innerHTML = '';
+      // 纵向布局：上面是「整幅画布 + 红框」（拖这里），下面是「实时结果」（导出就是这个）
+      const col = document.createElement('div');
+      col.className = 'cu-edgecol';
       const wrap = document.createElement('div');
       wrap.className = 'cu-edgewrap';
       const cv = document.createElement('canvas');
@@ -13020,13 +13035,88 @@ function buildToolFrameCut() {
         wrap.appendChild(d);
         hs[side] = d;
       });
-      stage.appendChild(wrap);
-      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs };
+      // 实时结果面板：拖动/松手都同步刷新（见 renderLiveResult 的注释）
+      const live = document.createElement('div');
+      live.className = 'cu-livebox';
+      const llb = document.createElement('div');
+      llb.className = 'cu-livelabel';
+      llb.textContent = '实时结果预览（导出就是这个）· 拖动中为快速近似，松手定稿';
+      const lcv = document.createElement('canvas');
+      lcv.className = 'cu-livecv';
+      const lhint = document.createElement('div');
+      lhint.className = 'cu-livehint';
+      live.appendChild(llb); live.appendChild(lcv); live.appendChild(lhint);
+      col.appendChild(wrap); col.appendChild(live);
+      stage.appendChild(col);
+      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs, live: { cv: lcv, hint: lhint } };
       st.liveCanvas = cv;
     }
     edgeUI.cv.style.filter = toneFilter(st.opt);
     edgeLayout();
+    renderLiveResult(true);   // 进调边模式 / 换图 / 清边距后都重出一次定稿
   }
+  // —— 实时结果预览（2026-11-05 用户报障）——
+  // 【为什么】调边模式原来只有「整幅画布 + 红框」，拖动时看不到成品长什么样：
+  //   点「完成调边」后若「显示裁剪位置」还勾着，主视图仍是全图+红框而不是成品；
+  //   补出来的那一圈是透明还是产品、有没有锯齿，全都要批量导出后才知道 ——
+  //   用户原话：「显示裁剪位置虽然是对的，但批量处理后依然不对，所以这个显示裁剪位置没有用」。
+  // 【怎么做】调边视图下方挂一块「实时结果」：拖动中防抖 120ms 走 quickCut（低分辨率跑
+  //   整条 alpha 链、含手动环，与导出同一条路，见 quickCut 注释）；松手立刻跑一次真渲染定稿。
+  //   框被压没了要说出来；往外放落在背景上的部分用棋盘格衬底当场可见。
+  function edgeLiveRefs() {
+    const cur = st.cur;
+    if (!cur || !cur.cutCv || !edgeUI) return null;
+    if (!cur.tightBox) measureRef();
+    const rb = refBox();
+    const nb = applyNudge(rb, cur.cutCv, nudgeOf(st.sel));
+    return { cur: cur, rb: rb, nb: nb };
+  }
+  function renderLiveResult(full) {
+    if (!edgeUI || !edgeUI.live) return;
+    const L = edgeUI.live, refs = edgeLiveRefs();
+    const cv = L.cv, hint = L.hint;
+    if (!refs || !refs.nb) {
+      cv.width = 0; cv.height = 0; cv.style.display = 'none';
+      hint.textContent = refs ? '⚠️ 微调值把范围压没了，请把边距调小一点' : '';
+      return;
+    }
+    cv.style.display = '';
+    const nb = refs.nb, cur = refs.cur;
+    let out = null, barHint = '';
+    if (full) {
+      const ob = {};
+      out = renderCut(cur.cutCv, nb, Object.assign({}, st.opt, { fixed: true, outBox: ob, ringBox: refs.rb }));
+      if (out) {
+        const bars = transparentBars(out);
+        if (bars) {
+          const seg = [];
+          if (bars.t > 2) seg.push('上 ' + bars.t);
+          if (bars.b > 2) seg.push('下 ' + bars.b);
+          if (bars.l > 2) seg.push('左 ' + bars.l);
+          if (bars.r > 2) seg.push('右 ' + bars.r);
+          if (seg.length) barHint = ' · ⚠️ ' + seg.join(' / ') + 'px 落在背景上（导出为透明，棋盘格处）';
+        }
+      }
+    } else {
+      out = quickCut(nb);       // 低分辨率整链（含环），与导出同一条路
+    }
+    if (!out) { cv.width = 0; cv.height = 0; cv.style.display = 'none'; hint.textContent = '结果还没算出来'; return; }
+    // 显示尺寸：跟随调边画布的可用宽度，高度封顶 300 —— 透明处棋盘格可见
+    const stage = $('fcStage');
+    const availW = Math.max(120, ((stage && stage.clientWidth) || 820) - 40);
+    const disp = Math.min(availW / out.width, 300 / out.height, 1);
+    const dw = Math.max(8, Math.round(out.width * disp)), dh = Math.max(8, Math.round(out.height * disp));
+    if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; }
+    const g = cv.getContext('2d');
+    g.clearRect(0, 0, dw, dh);
+    g.drawImage(out, 0, 0, dw, dh);
+    hint.textContent = `输出 ${out.width}×${out.height} px（原像素）${barHint}`;
+  }
+  function scheduleLive(ms) {
+    if (st.lvT) clearTimeout(st.lvT);
+    st.lvT = setTimeout(() => { st.lvT = 0; renderLiveResult(false); }, ms == null ? 120 : ms);
+  }
+  function flushLive() { if (st.lvT) { clearTimeout(st.lvT); st.lvT = 0; } }
   // 拖动一条边（或一个角）。side 里含 'l' 就是左，含 't' 就是上…… 角上是两个字母都含
   // （'tl' = 左上）→ 两个方向一起走。
   function edgeDrag(ev, side) {
@@ -13057,12 +13147,15 @@ function buildToolFrameCut() {
       dirty = true;
       edgeLayout();
       syncNudge();
+      scheduleLive();        // 实时结果：防抖 120ms 走低分辨率整链，跟手且不卡
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       if (!dirty) return;
       renderRows();
+      flushLive();
+      renderLiveResult(true);   // 松手立刻出真渲染定稿 —— 不用点「完成调边」就能看到成品
       log(`第 ${st.sel + 1} 张：手动调边 → 上 ${n.t} 下 ${n.b} 左 ${n.l} 右 ${n.r}（只作用于本张）`);
     };
     window.addEventListener('pointermove', move);
@@ -13072,10 +13165,20 @@ function buildToolFrameCut() {
     if (on && (!st.cur || !st.cur.cutCv)) { log('当前这张读不出来，没法手动调边'); return; }
     st.edge = !!on;
     edgeUI = null;
+    flushLive();
     $('fcEdge').classList.toggle('on', st.edge);
     $('fcEdge').textContent = st.edge ? '✓ 完成调边' : '✥ 手动调边';
     $('fcEdgeBar').style.display = st.edge ? '' : 'none';
     $('fcShowFull').disabled = st.edge;
+    // 【2026-11-05 用户报障】「点击完成调边后没有按照裁切后的显示」：
+    //   「显示裁剪位置」勾着的时候，完成调边回到的仍是「全图+红框」，不是成品 ——
+    //   用户只能认为没生效。完成调边 = 调完了，要看结果：自动收起这个开关，
+    //   让主视图直接显示裁剪结果（需要再看位置可以重新勾选）。
+    if (!st.edge && st.showFull) {
+      st.showFull = false;
+      $('fcShowFull').checked = false;
+      log('完成调边：已收起「显示裁剪位置」，直接显示裁剪结果（需要看位置可重新勾选）');
+    }
     flushPreview();
     drawPreview();
   }
@@ -13542,6 +13645,15 @@ function buildToolFrameCut() {
     st.busy = false;
     $('fcProgText').textContent = '已保存到文件夹';
     log('完成');
+  }
+
+  // 调试/自动化测试钩子：调边实时结果的入口挂到 __WB（闭包内函数，顶层 __WB 够不到）
+  if (typeof globalThis !== 'undefined' && globalThis.__WB) {
+    globalThis.__WB.fcLive = {
+      render: (full) => renderLiveResult(full !== false),
+      schedule: scheduleLive, flush: flushLive,
+      isOn: () => !!(edgeUI && edgeUI.live),
+    };
   }
 
   return box;
@@ -15201,6 +15313,7 @@ if (typeof globalThis !== 'undefined') {
     getCOLUMNS: () => COLUMNS,
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     revertDoneTask, enableDoneRevert, applyProgress, setStatus, inputProgress, adjustProgress,
+    fcLive: null,   // 框条抠图工具构建时填充（见 buildToolFrameCut 末尾）
     switchView, tryLogin, tryRegister, doLogout, changePassword,
     loadUsers, previewUser, backToAdmin, saveData, renderBoard,
     renderToolbox, TOOLS, getActiveTool: () => activeTool, buildRecentColumn, renderAdminDemo, renderAdminView, syncAdminDemoToggle,
