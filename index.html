@@ -12046,18 +12046,19 @@ function buildToolFrameCut() {
             </div>
           </div>
           <div class="cu-grp">
-            <div class="cu-grp-t">摆正</div>
+            <div class="cu-grp-t">摆正 <span class="cu-badge warn" id="fcAngTag" style="display:none">本张已手动</span></div>
             <div class="cu-row" style="font-size:12px;color:var(--text-light)">
               <label><input type="checkbox" id="fcDeskew" checked> 自动摆正倾斜</label>
               <span>本张 <b id="fcAngleInfo">—</b></span>
             </div>
             <div class="cu-row" style="margin-top:6px;font-size:12px;color:var(--text-light)">
-              <span title="留空 = 每张按自己检测到的角度摆正；填数字 = 全部按这个角度摆正">手动角度</span>
+              <span title="留空 = 本张按检测到的角度自动摆正；填数字 = 本张按这个角度摆正，逐张保存">手动角度</span>
               <span class="cu-nb">
-                <button class="cu-step" id="fcAngD" title="角度 −0.5°">−</button>
+                <button class="cu-step" id="fcAngD" title="本张角度 −0.5°">−</button>
                 <input class="cu-numv" id="fcAngle" placeholder="自动" style="width:56px">
-                <button class="cu-step" id="fcAngU" title="角度 +0.5°">+</button>°
+                <button class="cu-step" id="fcAngU" title="本张角度 +0.5°">+</button>°
               </span>
+              <button class="cu-mini" id="fcAngAll" title="把本张手动角度套用到全部图片">套用到全部图片</button>
             </div>
           </div>
           <div class="cu-grp">
@@ -12112,12 +12113,16 @@ function buildToolFrameCut() {
   const $ = (id) => box.querySelector('#' + id);
   const st = {
     files: [], meta: [], sel: 0, cur: null,
-    // ⚠️ 裁剪边距（nudge）**不在 opt 里** —— opt 是「整批共用的调色参数」，
-    //    边距是逐张的（见 nudgeOf / ensureNudge）：用户的原话是「个别框条边缘识别有问题」，
-    //    一张一张改才合理；要整批统一时用「套用到全部图片」一次性铺过去。
+    // ⚠️ 裁剪边距（nudge）和手动角度（angleM）都**不在 opt 里** —— opt 是「整批共用的调色参数」，
+    //    边距/角度是逐张的（见 nudgeOf / ensureNudge / angleOf）：用户的原话是「个别框条边缘识别有问题」、
+    //    「需要自动为每一张保存每一张调整后的单独的角度和裁切参数」——一张一张改才合理；
+    //    要整批统一时用「套用到全部图片」（边距 fcEdgeAll / 角度 fcAngAll）一次性铺过去。
     //    pad（留白）和 endTrim（两端再裁）**在 opt 里**：这两个是整批的规则，
     //    不是某一张的修正；endTrim 默认 100px，见 renderCut 里那一段的注释。
-    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, deskew: true, angle: null, endTrim: 100 },
+    // 【2026-11-09 角度逐张化】angle 原来在 opt 里是整批一个值 —— 在样张上拧 ±0.5°，
+    //    批量导出会给**每一张**都硬拧这个角度：别的张基准框变了、nudge 也跟着错位
+    //    （用户报的 DSC7741-7743：样张调好了、批量下载其余张全歪）。改成 meta[i].angleM 逐张保存。
+    opt: { sharpen: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, transparent: true, pad: 0, deskew: true, endTrim: 100 },
     busy: false,
     // 【2026-11-05 第二次改版】调边不再是独立模式：主视图常驻「整幅图 + 红框 + 可拖边」，
     // 没有「手动调边 / 完成调边 / 显示裁剪位置」这些按钮（用户原话：都去掉，直接在图上拖）。
@@ -12140,7 +12145,7 @@ function buildToolFrameCut() {
   // 否则「套用到全部」很容易把某一张的专门修正一起冲掉。
   function statusHtml(i, text, cls) {
     const m = st.meta[i];
-    const pen = (m && m.nudge) ? '<span class="cu-badge warn" title="这张手动调过裁剪边距">✥</span> ' : '';
+    const pen = (m && (m.nudge || m.angleM != null)) ? '<span class="cu-badge warn" title="这张手动调过裁剪边距/角度">✥</span> ' : '';
     return pen + `<span class="cu-badge ${cls || ''}">${esc(text)}</span>`;
   }
   function renderRows() {
@@ -12178,6 +12183,7 @@ function buildToolFrameCut() {
     if (!force && st.sel === i && st.cur) { st.sel = i; renderRows(); return; }
     st.sel = i;
     renderRows();
+    syncAngle();            // 先回填本张的手动角度（逐张保存，见 angleOf）—— 坏图也不能残留上一张的值
     const f = st.files[i];
     if (!f) return;
     const stage = $('fcStage');
@@ -12234,7 +12240,7 @@ function buildToolFrameCut() {
     if (!cur || !cur.cv) return;
     if (!cur.det || reDetect) cur.det = detectStripBoxRobust(cur.cv);
     if (cur.cutCv && cur.cutCv !== cur.cv) releaseCv(cur.cutCv);
-    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: st.opt.angle, det: cur.det, bleedMin: (st.meta[st.sel] && st.meta[st.sel].bleed) || 0 });
+    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: angleOf(st.sel), det: cur.det, bleedMin: (st.meta[st.sel] && st.meta[st.sel].bleed) || 0 });
     cur.cutCv = p.cv; cur.box = p.box; cur.low = p.low; cur.note = p.note;
     cur.detAngle = p.detAngle; cur.angle = p.angle; cur.rotated = p.rotated; cur.xf = p.xf;
     cur.bleedBox = p.bleedBox;
@@ -12288,7 +12294,7 @@ function buildToolFrameCut() {
     // 新余量 = 还想要的量 + 15% 条带宽的缓冲（免得放一点扩一次）；上限 3000，源图边界再收口
     const bleed = Math.min(3000, Math.max(m0.bleed || 0, want + Math.round(0.15 * (oldBb.x1 - oldBb.x0 + 1)) + 40));
     if (cur.cutCv && cur.cutCv !== cur.cv) releaseCv(cur.cutCv);
-    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: st.opt.angle, det: cur.det, bleedMin: bleed });
+    const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: angleOf(i), det: cur.det, bleedMin: bleed });
     cur.cutCv = p.cv; cur.box = p.box; cur.low = p.low; cur.note = p.note;
     cur.detAngle = p.detAngle; cur.angle = p.angle; cur.rotated = p.rotated; cur.xf = p.xf;
     cur.bleedBox = p.bleedBox;
@@ -12319,6 +12325,10 @@ function buildToolFrameCut() {
     if (!m.nudge) m.nudge = { t: 0, b: 0, l: 0, r: 0 };
     return m.nudge;
   }
+  // 本张手动角度：null/undefined = 这张没有手动角度（自动检测）；数字 = 逐张保存的覆盖值。
+  // 【2026-11-09】角度从 opt（整批共用）迁到 meta（逐张）：批量导出 processOne 用 angleOf(i)，
+  //   每张用各自保存的角度，与预览一致。
+  function angleOf(i) { const m = st.meta[i]; return (m && m.angleM != null) ? m.angleM : null; }
   // 把 nudge 夹回合法范围：不能出画布，也不能把范围压得比 8px 还小。
   // 放在「改完再夹」而不是「边改边夹」—— 拖到极限时四次夹取会互相打架，手感发黏。
   function clampNudge(base, cv, n) {
@@ -12706,26 +12716,53 @@ function buildToolFrameCut() {
   wireStep($('fcEtU'), () => putEndTrim(st.opt.endTrim + 1));
   $('fcTrans').onchange = () => { st.opt.transparent = $('fcTrans').checked; drawPreview(); };
   $('fcDeskew').onchange = () => { st.opt.deskew = $('fcDeskew').checked; applyFrameOpts(false); };
+  // 【2026-11-09 角度逐张化】角度只写当前选中这张的 meta.angleM（逐张保存），
+  //   不再动整批 —— 之前手动角度是整批一个值，样张上拧的角度会被批量导出强加给每张。
   $('fcAngle').oninput = () => {
     const t = $('fcAngle').value.trim();
     const v = parseFloat(t);
-    st.opt.angle = (t === '' || isNaN(v)) ? null : v;
+    const m = st.meta[st.sel] || (st.meta[st.sel] = { status: '待处理', cls: '', outName: '' });
+    if (t === '' || isNaN(v)) delete m.angleM;   // 留空 = 本张回到自动检测
+    else m.angleM = Math.max(-45, Math.min(45, v));
+    syncAngle();
     applyFrameOpts(false);
   };
-  // 手动角度 ±0.5°/格。空着的时候从「本张自动检测到的角度」起算 —— 常见用法是
+  // 手动角度 ±0.5°/格，只改本张。空着的时候从「本张自动检测到的角度」起算 —— 常见用法是
   // 「自动摆正了但还差半度」，这时候要接着它微调，而不是从 0 开始。
   function putAngle(v, clear) {
-    if (clear) { $('fcAngle').value = ''; st.opt.angle = null; }
+    const m = st.meta[st.sel] || (st.meta[st.sel] = { status: '待处理', cls: '', outName: '' });
+    if (clear) { $('fcAngle').value = ''; delete m.angleM; }
     else {
       const a = Math.max(-45, Math.min(45, Math.round(v * 10) / 10));
       $('fcAngle').value = a;
-      st.opt.angle = a;
+      m.angleM = a;
     }
+    syncAngle();
     applyFrameOpts(false);
   }
-  const angNow = () => (st.opt.angle == null ? ((st.cur && st.cur.detAngle) || 0) : st.opt.angle);
+  const angNow = () => {
+    const ma = angleOf(st.sel);
+    return ma != null ? ma : ((st.cur && st.cur.detAngle) || 0);
+  };
+  // 切换图片时把这一张自己的手动角度回填到输入框 + 角标（没有就显示「自动」）。
+  function syncAngle() {
+    const a = angleOf(st.sel);
+    $('fcAngle').value = (a == null ? '' : a);
+    const tag = $('fcAngTag');
+    if (tag) tag.style.display = (a == null) ? 'none' : '';
+  }
   wireStep($('fcAngD'), () => putAngle(angNow() - 0.5));
   wireStep($('fcAngU'), () => putAngle(angNow() + 0.5));
+  $('fcAngAll').onclick = () => {
+    const a = angleOf(st.sel);
+    if (a == null) { log('本张还没有手动角度 —— 先在输入框填角度，再点「套用到全部图片」'); return; }
+    for (let i = 0; i < st.files.length; i++) {
+      const m = st.meta[i] || (st.meta[i] = { status: '待处理', cls: '', outName: '' });
+      m.angleM = a;
+    }
+    syncAngle();
+    log(`已把本张手动角度 ${a}° 套用到全部 ${st.files.length} 张（导出时每张按这个角度摆正）`);
+  };
   // —— 调边辅助（红框常驻可拖，见 drawEdgeView / edgeDrag；没有模式切换） ——
   $('fcEdgeClear').onclick = () => {
     const m = st.meta[st.sel];
@@ -12752,14 +12789,14 @@ function buildToolFrameCut() {
   $('fcRedetect').onclick = () => {
     if (!st.cur) return;
     // 「重新自动识别」= 把这张的手动痕迹全清掉再跑一遍检测。
-    // ⚠️ 只清**本张** —— 别的图的手动边距是用户一张张调出来的，不能被这一下冲掉。
+    // ⚠️ 只清**本张** —— 别的图的手动边距/角度是用户一张张调出来的，不能被这一下冲掉。
     const m = st.meta[st.sel];
-    if (m) delete m.nudge;
+    if (m) { delete m.nudge; delete m.angleM; }
     $('fcAngle').value = '';
-    st.opt.angle = null;
+    syncAngle();
     applyFrameOpts(true);
     renderRows();
-    log(`第 ${st.sel + 1} 张：已重新自动识别（本张的手动边距已清除）`);
+    log(`第 ${st.sel + 1} 张：已重新自动识别（本张的手动边距/角度已清除）`);
   };
   $('fcReset').onclick = () => {
     st.opt.sharpen = st.opt.brightness = st.opt.contrast = st.opt.saturation = st.opt.hue = 0;
@@ -12815,7 +12852,7 @@ function buildToolFrameCut() {
         const dec = await loadCv(f);
         cv = dec.cv;
         if (dec.note) log(`第 ${i + 1} 张：${dec.note}`);
-        const p = prepareFrame(cv, { deskew: st.opt.deskew, angle: st.opt.angle, bleedMin: (st.meta[i] && st.meta[i].bleed) || 0 });
+        const p = prepareFrame(cv, { deskew: st.opt.deskew, angle: angleOf(i), bleedMin: (st.meta[i] && st.meta[i].bleed) || 0 });
         cutCv = p.cv; box = p.box; low = p.low; note = p.note;
       }
       if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
