@@ -12094,9 +12094,10 @@ function buildToolFrameCut() {
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>拖动红色单线框的四边 = 矩形收边（<b>导出 = 红线内原样</b>），<b>拖四个角点</b> = 透视四角各自对齐（框条拍斜了就用这个，导出自动矫正成矩形）· 数值会同步变 · 只作用于本张</span>
+            <span>拖动红色单线框的四边 / 四角 = 矩形调整（<b>导出 = 红线内原样</b>）· 框条拍斜了点<b>透视四角</b>，之后拖四个角点各自对齐，导出自动矫正成矩形 · 数值会同步变 · 只作用于本张</span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
+            <button class="cu-mini" id="fcQuadOn">透视四角（本张）</button>
             <button class="cu-mini" id="fcQuadClear" style="display:none">清除本张透视（回到边距）</button>
           </div>
         </div>
@@ -12576,6 +12577,8 @@ function buildToolFrameCut() {
         + (cur.low ? ' · ' + cur.note : '');
       const qc = $('fcQuadClear');
       if (qc) qc.style.display = '';
+      const qon = $('fcQuadOn');
+      if (qon) qon.style.display = 'none';
       return q;
     }
     // —— 矩形模式（常态）：恢复四边手柄 / 暗罩 / 直线红框 ——
@@ -12585,6 +12588,8 @@ function buildToolFrameCut() {
     ['l', 'r', 't', 'b'].forEach(s => { edgeUI.hs[s].style.display = ''; });
     const qc = $('fcQuadClear');
     if (qc) qc.style.display = 'none';
+    const qon = $('fcQuadOn');
+    if (qon) qon.style.display = '';
     const b = applyNudge(refBox(), cur.cutCv, nudgeOf(st.sel));
     if (!b) return null;
     const k = edgeUI.k, W = cur.cutCv.width * k, H = cur.cutCv.height * k;
@@ -12634,13 +12639,13 @@ function buildToolFrameCut() {
       EH.forEach(([cls, side]) => {
         const d = document.createElement('div');
         d.className = 'cu-eh ' + cls;
-        // 【2026-11-11 透视四角】角点手柄 = 透视入口，边中手柄 = 矩形收边：
-        //   ⚠️ 别写成「quad 已存在才走 cornerDrag」——quad 只能靠拖角创建，那样就死锁了
-        //   （2026-11-11 探针实测：拖角永远落进 edgeDrag 的矩形双轴缩放，四角模式进不去）。
-        //   角点第一次按下时 ensureQuad() 从当前红线框播种（矩形起步），所以手感与旧版拖角一致，
-        //   继续拖就能让这个角独立走位 → 斜边（透视）；想回矩形用「清除本张透视」或边距数值。
+        // 【2026-11-11 二次改版】角点手柄按 quad 状态分流：
+        //   透视模式 → 拖顶点；矩形模式 → 照旧双轴调角。
+        //   ⚠️ 别改成「角点无条件进 quad」——那是上午的第一版，端到端实测用户轻拖角点 10px
+        //   就误入透视模式、四边手柄随即隐藏 → 「调边卡住，只能重新识别」（probe_stuck A/B 复现）。
+        //   quad 的唯一创建入口 = 「透视四角（本张）」按钮（fcQuadOn），显式、可预期。
         d.addEventListener('pointerdown', (e) => {
-          if (side.length === 2) cornerDrag(e, side);
+          if (side.length === 2 && quadLive(st.sel)) cornerDrag(e, side);
           else edgeDrag(e, side);
         });
         wrap.appendChild(d);
@@ -12988,6 +12993,15 @@ function buildToolFrameCut() {
   $('fcQuadClear').onclick = () => {
     if (!clearQuad(st.sel)) { log('本张没有透视四角'); return; }
     drawPreview();
+  };
+  // 【2026-11-11 二次改版】透视四角的唯一创建入口 —— 显式按钮，不靠误碰角点。
+  // 从当前红线框播种（矩形起步），之后四个角点各自走位；导出走 warpQuad 自动矫正。
+  $('fcQuadOn').onclick = () => {
+    if (!st.cur || !st.cur.cutCv) return;
+    if (quadLive(st.sel)) { log('本张已在透视四角模式'); return; }
+    if (!ensureQuad()) { log('本张还没有可用的裁剪框，先等自动识别完成'); return; }
+    drawPreview();
+    log(`第 ${st.sel + 1} 张：进入透视四角模式（拖四个角点各自对齐，导出自动矫正为矩形；「清除本张透视」退出）`);
   };
   $('fcRedetect').onclick = () => {
     if (!st.cur) return;
