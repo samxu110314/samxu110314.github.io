@@ -10190,6 +10190,71 @@ function alphaEndsByTone(a, lum, w, h, ry0, ry1) {
   return { x0: x0, x1: x1 };
 }
 // 按裁剪框 + 参数 + 透明背景，生成最终成品 canvas（原像素尺寸，不缩放）
+// —— 【2026-11-11 透视四角】把画布上的任意四边形（TL,TR,BR,BL）矫正成矩形输出 ——
+// 用户需求：「有透视变形的框条，四角单独调节」。四边形逐张存 meta[i].quad（见 buildToolFrameCut
+// 里 quadOf/ensureQuad），批量导出与本视图同走这一条矫正路。
+// 实现：网格仿射（COLS×ROWS 细分，每格用双线性插值的四角做仿射贴图）——
+//   · 纯 canvas 2D 没有投影变换，整块两三角仿射在对角线处有接缝、误差集中；
+//   · 网格细分后每格误差摊平、相邻格共享同一插值边 → 无缝；
+//   · 输出尺寸 = max(上底,下底) × max(左腰,右腰)，透视收缩的长边不丢像素。
+// 留白（o.pad）= 输出四周的透明圈，与矩形路语义一致；调色（o）走同一 applyPixelAdjust。
+function warpQuad(srcCv, q, o) {
+  const dd = (ax, ay, bx, by) => Math.hypot(bx - ax, by - ay);
+  const dTop = dd(q.x0, q.y0, q.x1, q.y1), dBot = dd(q.x3, q.y3, q.x2, q.y2);
+  const dL = dd(q.x0, q.y0, q.x3, q.y3), dR = dd(q.x1, q.y1, q.x2, q.y2);
+  const dw = Math.max(8, Math.round(Math.max(dTop, dBot)));
+  const dh = Math.max(8, Math.round(Math.max(dL, dR)));
+  const pad = Math.max(0, Math.min(300, (o && o.pad) | 0));
+  const out = document.createElement('canvas');
+  out.width = dw + pad * 2; out.height = dh + pad * 2;
+  const cx = out.getContext('2d');
+  const COLS = Math.max(4, Math.min(48, Math.round(dw / 48)));
+  const ROWS = Math.max(2, Math.min(24, Math.round(dh / 48)));
+  const L = (a, b, t) => a + (b - a) * t;
+  // 四边形上的双ilinear 插值点（u 沿上/下边，v 沿左右腰）
+  const P = (u, v) => ({
+    x: L(L(q.x0, q.x1, u), L(q.x3, q.x2, u), v),
+    y: L(L(q.y0, q.y1, u), L(q.y3, q.y2, u), v),
+  });
+  for (let j = 0; j < ROWS; j++) {
+    for (let i = 0; i < COLS; i++) {
+      const u0 = i / COLS, u1 = (i + 1) / COLS, v0 = j / ROWS, v1 = (j + 1) / ROWS;
+      const ax0 = pad + u0 * dw, ay0 = pad + v0 * dh, ax1 = pad + u1 * dw, ay1 = pad + v1 * dh;
+      const s00 = P(u0, v0), s10 = P(u1, v0), s11 = P(u1, v1), s01 = P(u0, v1);
+      // 一格两三角：dst 三角形 → src 三角形的仿射，clip 在设备空间先画好
+      //（u = a·x + c·y + e，v = b·x + d·y + f；a/d 用 dy 系数、c/b 用 dx 系数 —— 别写串）
+      const tri = (dx0, dy0, dx1, dy1, dx2, dy2, s0, s1, s2) => {
+        const den = dx0 * (dy1 - dy2) + dx1 * (dy2 - dy0) + dx2 * (dy0 - dy1);
+        if (!den) return;
+        const a = (s0.x * (dy1 - dy2) + s1.x * (dy2 - dy0) + s2.x * (dy0 - dy1)) / den;
+        const b = (s0.y * (dy1 - dy2) + s1.y * (dy2 - dy0) + s2.y * (dy0 - dy1)) / den;
+        const c = (s0.x * (dx2 - dx1) + s1.x * (dx0 - dx2) + s2.x * (dx1 - dx0)) / den;
+        const d2 = (s0.y * (dx2 - dx1) + s1.y * (dx0 - dx2) + s2.y * (dx1 - dx0)) / den;
+        const e = s0.x - a * dx0 - c * dy0;
+        const f = s0.y - b * dx0 - d2 * dy0;
+        // 要的是 src→dst（drawImage 在变换后的坐标里绘制）：上面求的是 dst→src，取逆
+        const det = a * d2 - b * c;
+        if (!det) return;
+        const ia = d2 / det, ib = -b / det, ic = -c / det, id2 = a / det;
+        const ie = (c * f - d2 * e) / det, if2 = (b * e - a * f) / det;
+        cx.save();
+        cx.beginPath();
+        cx.moveTo(dx0, dy0); cx.lineTo(dx1, dy1); cx.lineTo(dx2, dy2); cx.closePath();
+        cx.clip();
+        cx.transform(ia, ib, ic, id2, ie, if2);
+        cx.drawImage(srcCv, 0, 0);
+        cx.restore();
+      };
+      tri(ax0, ay0, ax1, ay0, ax0, ay1, s00, s10, s01);
+      tri(ax1, ay0, ax1, ay1, ax0, ay1, s10, s11, s01);
+    }
+  }
+  const id = cx.getImageData(0, 0, out.width, out.height);
+  applyPixelAdjust(id.data, out.width, out.height, o || {});
+  cx.putImageData(id, 0, 0);
+  return out;
+}
+
 function renderCut(frontCv, box, o) {
   const w = Math.max(1, box.x1 - box.x0 + 1), h = Math.max(1, box.y1 - box.y0 + 1);
   const out = document.createElement('canvas');
@@ -12024,9 +12089,10 @@ function buildToolFrameCut() {
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>拖动红色单线框的四边 / 四角即可调整裁切（直接拖、不用点任何按钮），<b>导出 = 红线内原样</b> · 下面数值会同步变 · 只作用于本张</span>
+            <span>拖动红色单线框的四边 = 矩形收边（<b>导出 = 红线内原样</b>），<b>拖四个角点</b> = 透视四角各自对齐（框条拍斜了就用这个，导出自动矫正成矩形）· 数值会同步变 · 只作用于本张</span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
+            <button class="cu-mini" id="fcQuadClear" style="display:none">清除本张透视（回到边距）</button>
           </div>
         </div>
         <div class="cu-side">
@@ -12329,6 +12395,36 @@ function buildToolFrameCut() {
   // 【2026-11-09】角度从 opt（整批共用）迁到 meta（逐张）：批量导出 processOne 用 angleOf(i)，
   //   每张用各自保存的角度，与预览一致。
   function angleOf(i) { const m = st.meta[i]; return (m && m.angleM != null) ? m.angleM : null; }
+  // —— 【2026-11-11 透视四角】逐张 quad（TL,TR,BR,BL 四角，cutCv 画布坐标）——
+  // 与 nudge / angleM 同一套逐张语义。quad.key 是画布指纹（尺寸/是否摆正/角度/余量）：
+  // 画布一变（改角度、重新识别、按需扩画布）key 不匹配 → 失效回退边距模式（quadLive 惰性清理）。
+  // 拖四角手柄时 ensureQuad() 从当前红线框播种；导出 processOne 走 warpQuad 矫正成矩形。
+  function quadOf(i) { const m = st.meta[i]; return (m && m.quad) || null; }
+  function quadKeyOf(w, h, rotated, angle, bleed) {
+    return w + 'x' + h + ':' + (rotated ? 1 : 0) + ':' + (+angle || 0).toFixed(2) + ':' + (bleed || 0);
+  }
+  function curQuadKey() {
+    const cur = st.cur; if (!cur || !cur.cutCv) return '';
+    return quadKeyOf(cur.cutCv.width, cur.cutCv.height, cur.rotated, cur.angle, (st.meta[st.sel] && st.meta[st.sel].bleed) || 0);
+  }
+  function quadLive(i, keyInfo) {
+    const q = quadOf(i); if (!q) return null;
+    if (q.key !== (keyInfo != null ? keyInfo : curQuadKey())) { delete st.meta[i].quad; return null; }
+    return q;
+  }
+  function ensureQuad() {
+    const m = st.meta[st.sel] || (st.meta[st.sel] = { status: '待处理', cls: '', outName: '' });
+    if (m.quad && m.quad.key === curQuadKey()) return m.quad;
+    const b = applyNudge(refBox(), st.cur.cutCv, nudgeOf(st.sel));
+    if (!b) return null;
+    m.quad = { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y0, x2: b.x1, y2: b.y1, x3: b.x0, y3: b.y1, key: curQuadKey() };
+    return m.quad;
+  }
+  function clearQuad(i, why) {
+    const m = st.meta[i];
+    if (m && m.quad) { delete m.quad; log(why || `第 ${i + 1} 张：已退出透视四角（回到边距模式）`); renderRows(); return true; }
+    return false;
+  }
   // 把 nudge 夹回合法范围：不能出画布，也不能把范围压得比 8px 还小。
   // 放在「改完再夹」而不是「边改边夹」—— 拖到极限时四次夹取会互相打架，手感发黏。
   function clampNudge(base, cv, n) {
@@ -12450,6 +12546,40 @@ function buildToolFrameCut() {
   function edgeLayout() {
     const cur = st.cur;
     if (!edgeUI || !cur || !cur.cutCv) return null;
+    const quadHad = quadOf(st.sel);
+    const q = quadLive(st.sel);
+    if (quadHad && !q) log(`第 ${st.sel + 1} 张：画布已变（改角度 / 重新识别 / 扩画布），旧透视四角已失效`);
+    if (q) {
+      // —— 透视四角模式：红框变成四边形，四角手柄各拖各的；四边手柄/暗罩隐藏 ——
+      const k = edgeUI.k;
+      const pts = [[q.x0, q.y0], [q.x1, q.y1], [q.x2, q.y2], [q.x3, q.y3]];
+      const poly = edgeUI.svg.firstElementChild || edgeUI.svg.firstChild;
+      if (poly) poly.setAttribute('points', pts.map(p => (p[0] * k) + ',' + (p[1] * k)).join(' '));
+      edgeUI.svg.style.display = '';
+      edgeUI.line.style.display = 'none';
+      edgeUI.dims.forEach(d => { d.style.display = 'none'; });
+      const set = (el, s) => { for (const p in s) el.style[p] = s[p]; };
+      ['l', 'r', 't', 'b'].forEach(s => { edgeUI.hs[s].style.display = 'none'; });
+      set(edgeUI.hs.tl, { left: (q.x0 * k - 6) + 'px', top: (q.y0 * k - 6) + 'px' });
+      set(edgeUI.hs.tr, { left: (q.x1 * k - 5) + 'px', top: (q.y1 * k - 6) + 'px' });
+      set(edgeUI.hs.br, { left: (q.x2 * k - 5) + 'px', top: (q.y2 * k - 5) + 'px' });
+      set(edgeUI.hs.bl, { left: (q.x3 * k - 6) + 'px', top: (q.y3 * k - 5) + 'px' });
+      const dT = Math.hypot(q.x1 - q.x0, q.y1 - q.y0), dB = Math.hypot(q.x2 - q.x3, q.y2 - q.y3);
+      const dL = Math.hypot(q.x3 - q.x0, q.y3 - q.y0), dR = Math.hypot(q.x2 - q.x1, q.y2 - q.y1);
+      const dW = Math.round(Math.max(dT, dB)), dH = Math.round(Math.max(dL, dR));
+      $('fcBoxInfo').textContent = `透视裁切（四角） ${dW}×${dH} px = 导出尺寸 · 拖四个角点各自对齐`
+        + (cur.low ? ' · ' + cur.note : '');
+      const qc = $('fcQuadClear');
+      if (qc) qc.style.display = '';
+      return q;
+    }
+    // —— 矩形模式（常态）：恢复四边手柄 / 暗罩 / 直线红框 ——
+    edgeUI.svg.style.display = 'none';
+    edgeUI.line.style.display = '';
+    edgeUI.dims.forEach(d => { d.style.display = ''; });
+    ['l', 'r', 't', 'b'].forEach(s => { edgeUI.hs[s].style.display = ''; });
+    const qc = $('fcQuadClear');
+    if (qc) qc.style.display = 'none';
     const b = applyNudge(refBox(), cur.cutCv, nudgeOf(st.sel));
     if (!b) return null;
     const k = edgeUI.k, W = cur.cutCv.width * k, H = cur.cutCv.height * k;
@@ -12499,16 +12629,38 @@ function buildToolFrameCut() {
       EH.forEach(([cls, side]) => {
         const d = document.createElement('div');
         d.className = 'cu-eh ' + cls;
-        d.addEventListener('pointerdown', (e) => edgeDrag(e, side));
+        // 【2026-11-11 透视四角】角点手柄 = 透视入口，边中手柄 = 矩形收边：
+        //   ⚠️ 别写成「quad 已存在才走 cornerDrag」——quad 只能靠拖角创建，那样就死锁了
+        //   （2026-11-11 探针实测：拖角永远落进 edgeDrag 的矩形双轴缩放，四角模式进不去）。
+        //   角点第一次按下时 ensureQuad() 从当前红线框播种（矩形起步），所以手感与旧版拖角一致，
+        //   继续拖就能让这个角独立走位 → 斜边（透视）；想回矩形用「清除本张透视」或边距数值。
+        d.addEventListener('pointerdown', (e) => {
+          if (side.length === 2) cornerDrag(e, side);
+          else edgeDrag(e, side);
+        });
         wrap.appendChild(d);
         hs[side] = d;
       });
+      // 透视四边形红线（SVG polygon）：quad 模式替代 cu-eline；pointer-events:none 不挡拖拽
+      // ⚠️ 测试桩没有 createElementNS → 兜底用 div + setAttribute（探针/浏览器走真 SVG）
+      let svg = null;
+      try {
+        const NS = 'http://www.w3.org/2000/svg';
+        svg = document.createElementNS ? document.createElementNS(NS, 'svg') : document.createElement('div');
+        svg.setAttribute('class', 'cu-eq');
+        const poly = svg.tagName === 'svg' ? document.createElementNS(NS, 'polygon') : document.createElement('div');
+        poly.setAttribute('class', 'cu-eq-poly');
+        poly.setAttribute('style', 'fill:none;stroke:rgba(231,76,60,.95);stroke-width:2;vector-effect:non-scaling-stroke');
+        svg.appendChild(poly);
+      } catch (_) { svg = document.createElement('div'); svg.setAttribute('class', 'cu-eq'); }
+      svg.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;display:none';
+      wrap.appendChild(svg);
       // 单线红框：画在真实裁剪边界上（edgeLayout 同步位置），pointer-events:none 不挡拖拽
       const line = document.createElement('div');
       line.className = 'cu-eline';
       wrap.appendChild(line);
       stage.appendChild(wrap);
-      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs, line: line };
+      edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs, line: line, svg: svg };
       st.liveCanvas = cv;
     }
     edgeUI.cv.style.filter = toneFilter(st.opt);
@@ -12560,6 +12712,45 @@ function buildToolFrameCut() {
         const sf = wantedShortfall(refBox(), cur.cutCv, desired, st.opt.pad);
         if (Math.max(sf.t, sf.b, sf.l, sf.r) > 0) scheduleRecut(desired);
       }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  // 【2026-11-11 透视四角】拖一个角点：只改 quad 顶点 + 覆盖层，不重画图像 → 跟手。
+  // 第一次拖时从当前红线框播种 quad（矩形起步），之后这个顶点就各走各的。
+  function cornerDrag(ev, side) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const cur = st.cur;
+    if (!cur || !cur.cutCv || !edgeUI) return;
+    // 按下前是否本来就有有效 quad —— 用来区分「真的在拖」和「只是点了一下」
+    const hadQuad = !!quadLive(st.sel);
+    const q = ensureQuad();
+    if (!q) return;
+    const k = edgeUI.k;
+    const idx = { tl: 0, tr: 1, br: 2, bl: 3 }[side];
+    const keys = [['x0', 'y0'], ['x1', 'y1'], ['x2', 'y2'], ['x3', 'y3']][idx];
+    const sx = ev.clientX, sy = ev.clientY;
+    const v0 = { x: q[keys[0]], y: q[keys[1]] };
+    const W = cur.cutCv.width, H = cur.cutCv.height;
+    let dirty = false;
+    const move = (e) => {
+      q[keys[0]] = Math.max(0, Math.min(W - 1, Math.round(v0.x + (e.clientX - sx) / k)));
+      q[keys[1]] = Math.max(0, Math.min(H - 1, Math.round(v0.y + (e.clientY - sy) / k)));
+      dirty = true;
+      edgeLayout();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      // 只是点了一下、没拖动：别把刚播种的 quad 留在 meta 里（否则读数会莫名其妙跳成
+      // 「透视裁切（四角）」且导出凭空多走一次重采样）
+      if (!dirty) {
+        if (!hadQuad) { delete st.meta[st.sel].quad; renderRows(); edgeLayout(); }
+        return;
+      }
+      renderRows();
+      log(`第 ${st.sel + 1} 张：透视四角调整（${side.toUpperCase()} → ${q[keys[0]]},${q[keys[1]]}，只作用于本张，导出自动矫正为矩形）`);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -12659,6 +12850,9 @@ function buildToolFrameCut() {
     const [id, key] = s.split('|');
     const el = $(id);
     const put = (v) => {
+      // 【2026-11-11 透视四角】边距与透视互斥：改边距 = 放弃这张的四边形，回到红线矩形。
+      // quad 是从红线框播种的，删掉后 nudge 原样还在 —— 无缝回到拖角前的矩形。
+      clearQuad(st.sel);
       const n = ensureNudge(st.sel);
       const was = n.t + ',' + n.b + ',' + n.l + ',' + n.r;
       n[key] = Math.round(v) || 0;
@@ -12786,12 +12980,16 @@ function buildToolFrameCut() {
     renderRows();
     log(`已把手动边距（上 ${n.t} / 下 ${n.b} / 左 ${n.l} / 右 ${n.r} px）套用到全部 ${st.files.length} 张`);
   };
+  $('fcQuadClear').onclick = () => {
+    if (!clearQuad(st.sel)) { log('本张没有透视四角'); return; }
+    drawPreview();
+  };
   $('fcRedetect').onclick = () => {
     if (!st.cur) return;
     // 「重新自动识别」= 把这张的手动痕迹全清掉再跑一遍检测。
-    // ⚠️ 只清**本张** —— 别的图的手动边距/角度是用户一张张调出来的，不能被这一下冲掉。
+    // ⚠️ 只清**本张** —— 别的图的手动边距/角度/透视是用户一张张调出来的，不能被这一下冲掉。
     const m = st.meta[st.sel];
-    if (m) { delete m.nudge; delete m.angleM; }
+    if (m) { delete m.nudge; delete m.angleM; delete m.quad; }
     $('fcAngle').value = '';
     syncAngle();
     applyFrameOpts(true);
@@ -12845,6 +13043,7 @@ function buildToolFrameCut() {
     const reuse = (i === st.sel && st.cur && st.cur.cutCv) ? st.cur : null;
     let cv = null, cutCv = reuse ? reuse.cutCv : null, box = reuse ? reuse.box : null;
     let low = reuse ? reuse.low : false, note = reuse ? reuse.note : '';
+    let rotV = reuse ? reuse.rotated : 0, angV = reuse ? reuse.angle : 0;
     try {
       if (!reuse) {
         // ⚠️ 解码必须放在 try 里：早前它在 try 外面，一张解不开的图会把整个批量导出**中断**掉
@@ -12854,15 +13053,25 @@ function buildToolFrameCut() {
         if (dec.note) log(`第 ${i + 1} 张：${dec.note}`);
         const p = prepareFrame(cv, { deskew: st.opt.deskew, angle: angleOf(i), bleedMin: (st.meta[i] && st.meta[i].bleed) || 0 });
         cutCv = p.cv; box = p.box; low = p.low; note = p.note;
+        rotV = p.rotated; angV = p.angle;
       }
       if (!box) { setStatus(i, '跳过：没识别到框条', 'err'); log(`第 ${i + 1} 张：没识别到框条，已跳过`); return null; }
+      // —— 【2026-11-11 透视四角】本张有 quad 且画布指纹匹配 → 网格仿射矫正导出 ——
+      //   与预览同一个 quad（quadKey 绑画布指纹），看到什么导出什么；指纹不匹配（改了角度/
+      //   重新识别/扩过画布）自动失效回退矩形路，不会拿旧坐标乱切。
+      const quadHad = quadOf(i);
+      const qd = quadHad ? quadLive(i, quadKeyOf(cutCv.width, cutCv.height, rotV, angV, (st.meta[i] && st.meta[i].bleed) || 0)) : null;
+      if (quadHad && !qd) log(`第 ${i + 1} 张：画布已变，旧透视四角已失效（按矩形边距导出）`);
+      let out = null;
+      if (qd) {
+        out = warpQuad(cutCv, qd, st.opt);
+      }
       // 逐张的边距（手动调边 / ± 按钮）：以「自动收边后的框」为基准，与预览走同一套
       //（基准为什么不是检测框，见 refBox 的注释）。
       // 没有手动值就完全按自动结果 —— 与预览逐像素一致。
       const nz = nudgeOf(i);
       const manual = !!((nz && (nz.t || nz.b || nz.l || nz.r)) || st.opt.pad);
-      let out = null;
-      if (manual) {
+      if (manual && !out) {
         const ob = {};
         renderCut(cutCv, box, Object.assign({}, st.opt, { outBox: ob }));   // 先量出基准
         const rb = { x0: ob.x0, y0: ob.y0, x1: ob.x1, y1: ob.y1 };
@@ -14645,7 +14854,7 @@ if (typeof globalThis !== 'undefined') {
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg, narrowByStrongS,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, warpQuad, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
