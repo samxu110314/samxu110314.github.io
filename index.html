@@ -14251,7 +14251,11 @@ function buildToolFrameSearch() {
     renderMore();
   }
   function ensure() {
-    const a = FS_CUR || FS_ARCHIVES[0];
+    // 【2026-11-11 报障】默认直接选中第一个栏目 —— 旧版 FS_CUR 初始为 null，fetch 成功后
+    //   `FS_CUR && FS_CUR.id === a.id` 不成立 → 索引下载了却从不构建，底部永远「正在载入」、
+    //   搜索空转，必须手点一次栏目才活。这里进来就定默认档案；完成回调只在「已切走」时跳过。
+    if (!FS_CUR) FS_CUR = FS_ARCHIVES[0];
+    const a = FS_CUR;
     if (FS_N && FS_LOADED === a.id) return Promise.resolve(FS_DATA);
     if (FS_PROM) return FS_PROM;
     if (typeof fetch !== 'function') {
@@ -14264,6 +14268,7 @@ function buildToolFrameSearch() {
       return r.json();
     }).then(function (d) {
       FS_CACHE[a.id] = d;
+      // 只在用户没有中途切到别的档案时落位（FS_CUR 已在 ensure 入口兜底为默认档案）
       if (FS_CUR && FS_CUR.id === a.id) { fsBuildIndex(d, a); fillSelects(); run(); fillTabs(); }
       return d;
     }).catch(function (e) {
