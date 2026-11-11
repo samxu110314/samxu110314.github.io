@@ -5161,6 +5161,7 @@ function buildToolContainer() {
 const TZ_CITIES = [
   { city: '北京 / 上海', sub: 'China', zone: 'Asia/Shanghai' },
   { city: '东京', sub: 'Japan', zone: 'Asia/Tokyo' },
+  { city: '胡志明市', sub: 'Vietnam', zone: 'Asia/Ho_Chi_Minh' },
   { city: '迪拜', sub: 'UAE', zone: 'Asia/Dubai' },
   { city: '米兰', sub: 'Italy', zone: 'Europe/Rome' },
   { city: '法兰克福', sub: 'Germany', zone: 'Europe/Berlin' },
@@ -5179,10 +5180,15 @@ function zoneOffsetMin(zone, d) {
   } catch (_) { return null; }
 }
 function fmtOffsetDiff(min) {
+  // 【2026-11-11 报障修复】旧版把字符串喂给 Math.abs：txt = '1h' / '-2.5h'，
+  //   Math.abs('1h') = NaN → 面板上所有城市都显示「早/晚 NaNh」。
+  //   先取绝对值再格式化；顺带支持半小时/三刻度时区（印度 +5:30、尼泊尔 +5:45）→ 2h30m。
+  if (min == null || !isFinite(min)) return '—';
   if (min === 0) return '同时区';
-  const h = min / 60;
-  const txt = Number.isInteger(h) ? h + 'h' : h.toFixed(1) + 'h';
-  return (min > 0 ? '早 ' : '晚 ') + Math.abs(txt);
+  const abs = Math.abs(min);
+  const hh = Math.floor(abs / 60), mm = abs % 60;
+  const txt = mm === 0 ? hh + 'h' : (hh ? hh + 'h' + mm + 'm' : mm + 'm');
+  return (min > 0 ? '早 ' : '晚 ') + txt;
 }
 // 生成一枚实体钟表的 SVG 骨架（指针初始指向 12 点，之后只改 transform）
 function tzClockSvg() {
