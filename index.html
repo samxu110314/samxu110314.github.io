@@ -10193,9 +10193,12 @@ function alphaEndsByTone(a, lum, w, h, ry0, ry1) {
 // —— 【2026-11-11 透视四角】把画布上的任意四边形（TL,TR,BR,BL）矫正成矩形输出 ——
 // 用户需求：「有透视变形的框条，四角单独调节」。四边形逐张存 meta[i].quad（见 buildToolFrameCut
 // 里 quadOf/ensureQuad），批量导出与本视图同走这一条矫正路。
-// 实现：网格仿射（COLS×ROWS 细分，每格用双线性插值的四角做仿射贴图）——
-//   · 纯 canvas 2D 没有投影变换，整块两三角仿射在对角线处有接缝、误差集中；
-//   · 网格细分后每格误差摊平、相邻格共享同一插值边 → 无缝；
+// 实现：【2026-11-11 网格线报障】逐像素逆映射 ——
+//   · 旧版「每格 clip+drawImage 仿射」在格子边界和三角对角线上留发丝缝，
+//     导出图上是斜向交叉网格线（实测纯色输入 14 万缝像素、最大偏差 85/255）；
+//   · 输出网格是规则矩形 → 每个像素的 (u,v) 精确已知 → 双线性插回源 quad 上的点 →
+//     源图双线性采样。整幅一次成像，没有 clip、没有三角形，接缝从机制上不存在；
+//   · 顺带把仿射+最近邻升级成双线性采样，斜边与文字更平滑；
 //   · 输出尺寸 = max(上底,下底) × max(左腰,右腰)，透视收缩的长边不丢像素。
 // 留白（o.pad）= 输出四周的透明圈，与矩形路语义一致；调色（o）走同一 applyPixelAdjust。
 function warpQuad(srcCv, q, o) {
@@ -10208,6 +10211,8 @@ function warpQuad(srcCv, q, o) {
   const out = document.createElement('canvas');
   out.width = dw + pad * 2; out.height = dh + pad * 2;
   const cx = out.getContext('2d');
+  const sw = srcCv.width, sh = srcCv.height;
+  const src = srcCv.getContext('2d').getImageData(0, 0, sw, sh).data;
   const COLS = Math.max(4, Math.min(48, Math.round(dw / 48)));
   const ROWS = Math.max(2, Math.min(24, Math.round(dh / 48)));
   const L = (a, b, t) => a + (b - a) * t;
@@ -10216,40 +10221,40 @@ function warpQuad(srcCv, q, o) {
     x: L(L(q.x0, q.x1, u), L(q.x3, q.x2, u), v),
     y: L(L(q.y0, q.y1, u), L(q.y3, q.y2, u), v),
   });
-  for (let j = 0; j < ROWS; j++) {
-    for (let i = 0; i < COLS; i++) {
-      const u0 = i / COLS, u1 = (i + 1) / COLS, v0 = j / ROWS, v1 = (j + 1) / ROWS;
-      const ax0 = pad + u0 * dw, ay0 = pad + v0 * dh, ax1 = pad + u1 * dw, ay1 = pad + v1 * dh;
-      const s00 = P(u0, v0), s10 = P(u1, v0), s11 = P(u1, v1), s01 = P(u0, v1);
-      // 一格两三角：dst 三角形 → src 三角形的仿射，clip 在设备空间先画好
-      //（u = a·x + c·y + e，v = b·x + d·y + f；a/d 用 dy 系数、c/b 用 dx 系数 —— 别写串）
-      const tri = (dx0, dy0, dx1, dy1, dx2, dy2, s0, s1, s2) => {
-        const den = dx0 * (dy1 - dy2) + dx1 * (dy2 - dy0) + dx2 * (dy0 - dy1);
-        if (!den) return;
-        const a = (s0.x * (dy1 - dy2) + s1.x * (dy2 - dy0) + s2.x * (dy0 - dy1)) / den;
-        const b = (s0.y * (dy1 - dy2) + s1.y * (dy2 - dy0) + s2.y * (dy0 - dy1)) / den;
-        const c = (s0.x * (dx2 - dx1) + s1.x * (dx0 - dx2) + s2.x * (dx1 - dx0)) / den;
-        const d2 = (s0.y * (dx2 - dx1) + s1.y * (dx0 - dx2) + s2.y * (dx1 - dx0)) / den;
-        const e = s0.x - a * dx0 - c * dy0;
-        const f = s0.y - b * dx0 - d2 * dy0;
-        // 要的是 src→dst（drawImage 在变换后的坐标里绘制）：上面求的是 dst→src，取逆
-        const det = a * d2 - b * c;
-        if (!det) return;
-        const ia = d2 / det, ib = -b / det, ic = -c / det, id2 = a / det;
-        const ie = (c * f - d2 * e) / det, if2 = (b * e - a * f) / det;
-        cx.save();
-        cx.beginPath();
-        cx.moveTo(dx0, dy0); cx.lineTo(dx1, dy1); cx.lineTo(dx2, dy2); cx.closePath();
-        cx.clip();
-        cx.transform(ia, ib, ic, id2, ie, if2);
-        cx.drawImage(srcCv, 0, 0);
-        cx.restore();
-      };
-      tri(ax0, ay0, ax1, ay0, ax0, ay1, s00, s10, s01);
-      tri(ax1, ay0, ax1, ay1, ax0, ay1, s10, s11, s01);
+  // 源 quad 网格角点预计算（(COLS+1)×(ROWS+1)，与旧网格同一细分语义）
+  const gx = new Float64Array((COLS + 1) * (ROWS + 1));
+  const gy = new Float64Array((COLS + 1) * (ROWS + 1));
+  for (let j = 0; j <= ROWS; j++)
+    for (let i = 0; i <= COLS; i++) { const p = P(i / COLS, j / ROWS); gx[j * (COLS + 1) + i] = p.x; gy[j * (COLS + 1) + i] = p.y; }
+  const id = cx.getImageData(0, 0, out.width, out.height);
+  const dst = id.data, ow = out.width;
+  for (let py = 0; py < dh; py++) {
+    const vv = py / dh * ROWS;
+    let j = Math.floor(vv); if (j >= ROWS) j = ROWS - 1;
+    const s = vv - j, rowA = j * (COLS + 1), rowB = rowA + (COLS + 1);
+    const dRow = (py + pad) * ow + pad;
+    for (let px = 0; px < dw; px++) {
+      const uu = px / dw * COLS;
+      let i = Math.floor(uu); if (i >= COLS) i = COLS - 1;
+      const t = uu - i;
+      // 目标格内 (t,s) 双线性 → 源 quad 上的点（四角权重 (1-t)(1-s) 等）
+      const w00 = (1 - t) * (1 - s), w10 = t * (1 - s), w01 = (1 - t) * s, w11 = t * s;
+      const ia = rowA + i;
+      const sx = gx[ia] * w00 + gx[ia + 1] * w10 + gx[rowB + i] * w01 + gx[rowB + i + 1] * w11;
+      const sy = gy[ia] * w00 + gy[ia + 1] * w10 + gy[rowB + i] * w01 + gy[rowB + i + 1] * w11;
+      // 源图双线性采样（夹到图内；图外区域 alpha=0 本来就是留白/余量）
+      let fx = sx < 0 ? 0 : (sx > sw - 1 ? sw - 1 : sx);
+      let fy = sy < 0 ? 0 : (sy > sh - 1 ? sh - 1 : sy);
+      const x0i = fx | 0, y0i = fy | 0;
+      const x1i = x0i + 1 < sw ? x0i + 1 : x0i, y1i = y0i + 1 < sh ? y0i + 1 : y0i;
+      const tx = fx - x0i, ty = fy - y0i;
+      const i00 = (y0i * sw + x0i) * 4, i10 = (y0i * sw + x1i) * 4, i01 = (y1i * sw + x0i) * 4, i11 = (y1i * sw + x1i) * 4;
+      const di = (dRow + px) * 4;
+      for (let c = 0; c < 4; c++)
+        dst[di + c] = (src[i00 + c] * (1 - tx) + src[i10 + c] * tx) * (1 - ty)
+          + (src[i01 + c] * (1 - tx) + src[i11 + c] * tx) * ty;
     }
   }
-  const id = cx.getImageData(0, 0, out.width, out.height);
   applyPixelAdjust(id.data, out.width, out.height, o || {});
   cx.putImageData(id, 0, 0);
   return out;
