@@ -14904,6 +14904,19 @@ if (typeof globalThis !== 'undefined') {
 }
 
 init();
+
+// 【2026-11-11】构建号标记 —— 排查「改了没生效」：GitHub Pages 的 index.html 有 10 分钟缓存，
+// 浏览器可能还在跑旧 JS。右下角小字 + console 各打一份，眼见为实。
+(function () {
+  var BUILD = 'build 2026-11-11b（透视导出无缝版）';
+  try { console.log('[WB] ' + BUILD); } catch (_) {}
+  try {
+    var tag = document.createElement('div');
+    tag.textContent = BUILD;
+    tag.style.cssText = 'position:fixed;right:10px;bottom:8px;z-index:99999;font:10px/1.4 -apple-system,sans-serif;color:#888;opacity:.45;pointer-events:none;user-select:none';
+    document.body.appendChild(tag);
+  } catch (_) {} // 测试桩/极端环境下静默：构建号是纯装饰
+})();
 </script>
 </body>
 </html>
