@@ -1751,6 +1751,10 @@ function normalizeTask(t) {
     title: t.title || '', sub: t.sub || [], status, progress,
     planStart: t.planStart || '', planEnd: t.planEnd || '',
     doneAt: status === 'done' ? (t.doneAt || null) : null,
+    // 【2026-11-12 报障】paused 必须保留：normalizeColumns 是云端推送/拉取/本地重灌的公共路径，
+    //   这里白名单漏掉 paused → 20 秒后 cloudTick 自动拉取用洗过的云端数据覆盖本地，
+    //   暂停的任务「自己蹦回来」。往任务上加新字段必须同步维护这张白名单。
+    paused: !!t.paused,
   };
 }
 
@@ -14903,6 +14907,7 @@ async function init() {
 if (typeof globalThis !== 'undefined') {
   globalThis.__WB = {
     getCOLUMNS: () => COLUMNS,
+    normalizeTask, normalizeColumns,
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     revertDoneTask, enableDoneRevert, applyProgress, setStatus, inputProgress, adjustProgress,
     switchView, tryLogin, tryRegister, doLogout, changePassword,
