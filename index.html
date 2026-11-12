@@ -5407,16 +5407,23 @@ function buildToolCalc() {
   const body = box.querySelector('#tcBody');
   const focusBody = () => { if (body && body.focus) body.focus(); }; // DOM 桩没有 focus，别让它炸
   let expr = '';
+  let lastEq = null;   // 【2026-11-12】刚按完 = 的那一单：{ e: 完整算式, v: 结果 } —— 屏幕继续显示「算式 = 结果」
   const hist = [];
 
   const render = () => {
     const v = calcEval(expr);
     const tail = calcTail(expr);
     // 上方小字：完整算式；算式能求值且不等于正在输入的尾段时，右侧补一个浅色预览
-    let top = expr || '';
-    if (v !== null && top && tail !== top) top += '  = ' + calcFmt(v);
-    exprEl.textContent = top;
-    valEl.textContent = tail !== null ? calcFmt(parseFloat(tail)) : (v !== null ? calcFmt(v) : '0');
+    // 按 = 后（expr 还没被动过）整屏保持「原算式 = 结果」，不能只剩光秃秃的结果（用户 2026-11-12 报）
+    if (lastEq && expr === String(lastEq.v)) {
+      exprEl.textContent = lastEq.e + '  =  ' + calcFmt(lastEq.v);
+      valEl.textContent = calcFmt(lastEq.v);
+    } else {
+      let top = expr || '';
+      if (v !== null && top && tail !== top) top += '  = ' + calcFmt(v);
+      exprEl.textContent = top;
+      valEl.textContent = tail !== null ? calcFmt(parseFloat(tail)) : (v !== null ? calcFmt(v) : '0');
+    }
     histEl.innerHTML = hist.length
       ? hist.map(h => '<div class="calc-hist-item" data-e="' + esc(h.e) + '" title="点击回填"><span>' + esc(h.shown) + '</span><b>' + esc(h.res) + '</b></div>').join('')
       : '<div class="calc-empty">还没有记录</div>';
@@ -5427,17 +5434,20 @@ function buildToolCalc() {
   };
 
   const push = (k) => {
-    if (k === 'AC') { expr = ''; render(); return; }
-    if (k === '⌫') { expr = expr.slice(0, -1); render(); return; }
+    if (k === 'AC') { expr = ''; lastEq = null; render(); return; }
+    if (k === '⌫') { expr = expr.slice(0, -1); lastEq = null; render(); return; }
     if (k === '=') {
       const v = calcEval(expr);
       if (v !== null) {
         hist.unshift({ e: String(v), shown: expr, res: calcFmt(v) });
         if (hist.length > 6) hist.pop();
+        lastEq = { e: expr, v: v };   // 屏幕继续显示「算式 = 结果」
         expr = String(v);
       }
       render(); return;
     }
+    // 任何新输入都翻篇（= 后接着按运算符 = 拿结果续算；按数字 = 全新一轮）
+    lastEq = null;
     if (k === '%') { // 当前数字段直接换算成百分数
       const m = expr.match(/(\d+(?:\.\d*)?|\.\d+)$/);
       if (m) { const v = parseFloat(m[1]) / 100; expr = expr.slice(0, expr.length - m[1].length) + String(v); }
