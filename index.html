@@ -252,6 +252,14 @@
   }
   .task:hover { box-shadow: var(--shadow-hover); }
   .task.doing { border-left: 3px solid var(--c-sales); background: #f0f7fd; }
+  /* 【2026-11-12 暂停/重启】紧急任务插队时把被顶掉的任务按住：沉底 + 置灰 + ⏸ 徽章 */
+  .task.paused { opacity: 0.55; background: #f1f2f4; }
+  .task.paused .title { color: var(--text-light); }
+  .task.paused:hover { opacity: 0.85; }
+  .paused-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; flex-shrink: 0;
+    background: #eceef0; color: #6b757e; border: 1px dashed #b9c0c7; white-space: nowrap;
+  }
   .task .checkbox {
     width: 20px; height: 20px; border: 2px solid #ccc; border-radius: 5px; flex-shrink: 0;
     cursor: pointer; margin-top: 1px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;
@@ -2374,7 +2382,8 @@ function buildDatesRow(task, col, readonly) {
 
 function buildTaskEl(task, col, readonly) {
   const taskEl = document.createElement('div');
-  taskEl.className = 'task' + (task.status === 'done' ? ' done' : '') + (task.status === 'doing' ? ' doing' : '');
+  taskEl.className = 'task' + (task.status === 'done' ? ' done' : '') + (task.status === 'doing' ? ' doing' : '')
+    + (task.paused ? ' paused' : '');
 
   const checkbox = document.createElement('div');
   checkbox.className = 'checkbox';
@@ -2404,6 +2413,14 @@ function buildTaskEl(task, col, readonly) {
 
   top.appendChild(titleEl);
   top.appendChild(chip);
+  // 【2026-11-12 暂停/重启】暂停徽章（排在状态徽章后面）
+  if (task.paused) {
+    const pausedChip = document.createElement('span');
+    pausedChip.className = 'paused-chip';
+    pausedChip.textContent = '⏸ 已暂停';
+    pausedChip.title = '该任务已暂停：排在本列最底部，点 ▶ 重启';
+    top.appendChild(pausedChip);
+  }
   content.appendChild(top);
 
   if (task.sub && task.sub.length > 0) {
@@ -2457,6 +2474,12 @@ function buildTaskEl(task, col, readonly) {
   const tools = document.createElement('div');
   tools.style.cssText = 'display:flex;align-items:center;gap:2px;margin-left:auto;flex-shrink:0;';
   if (!readonly) {
+    // 【2026-11-12 暂停/重启】⏸ 暂停 → 沉到本列最底部并标记；▶ 重启 → 恢复
+    const pauseBtn = document.createElement('button');
+    pauseBtn.className = 'edit-btn';
+    pauseBtn.textContent = task.paused ? '▶' : '⏸';
+    pauseBtn.title = task.paused ? '重启：恢复正常排序与显示' : '暂停：排到本列最底部并标记（有紧急任务插队时用）';
+    pauseBtn.onclick = () => { task.paused = !task.paused; saveData(); renderBoard(); };
     const editBtn = document.createElement('button');
     editBtn.className = 'edit-btn';
     editBtn.textContent = '✎';
@@ -2472,6 +2495,7 @@ function buildTaskEl(task, col, readonly) {
       saveData();
       renderBoard();
     };
+    tools.appendChild(pauseBtn);
     tools.appendChild(editBtn);
     tools.appendChild(delBtn);
   }
@@ -2690,7 +2714,10 @@ function renderBoard() {
 
   cols.forEach(col => {
     const doneInCol = col.tasks.filter(t => t.status === 'done').length;
-    const activeTasks = col.tasks.filter(t => t.status !== 'done').slice().sort((a, b) => b.progress - a.progress);
+    // 【2026-11-12 暂停/重启】排到队尾的暂停任务（paused 沉底，其余仍按进度降序）
+    const activeTasks = col.tasks.filter(t => t.status !== 'done').slice()
+      .sort((a, b) => (a.paused ? 1 : 0) - (b.paused ? 1 : 0) || b.progress - a.progress);
+    const pausedInCol = activeTasks.filter(t => t.paused).length;
     const colProgress = col.tasks.length ? Math.round(col.tasks.reduce((a, t) => a + t.progress, 0) / col.tasks.length) : 0;
 
     const colEl = document.createElement('div');
@@ -2740,7 +2767,9 @@ function renderBoard() {
     countRow.className = 'count-row';
     const count = document.createElement('span');
     count.className = 'count';
-    count.textContent = `${activeTasks.length} 进行中 · 已完成 ${doneInCol}`;
+    // 暂停任务不算「进行中」，单独计数
+    count.textContent = `${activeTasks.length - pausedInCol} 进行中`
+      + (pausedInCol ? ` · 暂停 ${pausedInCol}` : '') + ` · 已完成 ${doneInCol}`;
     count.title = count.textContent;
     countRow.appendChild(count);
 
