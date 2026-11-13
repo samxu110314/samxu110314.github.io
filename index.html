@@ -14983,15 +14983,34 @@ if (typeof globalThis !== 'undefined') {
 
 init();
 
-// 【2026-11-11】构建号标记 —— 排查「改了没生效」：GitHub Pages 的 index.html 有 10 分钟缓存，
-// 浏览器可能还在跑旧 JS。右下角小字 + console 各打一份，眼见为实。
+// 【2026-11-11】构建号 + 更新日志 —— 排查「改了没生效」：GitHub Pages 的 index.html 有 10 分钟缓存，
+// 浏览器可能还在跑旧 JS。右下角常显最新一条（日期 + 本版主要内容），点击展开/收起历史日志。
+// ⚠️ 每次发版要在 CHANGELOG 最上面加一条 {d:'YYYY-MM-DD', t:'本版改了什么（简述）'}，日期用当天。
 (function () {
-  var BUILD = 'build 2026-11-11b（透视导出无缝版）';
+  var CHANGELOG = [
+    { d: '2026-11-13', t: '计算器：算式输一半就实时出结果（不用按 =）；历史多行「算式 = 结果」、点击回填算式；= 后按数字开新一轮' },
+    { d: '2026-11-12', t: '任务暂停/重启（⏸ 沉底标记 ▶ 复原）；档案检索默认选中第一个栏目；全球时差修 NaN + 新增越南；色值转换卡文案改「色号识别/Pantone色值」；计算器屏幕保留完整算式' },
+    { d: '2026-11-11', t: '框条抠图：透视四角单独调节（导出自动矫正为矩形）+ 修透视导出交叉网格线；修误碰角点锁死调边' },
+  ];
+  var BUILD = 'build ' + CHANGELOG[0].d + '（最新：' + CHANGELOG[0].t + '）';
   try { console.log('[WB] ' + BUILD); } catch (_) {}
   try {
     var tag = document.createElement('div');
-    tag.textContent = BUILD;
-    tag.style.cssText = 'position:fixed;right:10px;bottom:8px;z-index:99999;font:10px/1.4 -apple-system,sans-serif;color:#888;opacity:.45;pointer-events:none;user-select:none';
+    tag.style.cssText = 'position:fixed;right:10px;bottom:8px;z-index:99999;max-width:46vw;text-align:right;font:10px/1.5 -apple-system,sans-serif;color:#888;opacity:.55;cursor:pointer;user-select:none';
+    var render = function (full) {
+      tag.textContent = '';
+      CHANGELOG.slice(0, full ? CHANGELOG.length : 1).forEach(function (it, i) {
+        var line = document.createElement('div');
+        line.textContent = (i === 0 ? 'build ' : '') + it.d + '　' + it.t;
+        if (i > 0) line.style.opacity = '.6';
+        tag.appendChild(line);
+      });
+      if (full) { var hint = document.createElement('div'); hint.textContent = '（点击收起）'; hint.style.opacity = '.5'; tag.appendChild(hint); }
+      else { var hint2 = document.createElement('div'); hint2.textContent = '（点击看更早日志）'; hint2.style.opacity = '.5'; tag.appendChild(hint2); }
+    };
+    render(false);
+    tag.title = '构建更新日志（点击展开）';
+    tag.onclick = function () { render(tag._full = !tag._full); };
     document.body.appendChild(tag);
   } catch (_) {} // 测试桩/极端环境下静默：构建号是纯装饰
 })();
