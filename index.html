@@ -5382,7 +5382,7 @@ function buildToolCalc() {
         <div class="tool-calc-hist" id="tcHist"></div>
       </div>
     </div>
-    <div class="t-tip">鼠标点按即可；点一下机身也能直接用键盘敲（0-9 · + − × ÷ · 括号 · 回车 = · Esc 清空 · 退格）。点击历史记录可回填。</div>`;
+    <div class="t-tip">算式输到一半结果就实时算出（不用按 =）；按 = 存入历史（每条「算式 = 结果」，点击回填算式）。点一下机身也能直接用键盘敲（0-9 · + − × ÷ · 括号 · 回车 = · Esc 清空 · 退格）。</div>`;
 
   // 键位：4 列 × 5 行正好填满 20 格，运算符统一在最右列
   // AC/(/)/÷ · 789× · 456− · 123+ · %/0/./=   （0 不跨格，否则最后一行会挤出第 6 行）
@@ -5413,23 +5413,26 @@ function buildToolCalc() {
   const render = () => {
     const v = calcEval(expr);
     const tail = calcTail(expr);
-    // 上方小字：完整算式；算式能求值且不等于正在输入的尾段时，右侧补一个浅色预览
     // 按 = 后（expr 还没被动过）整屏保持「原算式 = 结果」，不能只剩光秃秃的结果（用户 2026-11-12 报）
     if (lastEq && expr === String(lastEq.v)) {
       exprEl.textContent = lastEq.e + '  =  ' + calcFmt(lastEq.v);
       valEl.textContent = calcFmt(lastEq.v);
+    } else if (v !== null && /[+−×÷%]/.test(expr)) {
+      // 【2026-11-12 报障】输入算式后自动出结果，不用按 =：算式完整可求值 → 大字直接显示结果
+      exprEl.textContent = expr;
+      valEl.textContent = calcFmt(v);
     } else {
-      let top = expr || '';
-      if (v !== null && top && tail !== top) top += '  = ' + calcFmt(v);
-      exprEl.textContent = top;
+      // 还没成完整算式（正在打数字 / 以运算符结尾）→ 大字显示正在输入的尾段
+      exprEl.textContent = expr || '';
       valEl.textContent = tail !== null ? calcFmt(parseFloat(tail)) : (v !== null ? calcFmt(v) : '0');
     }
+    // 【2026-11-12 报障】历史要有多行记录，且每行「算式 = 结果」；点击回填整条算式
     histEl.innerHTML = hist.length
-      ? hist.map(h => '<div class="calc-hist-item" data-e="' + esc(h.e) + '" title="点击回填"><span>' + esc(h.shown) + '</span><b>' + esc(h.res) + '</b></div>').join('')
-      : '<div class="calc-empty">还没有记录</div>';
+      ? hist.map(h => '<div class="calc-hist-item" data-e="' + esc(h.e) + '" title="点击回填算式">' + esc(h.shown) + '  =  ' + esc(h.res) + '</div>').join('')
+      : '<div class="calc-empty">还没有记录（按 = 存入）</div>';
     // 历史条目同样直接挂 onclick（点击回填算式）
     histEl.querySelectorAll('.calc-hist-item').forEach(it => {
-      it.onclick = () => { expr = it.dataset.e || ''; render(); focusBody(); };
+      it.onclick = () => { expr = it.dataset.e || ''; lastEq = null; render(); focusBody(); };
     });
   };
 
@@ -5439,14 +5442,20 @@ function buildToolCalc() {
     if (k === '=') {
       const v = calcEval(expr);
       if (v !== null) {
-        hist.unshift({ e: String(v), shown: expr, res: calcFmt(v) });
-        if (hist.length > 6) hist.pop();
+        // 存历史：回填用整条算式（e=expr）；连续同一条不重复存；上限 12 行
+        const shown = expr, res = calcFmt(v);
+        if (!(hist[0] && hist[0].shown === shown && hist[0].res === res)) {
+          hist.unshift({ e: shown, shown: shown, res: res });
+          if (hist.length > 12) hist.pop();
+        }
         lastEq = { e: expr, v: v };   // 屏幕继续显示「算式 = 结果」
         expr = String(v);
       }
       render(); return;
     }
-    // 任何新输入都翻篇（= 后接着按运算符 = 拿结果续算；按数字 = 全新一轮）
+    // 任何新输入都翻篇：= 后按运算符 = 拿结果续算；按数字 / 括号 = 全新一轮（不是把结果当字符串续拼）
+    const opKey = '+−×÷'.indexOf(k) >= 0;
+    if (lastEq && !opKey && k !== '%') expr = '';
     lastEq = null;
     if (k === '%') { // 当前数字段直接换算成百分数
       const m = expr.match(/(\d+(?:\.\d*)?|\.\d+)$/);
