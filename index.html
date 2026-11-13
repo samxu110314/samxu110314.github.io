@@ -1078,6 +1078,8 @@
 
   /* ===== 页脚 ===== */
   .footer { max-width: 1700px; margin: 24px auto 0; text-align: center; font-size: 12px; color: var(--text-light); }
+  .footer-changelog { max-width: 1100px; margin: 0 auto; line-height: 1.7; user-select: none; }
+  .footer-changelog > div { overflow: hidden; text-overflow: ellipsis; }
   .footer-tools { margin-top: 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
   .tool-btn { background: #34495e; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; font-family: inherit; }
   .tool-btn:hover { background: #2c3e50; }
@@ -1627,7 +1629,7 @@
   </div>
 
   <div class="footer">
-    点击状态标签切换 待办 / 进行中 / 已完成 · 点击任务名可改名 · 点击 🗓 设置日期（_月_日，鼠标放到 月/日 空格弹出选择，−/+ 任意加减） · 点击百分比可输入进度 · 按住列标题拖动可调整分类顺序 · 开启云端后数据自动多端同步
+    <div class="footer-changelog" id="wbChangelog" title="点击展开/收起更早日志"></div>
     <div class="footer-tools">
       <button class="tool-btn" id="exportBtn">⬇ 导出备份</button>
       <button class="tool-btn" id="importBtn">⬆ 导入恢复</button>
@@ -14984,34 +14986,42 @@ if (typeof globalThis !== 'undefined') {
 init();
 
 // 【2026-11-11】构建号 + 更新日志 —— 排查「改了没生效」：GitHub Pages 的 index.html 有 10 分钟缓存，
-// 浏览器可能还在跑旧 JS。右下角常显最新一条（日期 + 本版主要内容），点击展开/收起历史日志。
+// 浏览器可能还在跑旧 JS。console 各打一份，眼见为实。
+// 【2026-11-13】日志移到页面底部 footer（原操作提示文字删除，用户要求）；默认只显最新一条，点击展开全部。
 // ⚠️ 每次发版要在 CHANGELOG 最上面加一条 {d:'YYYY-MM-DD', t:'本版改了什么（简述）'}，日期用当天。
 (function () {
   var CHANGELOG = [
-    { d: '2026-11-13', t: '计算器：算式输一半就实时出结果（不用按 =）；历史多行「算式 = 结果」、点击回填算式；= 后按数字开新一轮' },
+    { d: '2026-11-13', t: '计算器：实时出结果（不用按 =）、历史多行「算式 = 结果」；底部更新日志取代原操作提示文字' },
     { d: '2026-11-12', t: '任务暂停/重启（⏸ 沉底标记 ▶ 复原）；档案检索默认选中第一个栏目；全球时差修 NaN + 新增越南；色值转换卡文案改「色号识别/Pantone色值」；计算器屏幕保留完整算式' },
     { d: '2026-11-11', t: '框条抠图：透视四角单独调节（导出自动矫正为矩形）+ 修透视导出交叉网格线；修误碰角点锁死调边' },
   ];
   var BUILD = 'build ' + CHANGELOG[0].d + '（最新：' + CHANGELOG[0].t + '）';
   try { console.log('[WB] ' + BUILD); } catch (_) {}
   try {
-    var tag = document.createElement('div');
-    tag.style.cssText = 'position:fixed;right:10px;bottom:8px;z-index:99999;max-width:46vw;text-align:right;font:10px/1.5 -apple-system,sans-serif;color:#888;opacity:.55;cursor:pointer;user-select:none';
+    var host = document.getElementById('wbChangelog');
+    var tag = host || document.createElement('div');
+    if (!host) { // 测试桩/异常环境兜底：挂 body 右下角
+      tag.style.cssText = 'position:fixed;right:10px;bottom:8px;z-index:99999;max-width:46vw;text-align:right;font:10px/1.5 -apple-system,sans-serif;color:#888;opacity:.55;cursor:pointer;user-select:none';
+    } else {
+      tag.style.cursor = 'pointer';
+    }
     var render = function (full) {
       tag.textContent = '';
       CHANGELOG.slice(0, full ? CHANGELOG.length : 1).forEach(function (it, i) {
         var line = document.createElement('div');
         line.textContent = (i === 0 ? 'build ' : '') + it.d + '　' + it.t;
-        if (i > 0) line.style.opacity = '.6';
+        if (i > 0) line.style.opacity = '.65';
         tag.appendChild(line);
       });
-      if (full) { var hint = document.createElement('div'); hint.textContent = '（点击收起）'; hint.style.opacity = '.5'; tag.appendChild(hint); }
-      else { var hint2 = document.createElement('div'); hint2.textContent = '（点击看更早日志）'; hint2.style.opacity = '.5'; tag.appendChild(hint2); }
+      var hint = document.createElement('div');
+      hint.textContent = full ? '▲ 收起更新日志' : '▼ 展开更新日志（本版：' + CHANGELOG[0].d + '）';
+      hint.style.opacity = '.55';
+      tag.appendChild(hint);
     };
     render(false);
-    tag.title = '构建更新日志（点击展开）';
+    tag.title = '更新日志（点击展开/收起）';
     tag.onclick = function () { render(tag._full = !tag._full); };
-    document.body.appendChild(tag);
+    if (!host) document.body.appendChild(tag);
   } catch (_) {} // 测试桩/极端环境下静默：构建号是纯装饰
 })();
 </script>
