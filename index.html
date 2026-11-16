@@ -1866,6 +1866,11 @@ async function cloudPull() {
         localStorage.setItem(boardKey(uid), JSON.stringify(normalizeColumns(cloudBoards[uid])));
       }
     });
+    // 【2026-11-16】看板名称：云端有、本地没有 → 补齐；本地已有自定义名则以本地为准
+    const cloudNames = p.names || {};
+    Object.keys(cloudNames).forEach(uid => {
+      if (typeof cloudNames[uid] === 'string' && cloudNames[uid] && !getBoardName(uid)) setBoardName(uid, cloudNames[uid]);
+    });
     setSyncStatus('☁️ 云端已同步 · 换设备登录不丢数据');
     return true;
   } catch (e) {
@@ -1891,7 +1896,11 @@ async function cloudPush() {
       // 本人看板 / 云端不存在的账号看板 → 用本地；其余保留云端版本
       if (isMine || !hasRemote) boards[uid] = normalizeColumns(b);
     });
-    await cloudWrite({ users, boards });
+    // 【2026-11-16】看板名称随用户数据上云：保留云端已有名字，本地有自定义的覆盖本人那条
+    const names = Object.assign({}, base.names || {});
+    Object.keys(users).forEach(uid => { const n = getBoardName(uid); if (n) names[uid] = n; });
+    if (myUid && !getBoardName(myUid)) delete names[myUid]; // 恢复默认 → 清掉云端旧名
+    await cloudWrite({ users, boards, names });
     localStorage.setItem(CLOUD_FLAG_KEY, '1');
     setSyncStatus('☁️ 云端已保存 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
   } catch (e) {
@@ -2039,10 +2048,32 @@ function changePassword() {
   alert('密码已修改');
 }
 
+// 【2026-11-16】看板名称自定义：点击标题改名（留空恢复默认），按账号存本地 + 云端 names 同步
+function boardNameKey(id) { return 'wb_boardname_v1_' + id; }
+function getBoardName(id) { try { return localStorage.getItem(boardNameKey(id)) || ''; } catch (e) { return ''; } }
+function setBoardName(id, name) { try { localStorage.setItem(boardNameKey(id), name || ''); } catch (e) {} }
+function renderBoardTitle() {
+  if (!currentUser) return;
+  const t = $('boardTitle');
+  const custom = getBoardName(currentUser.uid);
+  t.textContent = custom || ('📋 ' + currentUser.uid + ' 的工作看板');
+  t.title = '点击修改看板名称';
+  t.style.cursor = 'pointer';
+}
+function renameBoard(name) {
+  if (!currentUser) return false;
+  const def = '📋 ' + currentUser.uid + ' 的工作看板';
+  const v = (name || '').trim();
+  setBoardName(currentUser.uid, v === def ? '' : v);
+  renderBoardTitle();
+  if (cloudEnabled()) scheduleCloudPush(400);
+  return true;
+}
+
 function showApp() {
   $('loginView').style.display = 'none';
   $('appView').style.display = 'block';
-  $('boardTitle').textContent = '📋 ' + currentUser.uid + ' 的工作看板';
+  renderBoardTitle();
   $('userChip').textContent = '工号 ' + currentUser.uid;
   $('navAdmin').style.display = currentUser.isAdmin ? '' : 'none';
   setSyncStatus(cloudEnabled() ? '☁️ 正在连接云端…' : '💾 数据保存在本浏览器（未开启云端）', cloudEnabled() ? '#2980b9' : '#8a97a3');
@@ -14848,10 +14879,122 @@ function importData(file) {
 }
 
 // ================= 初始化 =================
+// 【2026-11-16】农历 / 节气 / 节日 —— 日期行显示「农历丙午年十月初八」+ 当天重要纪念日
+// 经典 1900-2100 年农历数据表（每月大月30/小月29、闰月位、闰月大小编码在位图里）
+const LUNAR_INFO = [
+  0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2,
+  0x04ae0, 0x0a5b6, 0x0a4d0, 0x0d250, 0x1d255, 0x0b540, 0x0d6a0, 0x0ada2, 0x095b0, 0x14977,
+  0x04970, 0x0a4b0, 0x0b4b5, 0x06a50, 0x06d40, 0x1ab54, 0x02b60, 0x09570, 0x052f2, 0x04970,
+  0x06566, 0x0d4a0, 0x0ea50, 0x06e95, 0x05ad0, 0x02b60, 0x186e3, 0x092e0, 0x1c8d7, 0x0c950,
+  0x0d4a0, 0x1d8a6, 0x0b550, 0x056a0, 0x1a5b4, 0x025d0, 0x092d0, 0x0d2b2, 0x0a950, 0x0b557,
+  0x06ca0, 0x0b550, 0x15355, 0x04da0, 0x0a5d0, 0x14573, 0x052b0, 0x0a9a8, 0x0e950, 0x06aa0,
+  0x0aea6, 0x0ab50, 0x04b60, 0x0aae4, 0x0a570, 0x05260, 0x0f263, 0x0d950, 0x05b57, 0x056a0,
+  0x096d0, 0x04dd5, 0x04ad0, 0x0a4d0, 0x0d4d4, 0x0d250, 0x0d558, 0x0b540, 0x0b5a0, 0x195a6,
+  0x095b0, 0x049b0, 0x0a974, 0x0a4b0, 0x0b27a, 0x06a50, 0x06d40, 0x0af46, 0x0ab60, 0x09570,
+  0x04af5, 0x04970, 0x064b0, 0x074a3, 0x0ea50, 0x06b58, 0x05ac0, 0x0ab60, 0x096d5, 0x092e0,
+  0x0c960, 0x0d954, 0x0d4a0, 0x0da50, 0x07552, 0x056a0, 0x0abb7, 0x025d0, 0x092d0, 0x0cab5,
+  0x0a950, 0x0b4a0, 0x0baa4, 0x0ad50, 0x055d9, 0x04ba0, 0x0a5b0, 0x15176, 0x052b0, 0x0a930,
+  0x07954, 0x06aa0, 0x0ad50, 0x05b52, 0x04b60, 0x0a6e6, 0x0a4e0, 0x0d260, 0x0ea65, 0x0d530,
+  0x05aa0, 0x076a3, 0x096d0, 0x04afb, 0x04ad0, 0x0a4d0, 0x1d0b6, 0x0d250, 0x0d520, 0x0dd45,
+  0x0b5a0, 0x056d0, 0x055b2, 0x049b0, 0x0a577, 0x0a4b0, 0x0aa50, 0x1b255, 0x06d20, 0x0ada0,
+  0x14b63, 0x09370, 0x049f8, 0x04970, 0x064b0, 0x168a6, 0x0ea50, 0x06aa0, 0x1a6c4, 0x0aae0,
+  0x092e0, 0x0d2e3, 0x0c960, 0x0d557, 0x0d4a0, 0x0da50, 0x05d55, 0x056a0, 0x0a6d0, 0x055d4,
+  0x052d0, 0x0a9b8, 0x0a950, 0x0b4a0, 0x0b6a6, 0x0ad50, 0x055a0, 0x0aba4, 0x0a5b0, 0x052b0,
+  0x0b273, 0x06930, 0x07337, 0x06aa0, 0x0ad50, 0x14b55, 0x04b60, 0x0a570, 0x054e4, 0x0d160,
+  0x0e968, 0x0d520, 0x0daa0, 0x16aa6, 0x056d0, 0x04ae0, 0x0a9d4, 0x0a2d0, 0x0d150, 0x0f252,
+  0x0d520,
+];
+function lunarYearDays(y) {
+  let sum = 348;
+  for (let i = 0x8000; i > 0x8; i >>= 1) sum += (LUNAR_INFO[y - 1900] & i) ? 1 : 0;
+  return sum + lunarLeapDays(y);
+}
+function lunarLeapMonth(y) { return LUNAR_INFO[y - 1900] & 0xf; }
+function lunarLeapDays(y) {
+  if (lunarLeapMonth(y)) return (LUNAR_INFO[y - 1900] & 0x10000) ? 30 : 29;
+  return 0;
+}
+function lunarMonthDays(y, m) { return (LUNAR_INFO[y - 1900] & (0x10000 >> m)) ? 30 : 29; }  // m: 1-12
+// 公历 → 农历（基准 1900-01-31 = 农历1900年正月初一）
+function solar2lunar(sy, sm, sd) {
+  const base = Date.UTC(1900, 0, 31);
+  let off = Math.round((Date.UTC(sy, sm - 1, sd) - base) / 86400000);
+  if (off < 0 || off > 74000) return null;
+  let y = 1900;
+  while (off >= lunarYearDays(y)) { off -= lunarYearDays(y); y++; if (y > 2100) return null; }
+  const leap = lunarLeapMonth(y);
+  let m = 1, isLeap = false;
+  for (;;) {
+    let dm;
+    if (leap > 0 && m === leap && !isLeap) {
+      dm = lunarMonthDays(y, m);
+      if (off < dm) { isLeap = false; break; }
+      off -= dm;
+      dm = lunarLeapDays(y);
+      if (off < dm) { isLeap = true; break; }
+      off -= dm;
+      m++;
+      continue;
+    }
+    dm = lunarMonthDays(y, m);
+    if (off < dm) break;
+    off -= dm;
+    m++;
+  }
+  return { year: y, month: m, day: off + 1, isLeap: isLeap };
+}
+const LUNAR_MONTH = ['正', '二', '三', '四', '五', '六', '七', '八', '九', '十', '冬', '腊'];
+const LUNAR_DAY = ['初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十',
+  '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
+  '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十'];
+const GAN = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+const ZHI = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+const ZODIAC = ['鼠', '牛', '虎', '兔', '龙', '蛇', '马', '羊', '猴', '鸡', '狗', '猪'];
+function lunarYearName(y) { return GAN[(y - 4) % 10] + ZHI[(y - 4) % 12]; }
+// 节气：经典分钟数近似（1900-2100 精度到日）。第 n 个节气 → 当月第几日
+const S_TERM_MIN = [0, 21208, 42467, 63836, 85337, 107014, 128867, 150921, 173149, 195551,
+  218072, 240693, 263343, 285989, 308563, 331033, 353350, 375494, 397447, 419210,
+  440795, 462224, 483532, 504758];
+const S_TERMS = ['小寒', '大寒', '立春', '雨水', '惊蛰', '春分', '清明', '谷雨', '立夏', '小满',
+  '芒种', '夏至', '小暑', '大暑', '立秋', '处暑', '白露', '秋分', '寒露', '霜降',
+  '立冬', '小雪', '大雪', '冬至'];
+function solarTermDay(y, n) {
+  const d = new Date((31556925974.7 * (y - 1900) + S_TERM_MIN[n] * 60000) + Date.UTC(1900, 0, 6, 2, 5));
+  return d.getUTCDate();
+}
+// 公历节日（m/d）与农历节日（m/d）
+const SOLAR_FEST = { '1/1': '元旦', '2/14': '情人节', '3/8': '妇女节', '3/12': '植树节', '4/1': '愚人节',
+  '5/1': '劳动节', '5/4': '青年节', '6/1': '儿童节', '7/1': '建党节', '8/1': '建军节',
+  '9/3': '抗战胜利纪念日', '9/10': '教师节', '10/1': '国庆节', '12/24': '平安夜', '12/25': '圣诞节' };
+const LUNAR_FEST = { '1/1': '春节', '1/15': '元宵节', '2/2': '龙抬头', '3/3': '上巳节', '5/5': '端午节',
+  '7/7': '七夕', '8/15': '中秋节', '9/9': '重阳节', '12/8': '腊八节' };
+// 当天的重要纪念日（公历节日 + 农历节日 + 除夕 + 节气），返回名字数组
+function todayFestivals(now) {
+  now = now || new Date();
+  const out = [];
+  const sm = now.getMonth() + 1, sd = now.getDate(), sy = now.getFullYear();
+  if (SOLAR_FEST[sm + '/' + sd]) out.push(SOLAR_FEST[sm + '/' + sd]);
+  const li = solar2lunar(sy, sm, sd);
+  if (li && !li.isLeap && LUNAR_FEST[li.month + '/' + li.day]) out.push(LUNAR_FEST[li.month + '/' + li.day]);
+  // 除夕：明天是正月初一
+  const tm = new Date(now.getTime() + 86400000);
+  const lt = solar2lunar(tm.getFullYear(), tm.getMonth() + 1, tm.getDate());
+  if (lt && !lt.isLeap && lt.month === 1 && lt.day === 1) out.push('除夕');
+  // 节气（当月的两个）
+  const n0 = (sm - 1) * 2;
+  if (sd === solarTermDay(sy, n0)) out.push(S_TERMS[n0]);
+  if (sd === solarTermDay(sy, n0 + 1)) out.push(S_TERMS[n0 + 1]);
+  return out;
+}
 function setDate() {
   const days = ['日', '一', '二', '三', '四', '五', '六'];
   const now = new Date();
-  $('todayDate').textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${days[now.getDay()]}`;
+  let txt = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${days[now.getDay()]}`;
+  const li = solar2lunar(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  if (li) txt += ` · 农历${lunarYearName(li.year)}${ZODIAC[(li.year - 4) % 12]}年${(li.isLeap ? '闰' : '') + LUNAR_MONTH[li.month - 1]}月${LUNAR_DAY[li.day - 1]}`;
+  const fests = todayFestivals(now);
+  if (fests.length) txt += ` · 🎉 今天是 ${fests.join('、')}`;
+  $('todayDate').textContent = txt;
 }
 
 async function init() {
@@ -14902,6 +15045,14 @@ async function init() {
   $('logoutBtn').onclick = doLogout;
   $('chgPwdBtn').onclick = changePassword;
   $('previewBack').onclick = backToAdmin;
+  $('boardTitle').onclick = () => {
+    if (!currentUser) return;
+    const def = '📋 ' + currentUser.uid + ' 的工作看板';
+    const cur = getBoardName(currentUser.uid) || def;
+    const v = window.prompt ? window.prompt('修改看板名称（留空恢复默认）：', cur) : null;
+    if (v === null) return; // 取消
+    renameBoard(v);
+  };
 
   $('exportBtn').onclick = exportData;
   $('importBtn').onclick = () => $('importFile').click();
@@ -14928,6 +15079,7 @@ async function init() {
 if (typeof globalThis !== 'undefined') {
   globalThis.__WB = {
     getCOLUMNS: () => COLUMNS,
+    solar2lunar, todayFestivals, lunarYearName, solarTermDay, getBoardName, setBoardName, renameBoard, renderBoardTitle,
     normalizeTask, normalizeColumns,
     addColumn, renameColumn, deleteColumn, renameTask, buildTaskEl,
     revertDoneTask, enableDoneRevert, applyProgress, setStatus, inputProgress, adjustProgress,
@@ -14991,6 +15143,7 @@ init();
 // ⚠️ 每次发版要在 CHANGELOG 最上面加一条 {d:'YYYY-MM-DD', t:'本版改了什么（简述）'}，日期用当天。
 (function () {
   var CHANGELOG = [
+    { d: '2026-11-16', t: '看板名称可点击标题自定义（留空恢复默认、云端同步）；日期行加农历 + 当天重要节日/节气' },
     { d: '2026-11-13', t: '计算器：实时出结果（不用按 =）、历史多行「算式 = 结果」；底部更新日志取代原操作提示文字' },
     { d: '2026-11-12', t: '任务暂停/重启（⏸ 沉底标记 ▶ 复原）；档案检索默认选中第一个栏目；全球时差修 NaN + 新增越南；色值转换卡文案改「色号识别/Pantone色值」；计算器屏幕保留完整算式' },
     { d: '2026-11-11', t: '框条抠图：透视四角单独调节（导出自动矫正为矩形）+ 修透视导出交叉网格线；修误碰角点锁死调边' },
