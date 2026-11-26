@@ -1011,6 +1011,18 @@
   .cu-edgewrap.fc-geo.cu-quaded .cu-eh.tl, .cu-edgewrap.fc-geo.cu-quaded .cu-eh.tr,
   .cu-edgewrap.fc-geo.cu-quaded .cu-eh.bl, .cu-edgewrap.fc-geo.cu-quaded .cu-eh.br { background: rgba(231,76,60,.9); outline: 2px solid #fff; }
   .cu-eline { position: absolute; border: 1px solid rgba(231,76,60,.95); box-sizing: border-box; pointer-events: none; }
+  /* 【2026-11-26 框条抠图预览缩放（放大镜 − / +）】按钮放在舞台**外面**（舞台会被 drawPreview 整个重写 innerHTML），
+     绝对定位贴在舞台左上角。放大后预览比舞台大 → 舞台改成可滚动：不能再用 flex 居中（溢出的那一侧会滚不到），
+     改 block + wrap 宽度取内容、左右 margin auto（窄时居中、宽时 auto = 0，两头都滚得到）。 */
+  .fc-stagewrap { position: relative; }
+  .fc-zoombar { position: absolute; left: 7px; top: 7px; z-index: 6; display: flex; align-items: center; gap: 4px; }
+  .fc-zbtn { width: 26px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; background: rgba(255,255,255,.92); }
+  .fc-zbtn svg { width: 15px; height: 15px; display: block; }
+  .fc-zpct { font-size: 11px; line-height: 18px; color: var(--text); background: rgba(255,255,255,.92); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; cursor: pointer; font-family: inherit; }
+  .fc-zpct:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  #fcStage.fc-zoomed { display: block; overflow: auto; }
+  #fcStage.fc-zoomed .cu-edgewrap { display: block; width: max-content; margin: 0 auto; }
+  #fcStage.fc-zoomed canvas { max-width: none; max-height: none; }
   .cu-mini.on { background: #2c7fb8; border-color: #2c7fb8; color: #fff; }
   /* 二维码 / 条形码 / 水印 */
   .code-box { display: inline-block; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
@@ -10296,6 +10308,19 @@ function alphaEndsByTone(a, lum, w, h, ry0, ry1) {
 //   角优先于边。纯函数（显示坐标 / CSS px），回归测试与探针都能直接调。
 const FC_RC = 10, FC_RE = 8;                                   // 角 / 边 的命中半径（CSS px）
 const FC_CORNERS = ['tl', 'tr', 'br', 'bl'];                   // 与 quad 顶点 0..3 一一对应
+const FC_ZOOMS = [0.5, 0.75, 1, 1.5, 2, 3, 4];                 // 【2026-11-26】框条抠图预览缩放档位（1 = 适应窗口）
+const FC_CORNERS4 = ['t', 'b', 'l', 'r'];                      // 【2026-11-26】画布的四条侧（按需扩画布逐侧判断）
+// 【2026-11-26】重切（画布扩了一圈）后把边距换算到新画布（纯函数）。
+//   画面整体平移了 (dx,dy)；基准框（成品框/检测框）自己平移了 baseNew − baseOld。
+//   要让红线**留在原来那块画面上**：左/上 n += 画面平移 − 基准平移；右/下记号相反（n = 基准边 − 红线边），取反。
+//   实测成品框是跟着画面一起平移的（两者相等 → nudge 不变）。旧代码写的是 n.t -= dy / n.b += dy
+//   再叠加「desired.t − dy」= 把平移量多减了一次：画布每扩一次，红线就朝那条边跳 dy 然后被钳在画布边上
+//   （probe_fctall：上拖 260px，画布扩 501px，红线却贴在新画布顶）。
+function fcRebaseNudge(n, baseOld, baseNew, dx, dy) {
+  const ax = dx - (baseNew.x0 - baseOld.x0), ay = dy - (baseNew.y0 - baseOld.y0);
+  const bx = (baseNew.x1 - baseOld.x1) - dx, by = (baseNew.y1 - baseOld.y1) - dy;
+  return { t: n.t + ay, b: n.b + by, l: n.l + ax, r: n.r + bx };
+}
 const FC_EDGE_V = { t: [0, 1], r: [1, 2], b: [2, 3], l: [3, 0] };   // 每条边连着哪两个顶点
 const FC_CORNER_CURSOR = { tl: 'nwse-resize', tr: 'nesw-resize', br: 'nwse-resize', bl: 'nesw-resize' };
 function fcSegDist(px, py, ax, ay, bx, by) {
@@ -10326,6 +10351,26 @@ function fcPickSide(pts, x, y, rc, re) {
 // 一条边的光标：按边的方向取「垂直于边」的那个双向箭头（斜边也给对方向，不再是横边的 ew-resize）
 // ⚠️ 边的两个走向（a 与 a+180）是同一条边 —— 先折算成「离水平多远」h 再分档。
 //    早期写法用 floor(a/90) 的奇偶分档，a≈179.7° 时落进「竖边」档 → 下边显示左右箭头（probe_hoverquad D 抓到）。
+// 【2026-11-26 预览缩放】下一挡缩放（纯函数，框条抠图左上角的放大镜 − / + 用）。
+//   z = 当前档（1 = 适应窗口），whole = 画布是否已经装着整张原图，dir = −1 缩小 / +1 放大。
+//   缩小的第一挡不是「再变小」，而是「把整张原图装进画布」（返回 whole:true、档位回到适应）——
+//   自动识别只认出一段的高框条，用户要的正是「先看到整张图，再手工把四条边拖到位」。
+function fcNextZoom(z, zWhole, dir) {
+  const zz = FC_ZOOMS.reduce((a, b) => (Math.abs(b - z) < Math.abs(a - z) ? b : a), FC_ZOOMS[2]);
+    const i = FC_ZOOMS.indexOf(zz);
+    if (!(dir > 0) && !(dir < 0)) return { zoom: zz, whole: !!zWhole };   // 没给方向 → 原样
+    if (!(dir > 0)) {
+    if (!zWhole) return { zoom: Math.min(zz, 1), whole: true };
+    return { zoom: FC_ZOOMS[Math.max(0, i - 1)], whole: true };
+  }
+  return { zoom: FC_ZOOMS[Math.min(FC_ZOOMS.length - 1, i + 1)], whole: !!zWhole };
+}
+// 预览比例：适应窗口（宽 ≤ avail、高 ≤ 460、不放大原图）× 缩放档位
+function fcPreviewScale(W, H, avail, zoom) {
+  let k = Math.min(1, avail / W, 460 / H);
+  if (!(k > 0) || !isFinite(k)) k = 1;
+  return k * (zoom > 0 ? zoom : 1);
+}
 function fcEdgeCursor(ax, ay, bx, by) {
   let a = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
   if (a < 0) a += 180;
@@ -12234,13 +12279,20 @@ function buildToolFrameCut() {
       <div class="cu-sec-t">② 调参数 <small>以当前选中的这组为样张；调色、「两端再裁」「留白」套用到整批，裁剪边距只作用于本张</small></div>
       <div class="cu-2col cu-cut">
         <div>
+          <div class="fc-stagewrap">
           <div class="cu-stage cu-checker" id="fcStage"><span class="cu-empty">选择文件夹后这里显示样张</span></div>
+          <div class="fc-zoombar">
+            <button class="cu-mini fc-zbtn" id="fcZoomOut" title="缩小：显示更多原图（第一次点 = 直接显示整张原图，再拖四条边框住整个框条）"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10 10L14.2 14.2"/><path d="M4.3 6.5H8.7"/></svg></button>
+            <span class="fc-zpct" id="fcZoomPct" title="当前预览缩放。点击 = 回到「适应窗口」">适应</span>
+            <button class="cu-mini fc-zbtn" id="fcZoomIn" title="放大：精细调边（预览可滚动）"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10 10L14.2 14.2"/><path d="M4.3 6.5H8.7"/><path d="M6.5 4.3V8.7"/></svg></button>
+          </div>
+        </div>
           <div class="cu-row" style="margin-top:8px">
             <span class="cu-badge" id="fcBoxInfo">裁剪区 —</span>
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>鼠标移到红框<b>边上</b>拖动 = 调边（<b>导出 = 红线内原样</b>）· 移到<b>角上</b>拖动 = <b>透视调角</b>（导出自动矫正成矩形；透视中仍可拖四条边整体平移）· 按住 Shift 拖角 = 仍按矩形同时调两边 · 数值会同步变 · 只作用于本张</span>
+            <span>鼠标移到红框<b>边上</b>拖动 = 调边（<b>导出 = 红线内原样</b>）· 移到<b>角上</b>拖动 = <b>透视调角</b>（导出自动矫正成矩形；透视中仍可拖四条边整体平移）· 按住 Shift 拖角 = 仍按矩形同时调两边 · 数值会同步变 · 只作用于本张 · 框条很高/自动识别只框到一段：点左上角 <b>🔍−</b> 显示整张原图再拖边，或直接把红边拖到画布边（画布会自动扩展，红线跟着鼠标走）· <b>🔍+</b> 放大细调</span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
             <button class="cu-mini" id="fcQuadClear" style="display:none">清除本张透视（回到边距）</button>
@@ -12499,35 +12551,107 @@ function buildToolFrameCut() {
     if (recutT) clearTimeout(recutT);
     recutT = setTimeout(() => { recutT = 0; recutForNudge(); }, 350);
   }
-  function recutForNudge() {
+  // ===== 【2026-11-26 高框条「升到一定高度就升不上去」】=====
+  // 报障现场（_DSC3241，7360×4912，框条高 3300px）：自动识别只认出框条下段，画布上沿在原图 y≈3331，
+  // 而框条顶在 y≈1030 —— 上边差 2300px 根本不在画布里。旧逻辑有三个卡点（probe_fctall 量化）：
+  //   ① 扩画布只在「松手、且鼠标已经拖出画布」时做，而拖动中红线被钳在画布边 ——
+  //      用户看到的就是「红线升到画布顶不动了」；鼠标再往上没多远就是窗口顶，拖不出去多少；
+  //   ② 就算触发了，画布一次扩 1000 多 px，红线却只挪「超出画布的那几个 px」，重切后还比画布顶低 92px
+  //      （夹取时成品框还没重量，基准退化成检测框）；
+  //   ③ 余量公式是 max(旧余量, 想要量 + 缓冲)：想要量不大时余量不涨、画布不扩，红线就卡在画布边。
+  // 现在：① fcDragGrow —— 拖动中红线一碰到画布边就**一次扩到整张原图**，红线落在鼠标指着的画面上、继续跟手；
+  //       ② fcRecut 先量出成品框再夹取，红线落在用户想要的位置（fcRebaseNudge）；
+  //       ③ 余量 = 这一侧现在已给的 + 想要量 + 缓冲，只要还想往外放就一定扩；
+  //       ④ 预览左上角放大镜 −：一键把画布扩到**整张原图**（fcZoom），四条边随便拖。
+  const FC_BLEED_MAX = 12000;                // 余量上限：比任何原图的长边都大 → 实际由原图边界收口
+  // 某一侧是否已经顶到原图边界（再扩也没有像素）：实际给的余量 < 申请的余量 = 被原图边界收口了。
+  // 没摆正时画布就是原图本身 → 四边都算到头。还没扩过画布时，申请的余量就是 12% 档（见 deskewCut）。
+  function fcSideFull(cur, side) {
+    if (!cur || !cur.cutCv) return false;
+    if (cur.cutCv === cur.cv) return true;
+    const bb = cur.bleedBox;
+    if (!bb) return false;
+    const m = st.meta[st.sel];
+    const bl = Math.max((m && m.bleed) || 0, 16, Math.min(600, Math.round(Math.max(bb.x1 - bb.x0 + 1, bb.y1 - bb.y0 + 1) * 0.12)));
+    const got = side === 't' ? bb.y0 : side === 'b' ? cur.cutCv.height - 1 - bb.y1 : side === 'l' ? bb.x0 : cur.cutCv.width - 1 - bb.x1;
+    return got < bl;
+  }
+  // 画布是否已经装着整张原图（四边都到头）
+  function fcIsWhole(cur) {
+    return !!cur && !!cur.cutCv && FC_CORNERS4.every(s => fcSideFull(cur, s));
+  }
+  // 还想往外放多少：只算**没到原图边界**的那几侧（到了头的那侧再扩也没像素，别白跑重切）
+  function fcGrowWant(sf) {
+    const cur = st.cur;
+    if (!sf) return 0;
+    return FC_CORNERS4.reduce((a, s) => (sf[s] > 0 && !fcSideFull(cur, s) ? Math.max(a, sf[s]) : a), 0);
+  }
+  // 扩画布的核心：sf = 四条边各「想要超出画布多少 px」，重切本张；
+  // desired（可空）= 松手前用户想要的边距，重切后按它落位。
+  // 返回 { grew, dx, dy, bleed }：grew=false 表示画布没变大。
+  function fcRecut(sf, desired) {
     const cur = st.cur, i = st.sel;
-    const desired = recutDesired; recutDesired = null;
-    if (!cur || !cur.cv || !cur.cutCv || !desired) return;
-    const sf = wantedShortfall(refBox(), cur.cutCv, desired, st.opt.pad);
-    const want = Math.max(sf.t, sf.b, sf.l, sf.r);
-    if (want <= 0) return;                     // 画布已经够（可能上一轮重切过了）
-    const oldBb = cur.bleedBox || cur.box;
+    if (!cur || !cur.cv || !cur.cutCv || !cur.box || !sf) return null;
+    if (!(fcGrowWant(sf) > 0)) return null;
+    const oldBb = cur.bleedBox || cur.box, oldBase = refBox();
     const m0 = st.meta[i] || (st.meta[i] = { status: '待处理', cls: '', outName: '' });
-    // 新余量 = 还想要的量 + 15% 条带宽的缓冲（免得放一点扩一次）；上限 3000，源图边界再收口
-    const bleed = Math.min(3000, Math.max(m0.bleed || 0, want + Math.round(0.15 * (oldBb.x1 - oldBb.x0 + 1)) + 40));
-    if (cur.cutCv && cur.cutCv !== cur.cv) releaseCv(cur.cutCv);
+    const W0 = cur.cutCv.width, H0 = cur.cutCv.height;
+    // 新余量 = 这一侧现在已经给了的 + 还想要的量 + 缓冲（15% 条带宽 + 40，免得放一点扩一次）；
+    // 上限 FC_BLEED_MAX，源图边界再收口。到头的那些侧不参与（它们给不出更多）。
+    const ap = { t: oldBb.y0, b: H0 - 1 - oldBb.y1, l: oldBb.x0, r: W0 - 1 - oldBb.x1 };
+    const need = FC_CORNERS4.map(s => fcSideFull(cur, s) ? 0 : ap[s] + (sf[s] || 0));
+    const bleed = Math.min(FC_BLEED_MAX, Math.max(m0.bleed || 0, Math.max.apply(null, need) + Math.round(0.15 * (oldBb.x1 - oldBb.x0 + 1)) + 40));
+    const q = quadLive(i);                   // 重切前记下透视四角（画布一变 key 就不匹配，下面跟着平移）
+    if (cur.cutCv !== cur.cv) releaseCv(cur.cutCv);
     const p = prepareFrame(cur.cv, { deskew: st.opt.deskew, angle: angleOf(i), det: cur.det, bleedMin: bleed });
     cur.cutCv = p.cv; cur.box = p.box; cur.low = p.low; cur.note = p.note;
     cur.detAngle = p.detAngle; cur.angle = p.angle; cur.rotated = p.rotated; cur.xf = p.xf;
     cur.bleedBox = p.bleedBox;
-    cur.tightBox = null;                       // 基准作废，下次渲染重新量
+    cur.tightBox = null;                       // 基准作废，下面当场重量
     m0.bleed = bleed;
-    // 条带在新画布里平移了多少 → nudge 反向补偿（保持红线视觉位置不动）。
-    // ⚠️ 必须用 bleedBox（deskewCut 的纯几何框）算 —— cur.box 经过 tightenBoxByEdges，
-    //    不同画布上收的位置差 ≠ 画布平移量（实测差 198px，用它补偿红线会跳）。
+    // ⚠️ 必须先量出成品框（measureRef）再夹取：nudge 是相对**成品框**的，而 clampNudge 的下限是
+    //    「成品框 + nudge ≥ 0」。旧代码在 tightBox 为空时夹取 → 基准退化成检测框（比成品框大 92px），
+    //    红线落位后比画布顶低 92px，用户再拖才贴得到边。
+    measureRef();
+    // 画面在新画布里整体平移了 (dx,dy)（用 bleedBox 算 —— deskewCut 的纯几何框，余量加多少它就平移多少），
+    // 成品框自己平移了多少则以量出来的为准（收边不是线性的）。两者之差才是 nudge 要补的量，见 fcRebaseNudge。
     const dx = p.bleedBox.x0 - oldBb.x0, dy = p.bleedBox.y0 - oldBb.y0;
     const n = ensureNudge(i);
-    if (dx || dy) { n.l -= dx; n.r += dx; n.t -= dy; n.b += dy; }
-    // 写回用户想要的值（补偿到新坐标系），此时画布已够，clamp 不会再动它
-    n.t = desired.t - dy; n.b = desired.b + dy; n.l = desired.l - dx; n.r = desired.r + dx;
+    const rn = fcRebaseNudge(desired || n, oldBase, refBox(), dx, dy);
+    n.t = rn.t; n.b = rn.b; n.l = rn.l; n.r = rn.r;
     clampNudge(refBox(), cur.cutCv, n);
-    log(`第 ${i + 1} 张：红线到了画布边缘 → 画布已扩展（余量 ${bleed}px），可以继续往外放`);
+    // 透视四角：画布只是多了一圈余量、内容没变 → 四个顶点整体平移 (dx,dy)，key 换成新画布的
+    if (q) {
+      q.x0 += dx; q.y0 += dy; q.x1 += dx; q.y1 += dy; q.x2 += dx; q.y2 += dy; q.x3 += dx; q.y3 += dy;
+      q.key = curQuadKey();
+    }
     syncNudge(); drawPreview(); renderRows();
+    return { grew: cur.cutCv.width !== W0 || cur.cutCv.height !== H0, dx: dx, dy: dy, bleed: bleed };
+  }
+  // 「扩到整张原图」要的量：四边都给 2× 原图长边（deskewCut 会逐边按原图边界收口）
+  function fcWholeSf(cur) {
+    const need = 2 * Math.max(cur.cv.width, cur.cv.height);
+    return { t: need, b: need, l: need, r: need };
+  }
+  // 拖动中扩画布：红线一碰到画布边就**一次扩到整张原图**，之后这张图怎么拖都不会再卡。
+  //   为什么不「要多少扩多少」：重切 7360×4912 的原图一次约 0.7~1.1s（probe_fctall 实测），一笔拖拽里扩 4 次
+  //   = 卡 3.6s、预览比例跳 4 次；一次到位只卡一次。松手兜底（recutForNudge）仍是按需的小步扩。
+  let fcGrowAt = 0;
+  function fcDragGrow(sf, desired) {
+    if (!(fcGrowWant(sf) > 0)) return null;   // 没超出画布 / 超出的那侧已顶到原图边界 → 没什么可扩
+    const now = Date.now();
+    if (now - fcGrowAt < 320) return null;    // 保险：重切万一没生效，不至于每个 pointermove 都来
+    fcGrowAt = now;
+    const cur = st.cur;
+    return cur ? fcRecut(fcWholeSf(cur), desired) : null;
+  }
+  function recutForNudge() {
+    const cur = st.cur, desired = recutDesired;
+    recutDesired = null;
+    if (!cur || !cur.cv || !cur.cutCv || !desired) return;
+    const sf = wantedShortfall(refBox(), cur.cutCv, desired, st.opt.pad);
+    if (!(fcGrowWant(sf) > 0)) return;        // 画布已经够（可能拖动中已经扩过）/ 那一侧已到原图边界
+    if (fcRecut(sf, desired)) log(`第 ${st.sel + 1} 张：红线到了画布边缘 → 画布已扩展（余量 ${st.meta[st.sel].bleed}px），可以继续往外放`);
   }
   // —— 逐张的裁剪边距 ——
   // 自动识别是「统计找主体」，个别照片的端头难免多带一点桌面/别的样品；
@@ -12778,11 +12902,15 @@ function buildToolFrameCut() {
   function drawEdgeView() {
     const stage = $('fcStage'), cur = st.cur;
     const W = cur.cutCv.width, H = cur.cutCv.height;
-    const key = st.sel + ':' + W + 'x' + H + ':' + (cur.rotated ? 1 : 0) + ':' + (+cur.angle || 0).toFixed(2);
+    const zoom = (st.zoom > 0) ? st.zoom : 1;          // 【2026-11-26】预览缩放档位（1 = 适应窗口）
+    const key = st.sel + ':' + W + 'x' + H + ':' + (cur.rotated ? 1 : 0) + ':' + (+cur.angle || 0).toFixed(2) + ':' + zoom;
+    let rebuilt = false;
     if (!edgeUI || edgeUI.key !== key) {
-      const avail = Math.max(280, (stage.clientWidth || 820) - 26);
-      let k = Math.min(1, avail / W, 460 / H);
-      if (!(k > 0) || !isFinite(k)) k = 1;
+      // 适应比例按舞台**外层**的宽度算：放大后舞台会出滚动条，stage.clientWidth 会变，
+      // 用它当基准的话每换一挡「适应」都要漂一点。
+      const pw = stage.parentElement ? stage.parentElement.clientWidth : 0;
+      const avail = Math.max(280, pw ? pw - 28 : (stage.clientWidth || 820) - 26);
+      let k = fcPreviewScale(W, H, avail, zoom);
       stage.innerHTML = '';
       const wrap = document.createElement('div');
       // 【2026-11-05 单线红框】cu-edgesingle：手柄只是透明热区（旧版每个手柄自带四边红框
@@ -12855,9 +12983,30 @@ function buildToolFrameCut() {
         } else if (quadLive(st.sel)) quadEdgeDrag(e, side);        // 透视里的边：整条边沿法线平移
         else edgeDrag(e, side);                                     // 矩形的边：调边距
       });
+      rebuilt = true;
     }
     edgeUI.cv.style.filter = toneFilter(st.opt);
+    // 【2026-11-26 预览缩放】放大档舞台可滚动；只在「换了张/换了挡」时才对视野 ——
+    //   改个调色滑块也会走到这里，不能把用户滚到的位置又拉回去。
+    if (stage.classList) stage.classList.toggle('fc-zoomed', zoom > 1);
+    const zp = $('fcZoomPct');
+    if (zp) zp.textContent = zoom === 1 ? '适应' : Math.round(zoom * 100) + '%';
     edgeLayout();
+    if (zoom > 1 && (rebuilt || st.zoomAnchor)) {
+      const an = st.zoomAnchor || (edgeUI.pts ? [0, 1, 2, 3].reduce((a, i) => [a[0] + edgeUI.pts[i][0] / 4, a[1] + edgeUI.pts[i][1] / 4], [0, 0]) : null);
+      fcCenterView(an);                        // 换挡：保持换挡前看的那个点在视野中央；换图：对到红线中心
+    }
+    st.zoomAnchor = null;
+  }
+  // 【2026-11-26 绝对定位拖拽】鼠标位置 → 画布坐标（按**当前**预览比例）。三种拖拽一律用它换算：
+  //   「红线 / 角点 = 鼠标指着的那个画面位置 − 按下时的抓取偏移」。
+  // 旧写法是「相对按下那一刻的位移」累加 —— 画布一扩（比例 k 变、画面平移、预览在屏幕上重排）起点就对不上：
+  //   probe_fctall 实测扩一次画布红线就偏离鼠标 90~180px。绝对定位下画布怎么变都天然跟手，也不用事后换算起点。
+  function fcMouseCv(e) {
+    const ui = edgeUI;
+    if (!ui || !(ui.k > 0) || !ui.wrap || !ui.wrap.getBoundingClientRect) return null;
+    const r = ui.wrap.getBoundingClientRect();
+    return [(e.clientX - r.left) / ui.k, (e.clientY - r.top) / ui.k];
   }
   // 拖动一条边（或一个角）。side 里含 'l' 就是左，含 't' 就是上…… 角上是两个字母都含
   // （'tl' = 左上）→ 两个方向一起走。
@@ -12866,31 +13015,34 @@ function buildToolFrameCut() {
   function edgeDrag(ev, side) {
     ev.preventDefault();
     ev.stopPropagation();
-    const cur = st.cur, base = refBox();
-    if (!cur || !cur.cutCv || !base || !edgeUI) return;
-    const k = edgeUI.k;
-    const sx = ev.clientX, sy = ev.clientY;
-    // ⚠️ n0 必须是**按下那一刻的数值副本**，不能是 `nudgeOf()` 返回的那个对象本身：
-    //    nudgeOf 与 ensureNudge 给出来的是**同一个对象**，于是 move 里按「相对起点的累计位移」
-    //    反复赋值 = 在已被上一段改过的值上再加一次 → 位移 D 分 m 段发出，最终值 ≈ D·(m+1)/2。
-    //    实测（_DSC5671，k=0.2118）：拖下边 20 CSS px、分 6 段 → 面板 0 → **−334**（3.5 倍）。
-    //    真实鼠标一次拖动会发几十个 pointermove → 放大十几倍，框直接冲到夹取极限。
-    //    【用户报障 2026-09-21】「手动调边后点击完成调边，又自动回到没调之前的预览图」，
-    //    他截图里那个「下 −33 / 上 −238」就是被这样放大出来的（他实际只拖了一点点）。
+    const cur = st.cur;
+    if (!cur || !cur.cutCv || !edgeUI || !refBox()) return;
+    const p0 = fcMouseCv(ev);
+    if (!p0) return;
     const n = ensureNudge(st.sel);
-    const n0 = { t: n.t | 0, b: n.b | 0, l: n.l | 0, r: n.r | 0 };
+    // 抓取偏移：按下点相对红框四条边的位置（画布坐标）。之后「边 = 鼠标位置 − 偏移」→ 从哪按住就还从哪带着走。
+    // ⚠️ 每个 move 都直接由鼠标位置算出 nudge（绝对值），**不是**在旧值上累加位移 ——
+    //    早期「n0 取了 nudgeOf() 返回的同一个对象 + 相对累加」出过 D·(m+1)/2 的放大 bug
+    //    （_DSC5671 拖下边 20px → 面板 −334；用户报障 2026-09-21「完成调边后又自动回到没调之前」）。绝对定位没有累加，天然免疫。
+    const b0 = applyNudge(refBox(), cur.cutCv, n) || refBox();
+    const g = { l: p0[0] - b0.x0, r: p0[0] - (b0.x1 + 1), t: p0[1] - b0.y0, b: p0[1] - (b0.y1 + 1) };
     let dirty = false, desired = null;
     const move = (e) => {
-      const dx = (e.clientX - sx) / k, dy = (e.clientY - sy) / k;
+      const p = fcMouseCv(e);
+      if (!p) return;
+      const base = refBox();                   // 现取：拖动中扩画布后成品框平移过
       // 记号见 applyNudge 上面那段：正数 = 往里收，所以右/下要取反
-      if (side.indexOf('l') >= 0) n.l = n0.l + Math.round(dx);
-      if (side.indexOf('r') >= 0) n.r = n0.r - Math.round(dx);
-      if (side.indexOf('t') >= 0) n.t = n0.t + Math.round(dy);
-      if (side.indexOf('b') >= 0) n.b = n0.b - Math.round(dy);
+      if (side.indexOf('l') >= 0) n.l = Math.round(p[0] - g.l - base.x0);
+      if (side.indexOf('r') >= 0) n.r = Math.round(base.x1 - (p[0] - g.r));
+      if (side.indexOf('t') >= 0) n.t = Math.round(p[1] - g.t - base.y0);
+      if (side.indexOf('b') >= 0) n.b = Math.round(base.y1 - (p[1] - g.b));
       const wanted = { t: n.t, b: n.b, l: n.l, r: n.r };   // clamp 前的「想要值」——按需扩画布用
       clampNudge(base, cur.cutCv, n);
       desired = wanted;
       dirty = true;
+      // 【2026-11-26】红线碰到画布边 → **拖动中**一次扩到整张原图，红线落在鼠标指着的画面上并继续跟手
+      //   （旧版要松手、还得把鼠标拖出画布才扩一点 = 高框条「升不上去」的根因，见 fcRecut 上面的注释）
+      fcDragGrow(wantedShortfall(base, cur.cutCv, wanted, st.opt.pad), wanted);
       edgeLayout();
       syncNudge();
     };
@@ -12900,7 +13052,7 @@ function buildToolFrameCut() {
       if (!dirty) return;
       renderRows();
       log(`第 ${st.sel + 1} 张：手动调边 → 上 ${n.t} 下 ${n.b} 左 ${n.l} 右 ${n.r}（只作用于本张）`);
-      // 按需扩画布：松手时想要的位置超出画布 → 防抖后带更大余量重切本张（recutForNudge）
+      // 兜底：松手时想要的位置仍超出画布（拖动中的扩画布被节流掉了）→ 防抖后重切本张（recutForNudge）
       if (desired && cur.cutCv) {
         const sf = wantedShortfall(refBox(), cur.cutCv, desired, st.opt.pad);
         if (Math.max(sf.t, sf.b, sf.l, sf.r) > 0) scheduleRecut(desired);
@@ -12916,21 +13068,27 @@ function buildToolFrameCut() {
     ev.stopPropagation();
     const cur = st.cur;
     if (!cur || !cur.cutCv || !edgeUI) return;
+    const p0 = fcMouseCv(ev);
+    if (!p0) return;
     // 按下前是否本来就有有效 quad —— 用来区分「真的在拖」和「只是点了一下」
     const hadQuad = !!quadLive(st.sel);
     const q = ensureQuad();
     if (!q) return;
-    const k = edgeUI.k;
     const idx = { tl: 0, tr: 1, br: 2, bl: 3 }[side];
     const keys = [['x0', 'y0'], ['x1', 'y1'], ['x2', 'y2'], ['x3', 'y3']][idx];
-    const sx = ev.clientX, sy = ev.clientY;
-    const v0 = { x: q[keys[0]], y: q[keys[1]] };
-    const W = cur.cutCv.width, H = cur.cutCv.height;
+    // 抓取偏移（画布坐标）：之后「角点 = 鼠标位置 − 偏移」（绝对定位，见 fcMouseCv）
+    const off = [p0[0] - q[keys[0]], p0[1] - q[keys[1]]];
     let dirty = false;
     const move = (e) => {
-      q[keys[0]] = Math.max(0, Math.min(W - 1, Math.round(v0.x + (e.clientX - sx) / k)));
-      q[keys[1]] = Math.max(0, Math.min(H - 1, Math.round(v0.y + (e.clientY - sy) / k)));
+      const p = fcMouseCv(e);
+      if (!p) return;
+      const W = cur.cutCv.width, H = cur.cutCv.height;
+      const wx = p[0] - off[0], wy = p[1] - off[1];
+      q[keys[0]] = Math.max(0, Math.min(W - 1, Math.round(wx)));
+      q[keys[1]] = Math.max(0, Math.min(H - 1, Math.round(wy)));
       dirty = true;
+      // 【2026-11-26】角点碰到画布边 → 拖动中一次扩到整张原图（四角跟着平移，见 fcRecut），角点继续跟鼠标
+      fcDragGrow({ t: -wy, b: wy - (H - 1), l: -wx, r: wx - (W - 1) }, null);
       edgeLayout();
     };
     const up = () => {
@@ -12949,7 +13107,7 @@ function buildToolFrameCut() {
     window.addEventListener('pointerup', up);
   }
   // 【2026-11-26 免按钮透视】透视模式里拖一条边：这条边的两个顶点一起沿**边的法线**平移。
-  // · 只取鼠标位移在法线上的投影 → 横着拖下边就是笔直往里/往外收，不会带出侧向错位；
+  // · 只取鼠标位置在法线上的投影 → 横着拖下边就是笔直往里/往外收，不会带出侧向错位；
   // · 对面的两个顶点不动 → 四边仍能各自对齐（框条拍斜了也能一条边一条边地贴）。
   // 这是「角上直接进透视」不再卡住的关键：进了透视照样能调边，不用「清除透视 / 重新识别」逃生。
   function quadEdgeDrag(ev, side) {
@@ -12957,22 +13115,31 @@ function buildToolFrameCut() {
     ev.stopPropagation();
     const cur = st.cur, q = quadLive(st.sel);
     if (!cur || !cur.cutCv || !q || !edgeUI) return;
-    const k = edgeUI.k, sx = ev.clientX, sy = ev.clientY;
+    const p0 = fcMouseCv(ev);
+    if (!p0) return;
     const keys = [['x0', 'y0'], ['x1', 'y1'], ['x2', 'y2'], ['x3', 'y3']];
     const ia = FC_EDGE_V[side][0], ib = FC_EDGE_V[side][1];
     const ka = keys[ia], kb = keys[ib];
-    const a0 = { x: q[ka[0]], y: q[ka[1]] }, b0 = { x: q[kb[0]], y: q[kb[1]] };
+    let a0 = { x: q[ka[0]], y: q[ka[1]] }, b0 = { x: q[kb[0]], y: q[kb[1]] };
     const ex = b0.x - a0.x, ey = b0.y - a0.y, len = Math.hypot(ex, ey) || 1;
     const nx = -ey / len, ny = ex / len;                       // 单位法线
-    const W = cur.cutCv.width - 1, H = cur.cutCv.height - 1;
+    // 抓取偏移（沿法线）：按下点到这条边的距离。之后「边 = 鼠标的法线坐标 − 偏移」（绝对定位，见 fcMouseCv）
+    const grab = (p0[0] * nx + p0[1] * ny) - (a0.x * nx + a0.y * ny);
     const cl = (v, hi) => Math.max(0, Math.min(hi, v));
     let dirty = false, moved = 0;
     const move = (e) => {
-      const d = Math.round(((e.clientX - sx) * nx + (e.clientY - sy) * ny) / k);
+      const p = fcMouseCv(e);
+      if (!p) return;
+      const W = cur.cutCv.width - 1, H = cur.cutCv.height - 1;
+      const d = Math.round((p[0] - a0.x) * nx + (p[1] - a0.y) * ny - grab);
       if (d === moved) return;                                  // 没动 / 又拖回原位：不重排、不记日志
       moved = d; dirty = true;
-      q[ka[0]] = Math.round(cl(a0.x + nx * d, W)); q[ka[1]] = Math.round(cl(a0.y + ny * d, H));
-      q[kb[0]] = Math.round(cl(b0.x + nx * d, W)); q[kb[1]] = Math.round(cl(b0.y + ny * d, H));
+      const ax = a0.x + nx * d, ay = a0.y + ny * d, bx = b0.x + nx * d, by = b0.y + ny * d;
+      q[ka[0]] = Math.round(cl(ax, W)); q[ka[1]] = Math.round(cl(ay, H));
+      q[kb[0]] = Math.round(cl(bx, W)); q[kb[1]] = Math.round(cl(by, H));
+      // 【2026-11-26】这条边碰到画布边 → 拖动中一次扩到整张原图（四角跟着平移，见 fcRecut），边继续跟鼠标
+      const g = fcDragGrow({ t: -Math.min(ay, by), b: Math.max(ay, by) - H, l: -Math.min(ax, bx), r: Math.max(ax, bx) - W }, null);
+      if (g && g.grew) { a0.x += g.dx; a0.y += g.dy; b0.x += g.dx; b0.y += g.dy; }   // 起点 = 平移后的顶点
       edgeLayout();
     };
     const up = () => {
@@ -12981,11 +13148,55 @@ function buildToolFrameCut() {
       window.removeEventListener('pointercancel', up);
       if (!dirty) return;
       renderRows();
-      log(`第 ${st.sel + 1} 张：透视四边平移（${side.toUpperCase()} 沿法线 ${moved > 0 ? '+' : ''}${moved} px，只作用于本张，导出自动矫正为矩形）`);
+      log(`第 ${st.sel + 1} 张：透视四边平移（${side.toUpperCase()} 沿法线 ${moved > 0 ? '+' : ''}${moved} px，只作用于本张，导出自动矫正成矩形）`);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
+  }
+  // ===== 【2026-11-26 预览缩放：左上角放大镜 − / +】=====
+  // 用户诉求（高框条识别失败）：「在预览左上角加两个小按钮 +- 的放大镜标，我可以通过缩小把整张图片
+  // 展示出来，再手工调边」。⚠️ 光把预览缩小没用 —— 画布本身只含「识别到的那一段 + 余量」，
+  // 缩得再小也看不到画布外面的像素。所以「缩小」的第一挡是**把画布扩到整张原图**（fcRecut），
+  // 画面里立刻出现整个产品；之后才是真的再缩小 / 放大细调。
+  function fcZoom(dir) {                 // 档位表 FC_ZOOMS 在顶层（fcNextZoom 用）
+    const cur = st.cur;
+    if (!cur || !cur.cutCv) return;
+    const whole = fcIsWhole(cur);
+    const nx = fcNextZoom(st.zoom || 1, whole, dir);
+    if (nx.whole && !whole) {
+      // 一键扩到整张原图（四边想要的量给足，deskewCut 再逐边按原图边界收）
+      const g = fcRecut(fcWholeSf(cur), null);
+      log(g && g.grew
+        ? `第 ${st.sel + 1} 张：画布已扩展到整张原图（余量 ${g.bleed}px），直接拖四条边框住整个框条即可`
+        : `第 ${st.sel + 1} 张：画布本来就已经是整张原图`);
+    }
+    if (nx.zoom === (st.zoom || 1) && whole === fcIsWhole(cur)) { log(dir < 0 ? '已经是最小缩放' : '已经是最大缩放'); return; }
+    const anchor = (edgeUI && edgeUI.wrap) ? fcViewCenter() : null;    // 现在看的是画布的哪个点
+    st.zoomAnchor = anchor;
+    st.zoom = nx.zoom;
+    flushPreview();
+    drawPreview();
+    log(`预览缩放：${Math.round(st.zoom * 100)}%` + (st.zoom === 1 ? '（适应窗口）' : st.zoom < 1 ? '（缩小）' : '（放大 · 预览区可滚动）'));
+  }
+  // 视野中央对应画布上的哪个点（画布坐标）
+  function fcViewCenter() {
+    const stg = $('fcStage'), ui = edgeUI;
+    if (!stg || !ui || !ui.wrap || !(ui.k > 0) || !stg.getBoundingClientRect) return null;
+    const sr = stg.getBoundingClientRect(), wr = ui.wrap.getBoundingClientRect();
+    return [(sr.left + sr.width / 2 - wr.left) / ui.k, (sr.top + sr.height / 2 - wr.top) / ui.k];
+  }
+  // 把画布上的某个点滚到视野中央（没放大时只是清掉滚动）
+  function fcCenterView(pt) {
+    const stg = $('fcStage'), ui = edgeUI;
+    if (!stg || !ui || !ui.wrap) return;
+    if (!((st.zoom > 0 ? st.zoom : 1) > 1)) { stg.scrollLeft = 0; stg.scrollTop = 0; return; }
+    if (!pt || !stg.getBoundingClientRect) return;
+    const sr = stg.getBoundingClientRect(), wr = ui.wrap.getBoundingClientRect();
+    const ox = wr.left - sr.left - (stg.clientLeft || 0) + (stg.scrollLeft || 0);   // wrap 左上角在滚动内容里的位置
+    const oy = wr.top - sr.top - (stg.clientTop || 0) + (stg.scrollTop || 0);
+    stg.scrollLeft = Math.max(0, ox + pt[0] * ui.k - stg.clientWidth / 2);
+    stg.scrollTop = Math.max(0, oy + pt[1] * ui.k - stg.clientHeight / 2);
   }
   function drawPreview() {
     const stage = $('fcStage');
@@ -13215,6 +13426,19 @@ function buildToolFrameCut() {
   $('fcQuadClear').onclick = () => {
     if (!clearQuad(st.sel)) { log('本张没有透视四角'); return; }
     drawPreview();
+  };
+  // 【2026-11-26 预览缩放】舞台左上角的放大镜 − / +（见 fcZoom）；中间的百分比点一下 = 回到「适应窗口」
+  //   ⚠️ 按钮放在舞台**外面**（.fc-stagewrap 里）：drawPreview 会把舞台 innerHTML 整个重写，
+  //      放在里面的话换一张图就没了；也不能放进 wrap —— wrap 的 pointerdown 是「拖边」分发。
+  $('fcZoomOut').onclick = () => fcZoom(-1);
+  $('fcZoomIn').onclick = () => fcZoom(1);
+  $('fcZoomPct').onclick = () => {
+    if ((st.zoom || 1) === 1) { log('预览已经是「适应窗口」'); return; }
+    st.zoomAnchor = (edgeUI && edgeUI.wrap) ? fcViewCenter() : null;
+    st.zoom = 1;
+    flushPreview();
+    drawPreview();
+    log('预览缩放：100%（适应窗口）');
   };
   // 【2026-11-26 免按钮透视】原「透视四角（本张）」按钮（fcQuadOn）已删除：鼠标移到角上按下即进透视
   //   （cornerDrag 里 ensureQuad() 从当前红线框播种，矩形起步）；退出透视仍用上面的「清除本张透视」。
@@ -15217,7 +15441,7 @@ if (typeof globalThis !== 'undefined') {
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg, narrowByStrongS,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, warpQuad, fcPickSide, fcSegDist, fcEdgeCursor, FC_RC, FC_RE, FC_EDGE_V, FC_CORNERS, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, warpQuad, fcPickSide, fcSegDist, fcEdgeCursor, fcNextZoom, fcPreviewScale, fcRebaseNudge, FC_ZOOMS, FC_RC, FC_RE, FC_EDGE_V, FC_CORNERS, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
@@ -15269,7 +15493,7 @@ init();
 // ⚠️ 每次发版要在 CHANGELOG 最上面加一条 {d:'YYYY-MM-DD', t:'本版改了什么（简述）'}，日期用当天。
 (function () {
   var CHANGELOG = [
-    { d: '2026-11-26', t: '框条抠图：去掉「透视四角」按钮 —— 鼠标移到角上直接透视调角、移到边上直接调边（悬停高亮）；透视中四条边仍可拖动平移' },
+    { d: '2026-11-26', t: '框条抠图：修「框条很高时上边升不上去」—— 红边拖到画布边自动扩展画布、红线跟着鼠标走；预览左上角新增放大镜 −/+（点 − 直接显示整张原图，再手工拖边；+ 放大细调）' },
     { d: '2026-11-16', t: '看板名称可点击标题自定义（留空恢复默认、云端同步）；日期行加农历 + 当天重要节日/节气' },
     { d: '2026-11-13', t: '计算器：实时出结果（不用按 =）、历史多行「算式 = 结果」；底部更新日志取代原操作提示文字' },
     { d: '2026-11-12', t: '任务暂停/重启（⏸ 沉底标记 ▶ 复原）；档案检索默认选中第一个栏目；全球时差修 NaN + 新增越南；色值转换卡文案改「色号识别/Pantone色值」；计算器屏幕保留完整算式' },
