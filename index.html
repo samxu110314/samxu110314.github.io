@@ -1020,6 +1020,7 @@
   .fc-zbtn svg { width: 15px; height: 15px; display: block; }
   .fc-zpct { font-size: 11px; line-height: 18px; color: var(--text); background: rgba(255,255,255,.92); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; cursor: pointer; font-family: inherit; }
   .fc-zpct:hover { border-color: var(--c-sales, #3498db); color: var(--c-sales, #3498db); }
+  .fc-zpct.fc-whole { border-color: #27ae60; color: #1e8449; font-weight: 600; }
   #fcStage.fc-zoomed { display: block; overflow: auto; }
   #fcStage.fc-zoomed .cu-edgewrap { display: block; width: max-content; margin: 0 auto; }
   #fcStage.fc-zoomed canvas { max-width: none; max-height: none; }
@@ -10353,16 +10354,19 @@ function fcPickSide(pts, x, y, rc, re) {
 //    早期写法用 floor(a/90) 的奇偶分档，a≈179.7° 时落进「竖边」档 → 下边显示左右箭头（probe_hoverquad D 抓到）。
 // 【2026-11-26 预览缩放】下一挡缩放（纯函数，框条抠图左上角的放大镜 − / + 用）。
 //   z = 当前档（1 = 适应窗口），whole = 画布是否已经装着整张原图，dir = −1 缩小 / +1 放大。
-//   缩小的第一挡不是「再变小」，而是「把整张原图装进画布」（返回 whole:true、档位回到适应）——
-//   自动识别只认出一段的高框条，用户要的正是「先看到整张图，再手工把四条边拖到位」。
+//   🔍− 不是「把画面缩小」，而是「把整张原图装进画布并放到适应窗口的最大画面」（whole:true、zoom:1）——
+//   自动识别只认出一段的高框条，用户要的是「先看到整张图，再手工把四条边拖到位」；
+//   一挡一挡缩小只会让画面和红框越来越小、红边点不中（2026-11-26 报障 _DSC3415：「只缩小预览框，还是到不了顶」），
+//   所以 75% / 50% 两档取消：任何状态点 − 都一步回到整张原图的最大适应视图。
 function fcNextZoom(z, zWhole, dir) {
   const zz = FC_ZOOMS.reduce((a, b) => (Math.abs(b - z) < Math.abs(a - z) ? b : a), FC_ZOOMS[2]);
     const i = FC_ZOOMS.indexOf(zz);
     if (!(dir > 0) && !(dir < 0)) return { zoom: zz, whole: !!zWhole };   // 没给方向 → 原样
     if (!(dir > 0)) {
-    if (!zWhole) return { zoom: Math.min(zz, 1), whole: true };
-    return { zoom: FC_ZOOMS[Math.max(0, i - 1)], whole: true };
-  }
+      // 🔍− = 「显示整张原图」：不管现在放大到几挡、还是已经缩到多小，一律一步回到「适应窗口」(zoom=1)，
+      //   并请求把画布扩到整张原图（whole:true）。不再一挡一挡缩小 —— 那只会让红框小到点不中。
+      return { zoom: 1, whole: true };
+    }
   return { zoom: FC_ZOOMS[Math.min(FC_ZOOMS.length - 1, i + 1)], whole: !!zWhole };
 }
 // 预览比例：适应窗口（宽 ≤ avail、高 ≤ 460、不放大原图）× 缩放档位
@@ -12282,8 +12286,8 @@ function buildToolFrameCut() {
           <div class="fc-stagewrap">
           <div class="cu-stage cu-checker" id="fcStage"><span class="cu-empty">选择文件夹后这里显示样张</span></div>
           <div class="fc-zoombar">
-            <button class="cu-mini fc-zbtn" id="fcZoomOut" title="缩小：显示更多原图（第一次点 = 直接显示整张原图，再拖四条边框住整个框条）"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10 10L14.2 14.2"/><path d="M4.3 6.5H8.7"/></svg></button>
-            <span class="fc-zpct" id="fcZoomPct" title="当前预览缩放。点击 = 回到「适应窗口」">适应</span>
+            <button class="cu-mini fc-zbtn" id="fcZoomOut" title="显示整张原图：点一下就把整张照片装进预览并放到最大，然后拖四条边框住产品（不会再缩小画面）"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10 10L14.2 14.2"/><path d="M4.3 6.5H8.7"/></svg></button>
+            <span class="fc-zpct" id="fcZoomPct" title="当前预览状态。点击 = 回到适应窗口">适应</span>
             <button class="cu-mini fc-zbtn" id="fcZoomIn" title="放大：精细调边（预览可滚动）"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10 10L14.2 14.2"/><path d="M4.3 6.5H8.7"/><path d="M6.5 4.3V8.7"/></svg></button>
           </div>
         </div>
@@ -12292,7 +12296,7 @@ function buildToolFrameCut() {
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>鼠标移到红框<b>边上</b>拖动 = 调边（<b>导出 = 红线内原样</b>）· 移到<b>角上</b>拖动 = <b>透视调角</b>（导出自动矫正成矩形；透视中仍可拖四条边整体平移）· 按住 Shift 拖角 = 仍按矩形同时调两边 · 数值会同步变 · 只作用于本张 · 框条很高/自动识别只框到一段：点左上角 <b>🔍−</b> 显示整张原图再拖边，或直接把红边拖到画布边（画布会自动扩展，红线跟着鼠标走）· <b>🔍+</b> 放大细调</span>
+            <span>鼠标移到红框<b>边上</b>拖动 = 调边（<b>导出 = 红线内原样</b>）· 移到<b>角上</b>拖动 = <b>透视调角</b>（导出自动矫正成矩形；透视中仍可拖四条边整体平移）· 按住 Shift 拖角 = 仍按矩形同时调两边 · 数值会同步变 · 只作用于本张 · 框条很高/自动识别只框到一段：点左上角 <b>🔍−</b> 一次显示整张原图（画面放到最大、不会再缩小），四条边随便拖；绿色「整张 · 适应」= 已显示整张 · 或直接把红边拖到画布边（画布会自动扩展，红线跟着鼠标走）· <b>🔍+</b> 放大细调</span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
             <button class="cu-mini" id="fcQuadClear" style="display:none">清除本张透视（回到边距）</button>
@@ -12990,11 +12994,18 @@ function buildToolFrameCut() {
     //   改个调色滑块也会走到这里，不能把用户滚到的位置又拉回去。
     if (stage.classList) stage.classList.toggle('fc-zoomed', zoom > 1);
     const zp = $('fcZoomPct');
-    if (zp) zp.textContent = zoom === 1 ? '适应' : Math.round(zoom * 100) + '%';
+    if (zp) {
+      const wholeNow = !!(st.cur && fcIsWhole(st.cur));
+      zp.textContent = zoom === 1 ? (wholeNow ? '整张 · 适应' : '适应') : Math.round(zoom * 100) + '%';
+      zp.title = wholeNow ? '画布已装下整张原图。点击 = 回到适应窗口' : '当前预览缩放。点击 = 回到适应窗口';
+      if (zp.classList) zp.classList.toggle('fc-whole', wholeNow);   // 绿色标签：一眼看出「整张原图已经显示」
+    }
     edgeLayout();
     if (zoom > 1 && (rebuilt || st.zoomAnchor)) {
       const an = st.zoomAnchor || (edgeUI.pts ? [0, 1, 2, 3].reduce((a, i) => [a[0] + edgeUI.pts[i][0] / 4, a[1] + edgeUI.pts[i][1] / 4], [0, 0]) : null);
       fcCenterView(an);                        // 换挡：保持换挡前看的那个点在视野中央；换图：对到红线中心
+    } else if (zoom <= 1 && stage.scrollLeft != null) {
+      stage.scrollLeft = 0; stage.scrollTop = 0;   // 从放大档回「适应」：清掉残留滚动，整张图完整露出
     }
     st.zoomAnchor = null;
   }
@@ -13157,8 +13168,9 @@ function buildToolFrameCut() {
   // ===== 【2026-11-26 预览缩放：左上角放大镜 − / +】=====
   // 用户诉求（高框条识别失败）：「在预览左上角加两个小按钮 +- 的放大镜标，我可以通过缩小把整张图片
   // 展示出来，再手工调边」。⚠️ 光把预览缩小没用 —— 画布本身只含「识别到的那一段 + 余量」，
-  // 缩得再小也看不到画布外面的像素。所以「缩小」的第一挡是**把画布扩到整张原图**（fcRecut），
-  // 画面里立刻出现整个产品；之后才是真的再缩小 / 放大细调。
+  // 缩得再小也看不到画布外面的像素，而且画面/红框会越来越小、红边点不中（用户报「只缩小预览框」）。
+  // 所以 🔍− 不是缩小档位，而是**一键把画布扩到整张原图 + 回到适应窗口的最大画面**（fcRecut + zoom=1）；
+  // 放大细调仍走 🔍+。
   function fcZoom(dir) {                 // 档位表 FC_ZOOMS 在顶层（fcNextZoom 用）
     const cur = st.cur;
     if (!cur || !cur.cutCv) return;
@@ -13168,16 +13180,20 @@ function buildToolFrameCut() {
       // 一键扩到整张原图（四边想要的量给足，deskewCut 再逐边按原图边界收）
       const g = fcRecut(fcWholeSf(cur), null);
       log(g && g.grew
-        ? `第 ${st.sel + 1} 张：画布已扩展到整张原图（余量 ${g.bleed}px），直接拖四条边框住整个框条即可`
+        ? `第 ${st.sel + 1} 张：已显示整张原图（余量 ${g.bleed}px），四条边现在能拖到照片任意位置`
         : `第 ${st.sel + 1} 张：画布本来就已经是整张原图`);
     }
-    if (nx.zoom === (st.zoom || 1) && whole === fcIsWhole(cur)) { log(dir < 0 ? '已经是最小缩放' : '已经是最大缩放'); return; }
+    if (nx.zoom === (st.zoom || 1) && whole === fcIsWhole(cur)) {
+      log(dir < 0 ? '已经是「整张原图 · 适应窗口」（要放大细调点 🔍+）' : '已经是最大缩放'); return;
+    }
     const anchor = (edgeUI && edgeUI.wrap) ? fcViewCenter() : null;    // 现在看的是画布的哪个点
     st.zoomAnchor = anchor;
     st.zoom = nx.zoom;
     flushPreview();
     drawPreview();
-    log(`预览缩放：${Math.round(st.zoom * 100)}%` + (st.zoom === 1 ? '（适应窗口）' : st.zoom < 1 ? '（缩小）' : '（放大 · 预览区可滚动）'));
+    log(`预览缩放：${Math.round(st.zoom * 100)}%` + (st.zoom === 1
+      ? (fcIsWhole(st.cur) ? '（整张原图 · 适应窗口）' : '（适应窗口）')
+      : st.zoom < 1 ? '（缩小）' : '（放大 · 预览区可滚动）'));
   }
   // 视野中央对应画布上的哪个点（画布坐标）
   function fcViewCenter() {
@@ -15493,6 +15509,7 @@ init();
 // ⚠️ 每次发版要在 CHANGELOG 最上面加一条 {d:'YYYY-MM-DD', t:'本版改了什么（简述）'}，日期用当天。
 (function () {
   var CHANGELOG = [
+    { d: '2026-11-26b', t: '框条抠图：🔍− 改为「一键显示整张原图」—— 不再一挡一挡缩小画面（画面/红框越来越小、红边点不中 → 拖不到顶）；任何状态点一下都回到整张原图的最大适应视图，左上角绿色「整张 · 适应」标签确认状态；🔍+ 放大细调不变' },
     { d: '2026-11-26', t: '框条抠图：修「框条很高时上边升不上去」—— 红边拖到画布边自动扩展画布、红线跟着鼠标走；预览左上角新增放大镜 −/+（点 − 直接显示整张原图，再手工拖边；+ 放大细调）' },
     { d: '2026-11-16', t: '看板名称可点击标题自定义（留空恢复默认、云端同步）；日期行加农历 + 当天重要节日/节气' },
     { d: '2026-11-13', t: '计算器：实时出结果（不用按 =）、历史多行「算式 = 结果」；底部更新日志取代原操作提示文字' },
