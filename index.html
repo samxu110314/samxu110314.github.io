@@ -1001,6 +1001,15 @@
      产品抠图（pdStage）不加 cu-edgesingle，维持旧视觉。 */
   .cu-edgesingle .cu-eh { background: rgba(231,76,60,0); border: 0; }
   .cu-edgesingle .cu-eh:hover { background: rgba(231,76,60,.28); }
+  /* 【2026-11-26 免按钮透视】框条抠图手柄改为几何命中（fcPickSide：边上 = 调边，角上 = 透视调角）。
+     手柄只负责视觉、不再接收事件（旧版 8 个透明方块叠在一起抢事件：角点只有 13px、还要先点按钮）。
+     .fc-geo 只加在框条抠图的 wrap 上，产品抠图维持旧视觉。 */
+  .cu-edgewrap.fc-geo .cu-eh { pointer-events: none; }
+  .cu-edgewrap.fc-geo .cu-eh.hov { background: rgba(231,76,60,.34); }
+  .cu-edgewrap.fc-geo .cu-eh.tl.hov, .cu-edgewrap.fc-geo .cu-eh.tr.hov,
+  .cu-edgewrap.fc-geo .cu-eh.bl.hov, .cu-edgewrap.fc-geo .cu-eh.br.hov { background: rgba(231,76,60,.95); outline: 2px solid #fff; }
+  .cu-edgewrap.fc-geo.cu-quaded .cu-eh.tl, .cu-edgewrap.fc-geo.cu-quaded .cu-eh.tr,
+  .cu-edgewrap.fc-geo.cu-quaded .cu-eh.bl, .cu-edgewrap.fc-geo.cu-quaded .cu-eh.br { background: rgba(231,76,60,.9); outline: 2px solid #fff; }
   .cu-eline { position: absolute; border: 1px solid rgba(231,76,60,.95); box-sizing: border-box; pointer-events: none; }
   .cu-mini.on { background: #2c7fb8; border-color: #2c7fb8; color: #fff; }
   /* 二维码 / 条形码 / 水印 */
@@ -10280,6 +10289,52 @@ function alphaEndsByTone(a, lum, w, h, ry0, ry1) {
   if (x1 - x0 + 1 < w * 0.4) return null;          // 收完只剩一小截 → 判断不可靠，原样保留
   return { x0: x0, x1: x1 };
 }
+// ================= 【2026-11-26 免按钮透视】框条抠图手柄的几何命中 =================
+// 用户需求：「去掉透视四角按钮 —— 鼠标移到边上就能调边，移到角上就能透视调角」。
+// 手柄不再靠 8 个透明方块抢事件，而是按鼠标到四边形（TL,TR,BR,BL）的几何位置判定：
+//   · 离某个顶点 ≤ FC_RC → 角（透视调角）；· 到某条边的垂距 ≤ FC_RE → 边（调边）；其余 = 不命中。
+//   角优先于边。纯函数（显示坐标 / CSS px），回归测试与探针都能直接调。
+const FC_RC = 10, FC_RE = 8;                                   // 角 / 边 的命中半径（CSS px）
+const FC_CORNERS = ['tl', 'tr', 'br', 'bl'];                   // 与 quad 顶点 0..3 一一对应
+const FC_EDGE_V = { t: [0, 1], r: [1, 2], b: [2, 3], l: [3, 0] };   // 每条边连着哪两个顶点
+const FC_CORNER_CURSOR = { tl: 'nwse-resize', tr: 'nesw-resize', br: 'nwse-resize', bl: 'nesw-resize' };
+function fcSegDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+// pts = [[x,y]×4]（TL,TR,BR,BL，CSS px）；返回 'tl'/'tr'/'br'/'bl'（角）、't'/'r'/'b'/'l'（边）或 null
+function fcPickSide(pts, x, y, rc, re) {
+  if (!pts || pts.length < 4) return null;
+  rc = rc == null ? FC_RC : rc; re = re == null ? FC_RE : re;
+  let best = -1, bd = rc;
+  for (let i = 0; i < 4; i++) {
+    const d = Math.hypot(x - pts[i][0], y - pts[i][1]);
+    if (d <= bd) { bd = d; best = i; }
+  }
+  if (best >= 0) return FC_CORNERS[best];
+  let side = null; bd = re;
+  const order = ['b', 't', 'r', 'l'];              // 等距时优先横边（框条又长又扁，上下边最常调）
+  for (let i = 0; i < 4; i++) {
+    const s = order[i], pr = FC_EDGE_V[s], a = pts[pr[0]], b = pts[pr[1]];
+    const d = fcSegDist(x, y, a[0], a[1], b[0], b[1]);
+    if (d < bd) { bd = d; side = s; }
+  }
+  return side;
+}
+// 一条边的光标：按边的方向取「垂直于边」的那个双向箭头（斜边也给对方向，不再是横边的 ew-resize）
+// ⚠️ 边的两个走向（a 与 a+180）是同一条边 —— 先折算成「离水平多远」h 再分档。
+//    早期写法用 floor(a/90) 的奇偶分档，a≈179.7° 时落进「竖边」档 → 下边显示左右箭头（probe_hoverquad D 抓到）。
+function fcEdgeCursor(ax, ay, bx, by) {
+  let a = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+  if (a < 0) a += 180;
+  if (a >= 180) a -= 180;
+  const h = Math.min(a, 180 - a);                // 0 = 横边，90 = 竖边
+  if (h < 22.5) return 'ns-resize';              // 横边 ↔ 上下箭头
+  if (h > 67.5) return 'ew-resize';              // 竖边 ↔ 左右箭头
+  return a < 90 ? 'nesw-resize' : 'nwse-resize'; // ↘ 向边 ↔ ↗↙ 箭头；↗ 向边 ↔ ↖↘ 箭头
+}
 // 按裁剪框 + 参数 + 透明背景，生成最终成品 canvas（原像素尺寸，不缩放）
 // —— 【2026-11-11 透视四角】把画布上的任意四边形（TL,TR,BR,BL）矫正成矩形输出 ——
 // 用户需求：「有透视变形的框条，四角单独调节」。四边形逐张存 meta[i].quad（见 buildToolFrameCut
@@ -12185,10 +12240,9 @@ function buildToolFrameCut() {
             <button class="cu-mini" id="fcRedetect">重新自动识别</button>
           </div>
           <div class="cu-row" id="fcEdgeBar" style="margin-top:7px;font-size:12px;color:var(--text-light)">
-            <span>拖动红色单线框的四边 / 四角 = 矩形调整（<b>导出 = 红线内原样</b>）· 框条拍斜了点<b>透视四角</b>，之后拖四个角点各自对齐，导出自动矫正成矩形 · 数值会同步变 · 只作用于本张</span>
+            <span>鼠标移到红框<b>边上</b>拖动 = 调边（<b>导出 = 红线内原样</b>）· 移到<b>角上</b>拖动 = <b>透视调角</b>（导出自动矫正成矩形；透视中仍可拖四条边整体平移）· 按住 Shift 拖角 = 仍按矩形同时调两边 · 数值会同步变 · 只作用于本张</span>
             <button class="cu-mini" id="fcEdgeAll">套用到全部图片</button>
             <button class="cu-mini" id="fcEdgeClear">清除本张手动边距</button>
-            <button class="cu-mini" id="fcQuadOn">透视四角（本张）</button>
             <button class="cu-mini" id="fcQuadClear" style="display:none">清除本张透视（回到边距）</button>
           </div>
         </div>
@@ -12642,12 +12696,17 @@ function buildToolFrameCut() {
   let edgeUI = null;
   function edgeLayout() {
     const cur = st.cur;
+    edgeUI.pts = null;                      // 【2026-11-26】当前形状的显示坐标（TL,TR,BR,BL，CSS px）→ fcPickSide 用
     if (!edgeUI || !cur || !cur.cutCv) return null;
     const quadHad = quadOf(st.sel);
     const q = quadLive(st.sel);
     if (quadHad && !q) log(`第 ${st.sel + 1} 张：画布已变（改角度 / 重新识别 / 扩画布），旧透视四角已失效`);
+    edgeUI.wrap.className = 'cu-edgewrap cu-edgesingle fc-geo' + (q ? ' cu-quaded' : '');
     if (q) {
-      // —— 透视四角模式：红框变成四边形，四角手柄各拖各的；四边手柄/暗罩隐藏 ——
+      // —— 透视四角模式：红框变成四边形，四角手柄各拖各的 ——
+      // 【2026-11-26 免按钮透视】四边手柄**不再隐藏**：改成贴着四边形四条边的斜向条带，
+      //   拖动 = 整条边沿法线平移（quadEdgeDrag）。旧版进透视就把四边藏掉 —— 那正是
+      //   「误入透视后调边卡住，只能重新识别」的根因（probe_stuck A/B）；现在透视里照样能调边。
       const k = edgeUI.k;
       const pts = [[q.x0, q.y0], [q.x1, q.y1], [q.x2, q.y2], [q.x3, q.y3]];
       const poly = edgeUI.svg.firstElementChild || edgeUI.svg.firstChild;
@@ -12656,7 +12715,18 @@ function buildToolFrameCut() {
       edgeUI.line.style.display = 'none';
       edgeUI.dims.forEach(d => { d.style.display = 'none'; });
       const set = (el, s) => { for (const p in s) el.style[p] = s[p]; };
-      ['l', 'r', 't', 'b'].forEach(s => { edgeUI.hs[s].style.display = 'none'; });
+      // 四条边：以边中点为中心、按边方向旋转的 11px 条带（两端各让 6px 给角点）；光标取边法线方向
+      ['l', 'r', 't', 'b'].forEach(s => {
+        const pr = FC_EDGE_V[s], a = pts[pr[0]], b = pts[pr[1]];
+        const len = Math.hypot((b[0] - a[0]) * k, (b[1] - a[1]) * k);
+        const w = Math.max(11, len - 12), cx = (a[0] + b[0]) / 2 * k, cy = (a[1] + b[1]) / 2 * k;
+        const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        set(edgeUI.hs[s], {
+          display: '', left: (cx - w / 2) + 'px', top: (cy - 5.5) + 'px', width: w + 'px', height: '11px',
+          transformOrigin: '50% 50%', transform: 'rotate(' + ang + 'rad)',
+        });
+        edgeUI.cursors[s] = fcEdgeCursor(a[0], a[1], b[0], b[1]);
+      });
       set(edgeUI.hs.tl, { left: (q.x0 * k - 6) + 'px', top: (q.y0 * k - 6) + 'px' });
       set(edgeUI.hs.tr, { left: (q.x1 * k - 5) + 'px', top: (q.y1 * k - 6) + 'px' });
       set(edgeUI.hs.br, { left: (q.x2 * k - 5) + 'px', top: (q.y2 * k - 5) + 'px' });
@@ -12664,12 +12734,11 @@ function buildToolFrameCut() {
       const dT = Math.hypot(q.x1 - q.x0, q.y1 - q.y0), dB = Math.hypot(q.x2 - q.x3, q.y2 - q.y3);
       const dL = Math.hypot(q.x3 - q.x0, q.y3 - q.y0), dR = Math.hypot(q.x2 - q.x1, q.y2 - q.y1);
       const dW = Math.round(Math.max(dT, dB)), dH = Math.round(Math.max(dL, dR));
-      $('fcBoxInfo').textContent = `透视裁切（四角） ${dW}×${dH} px = 导出尺寸 · 拖四个角点各自对齐`
+      edgeUI.pts = pts.map(p => [p[0] * k, p[1] * k]);
+      $('fcBoxInfo').textContent = `透视裁切（四角） ${dW}×${dH} px = 导出尺寸 · 拖角点各自对齐、拖边整体平移`
         + (cur.low ? ' · ' + cur.note : '');
       const qc = $('fcQuadClear');
       if (qc) qc.style.display = '';
-      const qon = $('fcQuadOn');
-      if (qon) qon.style.display = 'none';
       return q;
     }
     // —— 矩形模式（常态）：恢复四边手柄 / 暗罩 / 直线红框 ——
@@ -12679,8 +12748,6 @@ function buildToolFrameCut() {
     ['l', 'r', 't', 'b'].forEach(s => { edgeUI.hs[s].style.display = ''; });
     const qc = $('fcQuadClear');
     if (qc) qc.style.display = 'none';
-    const qon = $('fcQuadOn');
-    if (qon) qon.style.display = '';
     const b = applyNudge(refBox(), cur.cutCv, nudgeOf(st.sel));
     if (!b) return null;
     const k = edgeUI.k, W = cur.cutCv.width * k, H = cur.cutCv.height * k;
@@ -12692,10 +12759,12 @@ function buildToolFrameCut() {
     set(edgeUI.dims[2], { left: x0 + 'px', top: '0px', width: w + 'px', height: y0 + 'px' });
     set(edgeUI.dims[3], { left: x0 + 'px', top: y1 + 'px', width: w + 'px', height: Math.max(0, H - y1) + 'px' });
     const hs = edgeUI.hs;
-    set(hs.l, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px' });
-    set(hs.r, { left: (x1 - 6) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px' });
-    set(hs.t, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: (w + 10) + 'px', height: '11px' });
-    set(hs.b, { left: (x0 - 5) + 'px', top: (y1 - 6) + 'px', width: (w + 10) + 'px', height: '11px' });
+    set(hs.l, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px', transform: 'none' });
+    set(hs.r, { left: (x1 - 6) + 'px', top: (y0 - 5) + 'px', width: '11px', height: (h + 10) + 'px', transform: 'none' });
+    set(hs.t, { left: (x0 - 5) + 'px', top: (y0 - 5) + 'px', width: (w + 10) + 'px', height: '11px', transform: 'none' });
+    set(hs.b, { left: (x0 - 5) + 'px', top: (y1 - 6) + 'px', width: (w + 10) + 'px', height: '11px', transform: 'none' });
+    edgeUI.cursors = { l: 'ew-resize', r: 'ew-resize', t: 'ns-resize', b: 'ns-resize' };   // 【2026-11-26】矩形：横边 ↔ 上下箭头
+    edgeUI.pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
     set(hs.tl, { left: (x0 - 6) + 'px', top: (y0 - 6) + 'px' });
     set(hs.tr, { left: (x1 - 7) + 'px', top: (y0 - 6) + 'px' });
     set(hs.bl, { left: (x0 - 6) + 'px', top: (y1 - 7) + 'px' });
@@ -12718,7 +12787,7 @@ function buildToolFrameCut() {
       const wrap = document.createElement('div');
       // 【2026-11-05 单线红框】cu-edgesingle：手柄只是透明热区（旧版每个手柄自带四边红框
       //   = 一条边两条平行红线，用户原话「双线不好确定边缘」）；真实裁剪边界由 cu-eline 画。
-      wrap.className = 'cu-edgewrap cu-edgesingle';
+      wrap.className = 'cu-edgewrap cu-edgesingle fc-geo';
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round(W * k));
       cv.height = Math.max(1, Math.round(H * k));
@@ -12727,18 +12796,13 @@ function buildToolFrameCut() {
       const dims = [];
       for (let i = 0; i < 4; i++) { const d = document.createElement('div'); d.className = 'cu-edim'; wrap.appendChild(d); dims.push(d); }
       const hs = {};
+      // 【2026-11-26 免按钮透视】手柄只负责视觉（pointer-events:none），命中与拖拽统一走 wrap 上的
+      //   fcPickSide：鼠标在角上 = 透视调角（cornerDrag，自动从当前红框播种四边形），在边上 = 调边。
+      //   历史：① 角点无条件进透视 → 四边手柄被藏，误碰后「调边卡住」；② 改成「透视四角」按钮才进 →
+      //   用户要多点一下（2026-11-26 报障）。现在 = 角上直接进透视 + 透视里四条边照样可拖，两头都不卡。
       EH.forEach(([cls, side]) => {
         const d = document.createElement('div');
         d.className = 'cu-eh ' + cls;
-        // 【2026-11-11 二次改版】角点手柄按 quad 状态分流：
-        //   透视模式 → 拖顶点；矩形模式 → 照旧双轴调角。
-        //   ⚠️ 别改成「角点无条件进 quad」——那是上午的第一版，端到端实测用户轻拖角点 10px
-        //   就误入透视模式、四边手柄随即隐藏 → 「调边卡住，只能重新识别」（probe_stuck A/B 复现）。
-        //   quad 的唯一创建入口 = 「透视四角（本张）」按钮（fcQuadOn），显式、可预期。
-        d.addEventListener('pointerdown', (e) => {
-          if (side.length === 2 && quadLive(st.sel)) cornerDrag(e, side);
-          else edgeDrag(e, side);
-        });
         wrap.appendChild(d);
         hs[side] = d;
       });
@@ -12763,6 +12827,34 @@ function buildToolFrameCut() {
       stage.appendChild(wrap);
       edgeUI = { key: key, wrap: wrap, cv: cv, k: k, dims: dims, hs: hs, line: line, svg: svg };
       st.liveCanvas = cv;
+      // —— 【2026-11-26 免按钮透视】悬停高亮 + 按下分发（都走 fcPickSide 几何命中）——
+      edgeUI.cursors = { l: 'ew-resize', r: 'ew-resize', t: 'ns-resize', b: 'ns-resize' };
+      let hovSide = null;
+      edgeUI.setHov = (side) => {
+        if (!edgeUI || side === hovSide) return;
+        hovSide = side;
+        EH.forEach(([, s]) => { const el = edgeUI.hs[s]; if (el.classList) el.classList.toggle('hov', s === side); });
+        if (!side) { wrap.style.cursor = ''; return; }
+        wrap.style.cursor = side.length === 2 ? FC_CORNER_CURSOR[side] : edgeUI.cursors[side];
+      };
+      const pickAt = (e) => {
+        if (!edgeUI || !edgeUI.pts || !wrap.getBoundingClientRect) return null;
+        const r = wrap.getBoundingClientRect();
+        return fcPickSide(edgeUI.pts, e.clientX - r.left, e.clientY - r.top);
+      };
+      wrap.addEventListener('pointermove', (e) => { edgeUI.setHov(pickAt(e)); });
+      wrap.addEventListener('pointerleave', () => { edgeUI.setHov(null); });
+      wrap.addEventListener('pointerdown', (e) => {
+        if (e.button != null && e.button !== 0) return;             // 只认左键
+        const side = pickAt(e);
+        if (!side) return;
+        if (side.length === 2) {
+          // 角 = 透视调角。按住 Shift 且本张还没进透视 → 照旧按矩形同时调两条边（保留老能力）
+          if (e.shiftKey && !quadLive(st.sel)) edgeDrag(e, side);
+          else cornerDrag(e, side);
+        } else if (quadLive(st.sel)) quadEdgeDrag(e, side);        // 透视里的边：整条边沿法线平移
+        else edgeDrag(e, side);                                     // 矩形的边：调边距
+      });
     }
     edgeUI.cv.style.filter = toneFilter(st.opt);
     edgeLayout();
@@ -12855,6 +12947,45 @@ function buildToolFrameCut() {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+  }
+  // 【2026-11-26 免按钮透视】透视模式里拖一条边：这条边的两个顶点一起沿**边的法线**平移。
+  // · 只取鼠标位移在法线上的投影 → 横着拖下边就是笔直往里/往外收，不会带出侧向错位；
+  // · 对面的两个顶点不动 → 四边仍能各自对齐（框条拍斜了也能一条边一条边地贴）。
+  // 这是「角上直接进透视」不再卡住的关键：进了透视照样能调边，不用「清除透视 / 重新识别」逃生。
+  function quadEdgeDrag(ev, side) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const cur = st.cur, q = quadLive(st.sel);
+    if (!cur || !cur.cutCv || !q || !edgeUI) return;
+    const k = edgeUI.k, sx = ev.clientX, sy = ev.clientY;
+    const keys = [['x0', 'y0'], ['x1', 'y1'], ['x2', 'y2'], ['x3', 'y3']];
+    const ia = FC_EDGE_V[side][0], ib = FC_EDGE_V[side][1];
+    const ka = keys[ia], kb = keys[ib];
+    const a0 = { x: q[ka[0]], y: q[ka[1]] }, b0 = { x: q[kb[0]], y: q[kb[1]] };
+    const ex = b0.x - a0.x, ey = b0.y - a0.y, len = Math.hypot(ex, ey) || 1;
+    const nx = -ey / len, ny = ex / len;                       // 单位法线
+    const W = cur.cutCv.width - 1, H = cur.cutCv.height - 1;
+    const cl = (v, hi) => Math.max(0, Math.min(hi, v));
+    let dirty = false, moved = 0;
+    const move = (e) => {
+      const d = Math.round(((e.clientX - sx) * nx + (e.clientY - sy) * ny) / k);
+      if (d === moved) return;                                  // 没动 / 又拖回原位：不重排、不记日志
+      moved = d; dirty = true;
+      q[ka[0]] = Math.round(cl(a0.x + nx * d, W)); q[ka[1]] = Math.round(cl(a0.y + ny * d, H));
+      q[kb[0]] = Math.round(cl(b0.x + nx * d, W)); q[kb[1]] = Math.round(cl(b0.y + ny * d, H));
+      edgeLayout();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (!dirty) return;
+      renderRows();
+      log(`第 ${st.sel + 1} 张：透视四边平移（${side.toUpperCase()} 沿法线 ${moved > 0 ? '+' : ''}${moved} px，只作用于本张，导出自动矫正为矩形）`);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
   function drawPreview() {
     const stage = $('fcStage');
@@ -13085,15 +13216,10 @@ function buildToolFrameCut() {
     if (!clearQuad(st.sel)) { log('本张没有透视四角'); return; }
     drawPreview();
   };
-  // 【2026-11-11 二次改版】透视四角的唯一创建入口 —— 显式按钮，不靠误碰角点。
-  // 从当前红线框播种（矩形起步），之后四个角点各自走位；导出走 warpQuad 自动矫正。
-  $('fcQuadOn').onclick = () => {
-    if (!st.cur || !st.cur.cutCv) return;
-    if (quadLive(st.sel)) { log('本张已在透视四角模式'); return; }
-    if (!ensureQuad()) { log('本张还没有可用的裁剪框，先等自动识别完成'); return; }
-    drawPreview();
-    log(`第 ${st.sel + 1} 张：进入透视四角模式（拖四个角点各自对齐，导出自动矫正为矩形；「清除本张透视」退出）`);
-  };
+  // 【2026-11-26 免按钮透视】原「透视四角（本张）」按钮（fcQuadOn）已删除：鼠标移到角上按下即进透视
+  //   （cornerDrag 里 ensureQuad() 从当前红线框播种，矩形起步）；退出透视仍用上面的「清除本张透视」。
+  //   2026-11-11 曾改成显式按钮，是因为当时进了透视会藏掉四边手柄 → 误碰后调边卡住；
+  //   现在透视里四条边保持可拖（quadEdgeDrag），卡住的根因已除，按钮也就不需要了。
   $('fcRedetect').onclick = () => {
     if (!st.cur) return;
     // 「重新自动识别」= 把这张的手动痕迹全清掉再跑一遍检测。
@@ -15091,7 +15217,7 @@ if (typeof globalThis !== 'undefined') {
     estimateSkewDeg, skewWidth, fitLineSlope, pickBody, projBody, bestBody, ownEdgeFactor, refineBody, fitBandDeg, findComponents, closeMask, morph3, scoreComponent,
     bandMaskCol, robustBgRef, cleanAnchors, secondBgRef, joinRuns, clusterComp, trustBody, medianSmooth1D, extSmooth1D, tightenBand, lumSatOf, transposeArr, normAngleDeg, narrowByStrongS,
     quantileOfN, medianArr, edgeRowProfile, edgePairScore, pickEdgePair, refineEdgeLines, bandLinesInRegion, snapAlphaBand, stripAngleInBox, stripAngleFor, estimateSkewProj, tightenBoxByEdges,
-    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, warpQuad, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
+    fillAlphaCols, findTextBlocks, extractModelNumber, ocrCrop, buildOcrCands, cropStats, ocrBackModel, applyPixelAdjust, toneFilter, toneDeltaFilter, toneSnapshot, hasTone, cutProductOutline, renderCut, warpQuad, fcPickSide, fcSegDist, fcEdgeCursor, FC_RC, FC_RE, FC_EDGE_V, FC_CORNERS, maskToAlpha, alphaTightBox, alphaTightCols, alphaEndsByEdges, alphaEndsByTone, trimEnds, straightenBand, fitLineRobust, bandTextureFill, textureBandMask,
     fillAlphaRuns, featherAlpha, sampleOf, sampleOfSub, imgToCanvas, clamp255,
     cutPlainBackground, crc32, zipStore, concatU8, u32le,
     detectProductMask, cutProductOutline, detectPlainMask, pdBorderRefs, pdOwnDist, pdFlood, pdLabel8, pdPickBody,
@@ -15143,6 +15269,7 @@ init();
 // ⚠️ 每次发版要在 CHANGELOG 最上面加一条 {d:'YYYY-MM-DD', t:'本版改了什么（简述）'}，日期用当天。
 (function () {
   var CHANGELOG = [
+    { d: '2026-11-26', t: '框条抠图：去掉「透视四角」按钮 —— 鼠标移到角上直接透视调角、移到边上直接调边（悬停高亮）；透视中四条边仍可拖动平移' },
     { d: '2026-11-16', t: '看板名称可点击标题自定义（留空恢复默认、云端同步）；日期行加农历 + 当天重要节日/节气' },
     { d: '2026-11-13', t: '计算器：实时出结果（不用按 =）、历史多行「算式 = 结果」；底部更新日志取代原操作提示文字' },
     { d: '2026-11-12', t: '任务暂停/重启（⏸ 沉底标记 ▶ 复原）；档案检索默认选中第一个栏目；全球时差修 NaN + 新增越南；色值转换卡文案改「色号识别/Pantone色值」；计算器屏幕保留完整算式' },
